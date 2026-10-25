@@ -89,11 +89,19 @@ function pair(v: unknown): { t: number; v: number } {
   return { t: 0, v: 0 };
 }
 
-function subs(v: unknown): Rune["subs"] {
+function subs(v: unknown, grindFirst = false): Rune["subs"] {
   return list(v)
     .map((s) => {
       if (Array.isArray(s)) {
-        return { t: typeOf(s[0]), v: num(s[1]), g: num(s[2]), gem: num(s[3]) };
+        // 兩種匯出格式的欄位順序不同：
+        //   SWEX / 遊戲原始：[屬性, 數值, 寶石(0/1), 精煉值]
+        //   SWOP / 舊版匯出：[屬性, 數值, 精煉值, 寶石]
+        // 由 parseAccountJSON 依整份檔案的數值分佈判斷後傳入 grindFirst。
+        const a = num(s[2]);
+        const b = num(s[3]);
+        return grindFirst
+          ? { t: typeOf(s[0]), v: num(s[1]), g: a, gem: b }
+          : { t: typeOf(s[0]), v: num(s[1]), gem: a, g: b };
       }
       if (s && typeof s === "object") {
         const o = s as Record<string, unknown>;
@@ -116,8 +124,8 @@ export interface ParseResult {
   warnings: string[];
 }
 
-/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級 */
-export const PARSE_VERSION = 2;
+/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值 */
+export const PARSE_VERSION = 3;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -163,6 +171,19 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     return { account: null, error: "找不到 runes（符文清單），這個檔案可能不完整。", warnings };
   }
 
+  // 判斷 sec_eff 的精煉欄位在第 3 欄（SWOP 舊格式）還是第 4 欄（SWEX 原始格式）。
+  // 寶石標記只會是 0/1，因此「大於 1 的值」出現在哪一欄就是精煉值。
+  let thirdBig = 0;
+  let fourthBig = 0;
+  for (const { r } of runeSources) {
+    for (const s of list(r.sec_eff ?? r.subs ?? r.substats)) {
+      if (!Array.isArray(s)) continue;
+      if (num(s[2]) > 1) thirdBig++;
+      if (num(s[3]) > 1) fourthBig++;
+    }
+  }
+  const grindFirst = thirdBig > fourthBig;
+
   const runes: Rune[] = [];
   const idToRune = new Map<number, Rune>();
   const seenIds = new Set<number>();
@@ -200,14 +221,14 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       level: Math.min(15, Math.max(0, num(r.upgrade_curr ?? r.level, 0))),
       main: pair(r.pri_eff ?? r.main ?? r.mainStat),
       prefix: pair(r.prefix_eff ?? r.prefix),
-      subs: subs(r.sec_eff ?? r.subs ?? r.substats),
+      subs: subs(r.sec_eff ?? r.subs ?? r.substats, grindFirst),
       occupied: num(r.occupied_id ?? r.occupied ?? r.equippedBy ?? r.equipped_by) || owner,
       ancient,
       locked: truthy(r.locked),
       eff: 0,
       effMax: 100,
     };
-    rune.eff = runeEfficiency(rune).current;
+    rune.eff = runeEfficiency(rune, true).current;
     runes.push(rune);
     if (id > 0) idToRune.set(id, rune);
   }
@@ -347,7 +368,7 @@ export function exportAccount(account: Account): string {
       upgrade_curr: r.level,
       pri_eff: [r.main.t, r.main.v],
       prefix_eff: [r.prefix.t, r.prefix.v],
-      sec_eff: r.subs.map((s) => [s.t, s.v, s.g, s.gem]),
+      sec_eff: r.subs.map((s) => [s.t, s.v, s.gem, s.g]),
       occupied_id: r.occupied,
       ancient: r.ancient ? 1 : 0,
     })),

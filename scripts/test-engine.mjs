@@ -31,7 +31,7 @@ if (build.status !== 0) throw new Error("rolldown bundle 失敗");
 const engine = await import(`${pathToFileURL(BUNDLE).href}?t=${Date.now()}`);
 const {
   tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize, maxSpeedBound,
-  baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS,
+  baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
 } = engine;
 
 let passed = 0;
@@ -160,7 +160,7 @@ check("SWEX v1.1.0：合併裝備符文、遠古 class/rank、無建築等級", 
         runes: [
           {
             rune_id: 9001, occupied_id: 501, slot_no: 2, set_id: 13, class: 6, rank: 5, upgrade_curr: 15,
-            pri_eff: [8, 42], prefix_eff: [0, 0], sec_eff: [[8, 10, 4, 0], [12, 8, 0, 0]],
+            pri_eff: [8, 42], prefix_eff: [0, 0], sec_eff: [[8, 10, 0, 4], [12, 8, 0, 0]],
           },
           {
             rune_id: 9002, occupied_id: 501, slot_no: 6, set_id: 15, class: 16, rank: 15, upgrade_curr: 15,
@@ -185,6 +185,8 @@ check("SWEX v1.1.0：合併裝備符文、遠古 class/rank、無建築等級", 
   assert.equal(r1.main.t, 8);
   assert.equal(r1.subs[0].t, 8);
   assert.equal(r1.subs[1].t, 12);
+  assert.equal(r1.subs[0].g, 4, "精煉值應讀取 sec_eff 第 4 欄");
+  assert.equal(runeSpeed(r1), 56, "速度應包含主屬性 42 與精煉 +4");
   assert.equal(r1.set, 13);
   const r2 = p.account.runes.find((r) => r.id === 9002);
   assert.equal(r2.grade, 6, "遠古符文星級應為 class - 10");
@@ -192,6 +194,32 @@ check("SWEX v1.1.0：合併裝備符文、遠古 class/rank、無建築等級", 
   assert.equal(r2.occupied, 501);
   assert.equal(p.account.buildings.length, 0, "沒有等級時不應假造 0 等建築");
   assert.ok(p.warnings.some((w) => w.includes("沒有等級欄位")), "應提示建築沒有等級");
+});
+
+check("精煉（磨石）數值完整計入：速度 28 + 5 = 33、防禦 12 + 10 = 22", () => {
+  const raw = {
+    unit_list: [],
+    runes: [
+      {
+        rune_id: 9100, occupied_id: 0, slot_no: 4, set_id: 3, class: 6, rank: 5, upgrade_curr: 15,
+        pri_eff: [2, 63], prefix_eff: [10, 4],
+        sec_eff: [[4, 8, 0, 10], [9, 5, 0, 0], [6, 12, 1, 10], [8, 28, 0, 5]],
+      },
+    ],
+    building_list: [],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "grind.json");
+  assert.equal(p.error, undefined, p.error);
+  const r = p.account.runes[0];
+  const spd = r.subs.find((s) => s.t === 8);
+  const def = r.subs.find((s) => s.t === 6);
+  assert.equal(spd.v, 28);
+  assert.equal(spd.g, 5, "速度精煉應為 +5");
+  assert.equal(spd.gem, 0);
+  assert.equal(def.g, 10, "防禦精煉應為 +10");
+  assert.equal(def.gem, 1, "第 3 欄是寶石標記");
+  assert.equal(runeSpeed(r), 33, "速度合計應為 33");
+  assert.ok(r.eff > 0);
 });
 
 /* ── 4. 一鍵配符 ─────────────────────────────── */

@@ -298,8 +298,8 @@ export default function SettingsPage() {
             <div className="divider" />
             <label className="row between" style={{ gap: 10, cursor: "pointer" }}>
               <span>
-                <span style={{ fontWeight: 600 }}>計入磨石</span>
-                <span className="tiny dim" style={{ display: "block" }}>副屬性上的磨石數值一併計算</span>
+                <span style={{ fontWeight: 600 }}>計入精煉（磨石）</span>
+                <span className="tiny dim" style={{ display: "block" }}>副屬性上的精煉數值一併計算</span>
               </span>
               <input type="checkbox" checked={bonus.grind} onChange={(e) => patchBonus({ grind: e.target.checked })} />
             </label>

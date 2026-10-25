@@ -150,11 +150,15 @@ export function RuneCard({
           <div className="rune-sub" key={i}>
             <span>
               {statLabel(s.t)}
-              {s.gem > 0 && <span className="gem" title={`寶石 ${s.gem}`}> ◆</span>}
+              {s.gem > 0 && <span className="gem" title="寶石（變換）"> ◆</span>}
             </span>
             <span>
-              <b>+{s.v}{statSuffix(s.t)}</b>
-              {s.g > 0 && <span className="g"> (+{s.g}{statSuffix(s.t)})</span>}
+              <b>+{s.v + s.g}{statSuffix(s.t)}</b>
+              {s.g > 0 && (
+                <span className="g" title={`實際數值已含精煉 +${s.g}${statSuffix(s.t)}`}>
+                  {" "}(含精煉 +{s.g})
+                </span>
+              )}
             </span>
           </div>
         ))}

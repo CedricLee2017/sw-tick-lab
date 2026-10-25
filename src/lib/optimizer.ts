@@ -183,7 +183,7 @@ export function runeValue(rune: Rune, w: Record<StatKey, number>, focus?: Map<St
 const FLAT_KEYS = ["flatHp", "flatAtk", "flatDef", "flatSpd", "flatCr", "flatCd", "flatRes", "flatAcc"] as const;
 const PCT_KEYS = ["pctHp", "pctAtk", "pctDef"] as const;
 
-/** 單顆符文提供的速度（含磨石） */
+/** 單顆符文提供的速度（含精煉） */
 export function runeSpeed(rune: Rune): number {
   let v = 0;
   const add = (t: number, value: number) => {

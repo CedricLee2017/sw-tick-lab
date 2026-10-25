@@ -139,7 +139,7 @@ export default function SpeedPage() {
                     {needRune <= 0 ? 0 : needRune}
                   </div>
                   <div className="tiny muted">
-                    {needRune <= 0 ? "目前的基礎加成已足夠，不需要符文速度" : "包含主屬性、副屬性與磨石的速度總和"}
+                    {needRune <= 0 ? "目前的基礎加成已足夠，不需要符文速度" : "包含主屬性、副屬性與精煉的速度總和"}
                   </div>
                 </div>
 

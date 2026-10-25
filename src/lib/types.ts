@@ -29,7 +29,9 @@ export interface Monster {
 export interface RuneSub {
   t: number;
   v: number;
+  /** 精煉（磨石）加成，實際數值 = v + g */
   g: number;
+  /** 寶石（變換）標記，>0 表示這條副屬性是用寶石洗出來的 */
   gem: number;
 }
 

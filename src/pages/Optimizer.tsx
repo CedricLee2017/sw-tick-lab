@@ -18,6 +18,26 @@ const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2);
 
 const focusLabel = (key: StatKey) => FOCUS_OPTIONS.find((o) => o.key === key)?.label ?? key;
 
+/** 結果排序欄位（對應 SWOP 的排序方式） */
+type SortKey =
+  | "recommended" | "spd" | "hp" | "def" | "atk" | "ehp"
+  | "cr" | "cd" | "res" | "acc" | "eff" | "focus";
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "recommended", label: "推薦排序" },
+  { key: "spd", label: "速度" },
+  { key: "hp", label: "體力" },
+  { key: "def", label: "防禦" },
+  { key: "atk", label: "攻擊" },
+  { key: "ehp", label: "有效體力 EHP" },
+  { key: "cr", label: "暴擊率" },
+  { key: "cd", label: "暴擊傷害" },
+  { key: "res", label: "效果抵抗" },
+  { key: "acc", label: "效果命中" },
+  { key: "eff", label: "符文效率" },
+  { key: "focus", label: "焦點契合" },
+];
+
 /** 2/4/6 號位可選主屬性（type id 對應 SWEX） */
 const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
   2: [
@@ -66,6 +86,8 @@ export default function OptimizerPage() {
   const [openIdx, setOpenIdx] = useState(-1);
   const [planIdx, setPlanIdx] = useState(-1);
   const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("recommended");
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
   const workerRef = useRef<Worker | null>(null);
   const runId = useRef(0);
@@ -286,6 +308,33 @@ export default function OptimizerPage() {
 
   // 顯示目前裝備
   const currentStats = boxMonster?.stats;
+
+  /** 依使用者選定的數值重新排序（不影響配符運算結果） */
+  const sortedBuilds = useMemo<Build[]>(() => {
+    if (!result) return [];
+    if (sortKey === "recommended") return result.builds;
+    const valueOf = (b: Build) =>
+      sortKey === "eff" ? b.eff : sortKey === "focus" ? (b.focusFit ?? 0) : b.stats[sortKey];
+    return result.builds
+      .map((b, i) => ({ b, i, v: valueOf(b) }))
+      .sort((a, z) => {
+        const d = z.v - a.v;
+        return (sortDir === "desc" ? d : -d) || a.i - z.i;
+      })
+      .map((x) => x.b);
+  }, [result, sortKey, sortDir]);
+
+  // 換排序時把展開的卡片與配符清單歸零，避免指到別組
+  useEffect(() => {
+    if (!result) return;
+    setOpenIdx(0);
+    setPlanIdx(-1);
+  }, [sortKey, sortDir, result]);
+
+  // 焦點被清空時，排序欄位不要停在已不存在的選項
+  useEffect(() => {
+    if (sortKey === "focus" && focus.length === 0) setSortKey("recommended");
+  }, [focus.length, sortKey]);
 
   return (
     <>
@@ -510,6 +559,34 @@ export default function OptimizerPage() {
                   <span className="chip gold">≥ {targetSpeed} 速</span>
                 </div>
               </div>
+              <div className="sort-bar">
+                <span className="tiny dim">排序</span>
+                <select
+                  className="select"
+                  value={sortKey}
+                  onChange={(e) => {
+                    setSortKey(e.target.value as SortKey);
+                    setSortDir("desc");
+                  }}
+                >
+                  {SORT_OPTIONS.filter((o) => o.key !== "focus" || focus.length > 0).map((o) => (
+                    <option key={o.key} value={o.key}>{o.label}</option>
+                  ))}
+                </select>
+                {sortKey !== "recommended" && (
+                  <>
+                    <div className="tabs">
+                      <button type="button" className={`tab ${sortDir === "desc" ? "active" : ""}`} onClick={() => setSortDir("desc")}>
+                        高 → 低
+                      </button>
+                      <button type="button" className={`tab ${sortDir === "asc" ? "active" : ""}`} onClick={() => setSortDir("asc")}>
+                        低 → 高
+                      </button>
+                    </div>
+                    <span className="tiny dim">只改變顯示順序，不會重新計算</span>
+                  </>
+                )}
+              </div>
               {result.builds.length === 0 && (
                 <div className="alert warn" style={{ marginTop: 10 }}>
                   <div>找不到符合條件的配裝。</div>
@@ -522,9 +599,9 @@ export default function OptimizerPage() {
             </div>
           )}
 
-          {result?.builds.map((b, i) => (
+          {result && sortedBuilds.map((b, i) => (
             <BuildCard
-              key={i}
+              key={b.runes.map((r) => r?.id ?? 0).join("-") || i}
               index={i}
               build={b}
               rta={rta}
@@ -568,9 +645,9 @@ export default function OptimizerPage() {
         </div>
       </div>
 
-      {planIdx >= 0 && result && (
+      {planIdx >= 0 && planIdx < sortedBuilds.length && (
         <PlanModal
-          build={result.builds[planIdx]}
+          build={sortedBuilds[planIdx]}
           monsterName={anyMonster?.name ?? "魔靈"}
           ownerOf={(rid) => {
             const u = account?.units.find((x) => x.runes.includes(rid));
@@ -717,7 +794,7 @@ function PlanModal({
       const rn = r!;
       const owner = ownerOf(rn.id);
       const subs = rn.subs
-        .map((s) => `${statLabel(s.t)}+${s.v}${statSuffix(s.t)}${s.g > 0 ? `(磨石+${s.g})` : ""}`)
+        .map((s) => `${statLabel(s.t)}+${s.v + s.g}${statSuffix(s.t)}${s.g > 0 ? `(含精煉+${s.g})` : ""}`)
         .join("、");
       const prefix = rn.prefix?.t ? `｜固有 ${statText(rn.prefix.t, rn.prefix.v)}` : "";
       return [

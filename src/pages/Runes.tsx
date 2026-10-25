@@ -121,7 +121,7 @@ export default function RunesPage() {
               <div className="kv"><span className="k">效率</span><span className="v gold">{detail.eff.toFixed(1)}%</span></div>
               <div className="kv"><span className="k">主屬性</span><span className="v">{statText(detail.main.t, detail.main.v)}</span></div>
               {detail.prefix.t > 0 && <div className="kv"><span className="k">固有屬性</span><span className="v">{statText(detail.prefix.t, detail.prefix.v)}</span></div>}
-              <div className="kv"><span className="k">磨石</span><span className="v">{[...detail.subs].reduce((s, x) => s + x.g, 0)}</span></div>
+              <div className="kv"><span className="k">精煉（磨石）</span><span className="v">{[...detail.subs].reduce((s, x) => s + x.g, 0)}</span></div>
               <div className="kv"><span className="k">擁有者</span><span className="v">{owner.get(detail.id) ?? "未裝備"}</span></div>
               <div className="kv"><span className="k">古代符文</span><span className="v">{detail.ancient ? "是" : "否"}</span></div>
             </div>
