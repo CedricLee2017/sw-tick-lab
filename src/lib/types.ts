@@ -1,4 +1,11 @@
 /** 資料型別 */
+import type { StatKey } from "./constants";
+
+/** 焦點屬性：weight 1~10，越高越優先抽入該屬性的符文 */
+export interface FocusEntry {
+  key: StatKey;
+  weight: number;
+}
 
 export interface Monster {
   id: number;

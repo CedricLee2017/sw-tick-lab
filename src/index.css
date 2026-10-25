@@ -264,6 +264,50 @@ p { margin: 0; }
 .rune.legendary { border-color: rgba(255, 200, 90, .28); }
 .rune.hero { border-color: rgba(190, 130, 255, .25); }
 .rune.rare { border-color: rgba(88, 166, 255, .22); }
+.rune-prefix { color: #a9bce0; }
+.rune-tag {
+  font-size: 9px; font-weight: 700; letter-spacing: .02em; color: var(--gold);
+  border: 1px solid rgba(242, 198, 92, .35); background: rgba(242, 198, 92, .08);
+  border-radius: 4px; padding: 0 3px; line-height: 1.5;
+}
+.rune-tag.muted { color: var(--muted); border-color: var(--line-soft); background: transparent; }
+.rune-sub .gem { color: #5ee6d0; font-size: 10px; }
+.rune.detail { padding: 11px 12px; gap: 4px; }
+.rune.detail .rune-main { font-size: 13.5px; letter-spacing: -0.01em; }
+.rune-meta {
+  margin-top: 6px; padding-top: 7px; border-top: 1px dashed var(--line-soft);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.rune-meta-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 10.5px; color: var(--muted-2);
+}
+.rune-meta-row b {
+  color: #cfdcf7; font-weight: 700; font-variant-numeric: tabular-nums;
+  max-width: 68%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rune-meta-row b.gold { color: var(--gold); }
+.rune-meta .bar { margin-top: 3px; }
+
+/* ── focus ────────────────────────────────────────── */
+.focus-panel {
+  border: 1px solid rgba(242, 198, 92, .24);
+  background: linear-gradient(180deg, rgba(242, 198, 92, .06), rgba(242, 198, 92, .02));
+  border-radius: 12px; padding: 11px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.focus-title { font-size: 12px; font-weight: 700; letter-spacing: .03em; }
+.focus-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 58px 30px;
+  gap: 6px; align-items: center;
+}
+.focus-row .select { padding: 5px 26px 5px 9px; font-size: 12px; }
+.focus-row .input { padding: 5px 6px; font-size: 12px; text-align: center; }
+.focus-row .btn { padding: 4px; }
+.focus-depth {
+  border-top: 1px dashed var(--line-soft); padding-top: 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
 
 /* ── misc ─────────────────────────────────────────── */
 .empty { padding: 50px 20px; text-align: center; color: var(--muted); }
@@ -317,6 +361,27 @@ p { margin: 0; }
 .build-row { display: grid; grid-template-columns: 38px 1fr auto; gap: 12px; align-items: center; }
 .build-rank { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: rgba(88, 166, 255, .1); color: var(--blue); border: 1px solid rgba(88, 166, 255, .2); }
 .build-rank.top { background: rgba(242, 198, 92, .14); color: var(--gold); border-color: rgba(242, 198, 92, .35); }
+
+.optimizer-grid { grid-template-columns: minmax(330px, 380px) minmax(0, 1fr); align-items: start; }
+.optimizer-side {
+  position: sticky; top: 78px;
+  max-height: calc(100vh - 118px);
+  overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: #2b3d63 transparent;
+}
+.optimizer-side::-webkit-scrollbar { width: 7px; }
+.optimizer-side::-webkit-scrollbar-thumb { background: #2b3d63; border-radius: 99px; }
+.optimizer-actions {
+  position: sticky; bottom: 0;
+  margin: 2px -18px -18px; padding: 12px 18px 18px;
+  background: linear-gradient(180deg, rgba(16, 24, 40, 0), #101828 38%);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+@media (max-width: 1080px) {
+  .optimizer-grid { grid-template-columns: 1fr; }
+  .optimizer-side { position: static; max-height: none; overflow: visible; }
+  .optimizer-actions { position: static; margin: 2px 0 0; padding: 0; background: none; }
+}
 
 .mobile-nav { display: none; }
 

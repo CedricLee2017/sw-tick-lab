@@ -276,6 +276,69 @@ check("主屬性篩選（#4 HP%、#6 攻擊%）", () => {
   }
 });
 
+/* ── 4b. Focus 焦點屬性 ───────────────────────── */
+console.log("\n[4b] Focus 焦點屬性加權");
+const { normalizeFocus, focusFitOf, runeValue, FOCUS_LIMIT } = engine;
+
+check("normalizeFocus：最多 5 組、去重、比重限制 1~10", () => {
+  assert.equal(FOCUS_LIMIT, 5);
+  const list = normalizeFocus([
+    { key: "hp", weight: 99 },
+    { key: "hp", weight: 3 },
+    { key: "atk", weight: 0 },
+    { key: "def", weight: 5 },
+    { key: "spd", weight: 6 },
+    { key: "cr", weight: 7 },
+    { key: "cd", weight: 8 },
+    { key: "res", weight: 9 },
+  ]);
+  assert.equal(list.length, 5, "沒有裁切成 5 組");
+  assert.deepEqual(list.map((f) => f.key), ["hp", "atk", "def", "spd", "cr"]);
+  assert.equal(list[0].weight, 10, "比重沒有上限 10");
+  assert.equal(list[1].weight, 1, "比重沒有下限 1");
+});
+
+check("focusFitOf：依比重加權（HP 100%、SPD 50% → 75%）", () => {
+  const stats = { hp: 40000, atk: 0, def: 0, spd: 140, cr: 0, cd: 0, res: 0, acc: 0 };
+  const fit = focusFitOf(stats, [{ key: "hp", weight: 5 }, { key: "spd", weight: 5 }]);
+  assert.equal(Math.round(fit), 75);
+  assert.equal(focusFitOf(stats, []), 0);
+});
+
+check("焦點權重會把高 HP 符文排到高速度符文前面", () => {
+  const w = { hp: 0.15, atk: 0.15, def: 0.15, spd: 0.3, cr: 0.15, cd: 0.1, res: 0.1, acc: 0.15 };
+  const mk = (id, subs) => ({
+    id, set: 1, slot: 1, grade: 6, level: 15,
+    main: { t: 3, v: 160 }, prefix: { t: 0, v: 0 }, subs,
+    occupied: 0, ancient: false, locked: false, eff: 60, effMax: 100,
+  });
+  const speedRune = mk(1, [{ t: 8, v: 25, g: 0, gem: 0 }]);
+  const hpRune = mk(2, [{ t: 2, v: 40, g: 0, gem: 0 }]);
+  assert.ok(runeValue(speedRune, w) > runeValue(hpRune, w), "未加焦點時應以速度優先");
+  const focus = new Map([["hp", 10]]);
+  assert.ok(runeValue(hpRune, w, focus) > runeValue(speedRune, w, focus), "焦點 HP 沒有提高 HP 符文排序");
+});
+
+const focusedRun = optimize({
+  ...req,
+  min: { spd: 286 },
+  objective: "spd",
+  focus: [{ key: "hp", weight: 10 }, { key: "spd", weight: 8 }],
+});
+check("Focus 套用到配符：仍符合速度條件，且附上焦點契合度", () => {
+  assert.ok(focusedRun.builds.length > 0, "加上 Focus 後沒有任何結果");
+  for (const b of focusedRun.builds) {
+    assert.ok(b.stats.spd >= 286, `速度只有 ${b.stats.spd}`);
+    assert.ok(typeof b.focusFit === "number", "缺少 focusFit");
+    assert.ok(b.focusFit >= 0 && b.focusFit <= 100, `focusFit 超出範圍：${b.focusFit}`);
+  }
+  for (let i = 1; i < focusedRun.builds.length; i++) {
+    assert.ok(focusedRun.builds[i - 1].score >= focusedRun.builds[i].score, "結果沒有依分數排序");
+  }
+});
+console.log(`  · 無 Focus 第一名：${result.builds[0].stats.spd} 速 / HP ${result.builds[0].stats.hp} / 焦點契合 ${Math.round(focusFitOf(result.builds[0].stats, [{ key: "hp", weight: 10 }, { key: "spd", weight: 8 }]))}%`);
+console.log(`  · 有 Focus 第一名：${focusedRun.builds[0].stats.spd} 速 / HP ${focusedRun.builds[0].stats.hp} / 焦點契合 ${Math.round(focusedRun.builds[0].focusFit)}%`);
+
 /* ── 5. 出手順序 ─────────────────────────────── */
 console.log("\n[5] 出手順序模擬");
 check("286 速比 285 速先出手", () => {

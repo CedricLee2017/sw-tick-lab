@@ -9,9 +9,63 @@ import {
   type BaseStats,
   type StatAccum,
 } from "./stats";
-import type { BonusConfig, Rune, Stats } from "./types";
+import type { BonusConfig, FocusEntry, Rune, Stats } from "./types";
 
 export type Objective = "spd" | "ehp" | "hp" | "atk" | "def" | "eff" | "score";
+
+/** Focus 區塊最多可選幾組屬性 */
+export const FOCUS_LIMIT = 5;
+
+export const FOCUS_OPTIONS: { key: StatKey; label: string }[] = [
+  { key: "hp", label: "體力 HP" },
+  { key: "atk", label: "攻擊 ATK" },
+  { key: "def", label: "防禦 DEF" },
+  { key: "spd", label: "速度 SPD" },
+  { key: "cr", label: "暴擊率 CR" },
+  { key: "cd", label: "暴擊傷害 CD" },
+  { key: "res", label: "效果抵抗 RES" },
+  { key: "acc", label: "效果命中 ACC" },
+];
+
+/** 焦點契合度的參考值（達到即視為 100%） */
+const FOCUS_REF: Record<StatKey, number> = {
+  hp: 40000,
+  atk: 3000,
+  def: 2500,
+  spd: 280,
+  cr: 100,
+  cd: 250,
+  res: 100,
+  acc: 100,
+};
+
+/** 清掉重複 / 超量 / 非法比重，確保最多 5 組 */
+export function normalizeFocus(focus: FocusEntry[] | undefined): FocusEntry[] {
+  const out: FocusEntry[] = [];
+  const seen = new Set<StatKey>();
+  for (const f of focus ?? []) {
+    if (!f || !FOCUS_OPTIONS.some((o) => o.key === f.key) || seen.has(f.key)) continue;
+    const weight = Math.max(1, Math.min(10, Math.round(Number(f.weight) || 1)));
+    seen.add(f.key);
+    out.push({ key: f.key, weight });
+    if (out.length >= FOCUS_LIMIT) break;
+  }
+  return out;
+}
+
+/** 這組配裝對焦點屬性的契合度（0~100%，依比重加權） */
+export function focusFitOf(stats: Stats, focus: FocusEntry[] | undefined): number {
+  const list = focus ?? [];
+  if (list.length === 0) return 0;
+  let sum = 0;
+  let total = 0;
+  for (const f of list) {
+    const ref = FOCUS_REF[f.key] || 1;
+    sum += f.weight * Math.min(1, Math.max(0, stats[f.key] / ref));
+    total += f.weight;
+  }
+  return total > 0 ? (sum / total) * 100 : 0;
+}
 
 export const OBJECTIVE_LABEL: Record<Objective, string> = {
   spd: "速度優先",
@@ -41,6 +95,8 @@ export interface OptRequest {
   mainFilters?: Partial<Record<number, number>>;
   /** 允許破套：副套裝（2 件）只作優先，不強制剛好 2 件 */
   relaxSub?: boolean;
+  /** 焦點屬性：數值越高的符文越優先進入候選池（最多 5 組） */
+  focus?: FocusEntry[];
 }
 
 export interface Build {
@@ -49,6 +105,8 @@ export interface Build {
   score: number;
   eff: number;
   sets: Record<number, number>;
+  /** 焦點契合度 0~100% */
+  focusFit?: number;
 }
 
 export interface OptResult {
@@ -103,14 +161,18 @@ export function scoreOf(stats: Stats, eff: number, objective: Objective): number
   return s;
 }
 
-function runeValue(rune: Rune, w: Record<StatKey, number>): number {
+export function runeValue(rune: Rune, w: Record<StatKey, number>, focus?: Map<StatKey, number>): number {
   let v = 0;
   const add = (t: number, value: number, mult = 1) => {
     const k = STAT_TYPES[t]?.key;
     if (!k) return;
     const name = MAX_STAT_NAME[t];
     const maxV = name ? (SUB_STAT_MAX[name]?.[`g${Math.min(6, Math.max(1, rune.grade))}`] ?? 1) : 1;
-    v += w[k] * (value / Math.max(1, maxV)) * mult;
+    const norm = value / Math.max(1, maxV);
+    v += w[k] * norm * mult;
+    // 焦點：同一條屬性再加權，讓高相關符文優先進入候選池
+    const fw = focus?.get(k);
+    if (fw) v += (fw / 10) * norm * mult * 1.6;
   };
   add(rune.main.t, rune.main.v, 2.2);
   if (rune.prefix?.t) add(rune.prefix.t, rune.prefix.v, 0.7);
@@ -156,7 +218,14 @@ export function optimize(req: OptRequest): OptResult {
     maxNodes = 3_500_000,
     mainFilters = {},
     relaxSub = false,
+    focus = [],
   } = req;
+
+  const focusList = normalizeFocus(focus);
+  const focusWeight = new Map<StatKey, number>();
+  for (const f of focusList) focusWeight.set(f.key, f.weight);
+  /** 焦點契合度對最終分數的加分上限（只用來小幅調整同分排序） */
+  const FOCUS_BONUS = 2;
 
   const allRequired = required.filter((r) => r.count > 0);
   const requiredSets = relaxSub ? allRequired.filter((r) => r.count >= 4) : allRequired;
@@ -184,7 +253,7 @@ export function optimize(req: OptRequest): OptResult {
     if (!allowEquipped) list = list.filter((r) => r.occupied === 0 || r.occupied === targetUnit);
     if (strictSets) list = list.filter((r) => requiredIds.has(r.set));
     const scored = list
-      .map((r) => ({ r, v: runeValue(r, w) + r.eff * 0.02, spd: runeSpeed(r) }))
+      .map((r) => ({ r, v: runeValue(r, w, focusWeight) + r.eff * 0.02, spd: runeSpeed(r) }))
       .sort((a, b) => b.v - a.v);
 
     // 候選不能只看加權分數：保留各指定套裝與最高速符文，
@@ -209,7 +278,7 @@ export function optimize(req: OptRequest): OptResult {
       const speedOf = new Map(scored.map((x) => [x.r.id, x.spd]));
       picked.sort((a, b) => (speedOf.get(b.id) ?? 0) - (speedOf.get(a.id) ?? 0));
     } else {
-      picked.sort((a, b) => runeValue(b, w) - runeValue(a, w));
+      picked.sort((a, b) => runeValue(b, w, focusWeight) - runeValue(a, w, focusWeight));
     }
 
     slots.push({
@@ -330,7 +399,15 @@ export function optimize(req: OptRequest): OptResult {
       for (const [k, v] of minEntries) if (stats[k] < v) return;
       for (const [k, v] of maxEntries) if (stats[k] > v) return;
       const eff = accEff / 6;
-      push({ runes: chosen.slice(1), stats, score: scoreOf(stats, eff, objective), eff, sets: { ...acc.sets } });
+      const fit = focusFitOf(stats, focusList);
+      push({
+        runes: chosen.slice(1),
+        stats,
+        score: scoreOf(stats, eff, objective) + (focusList.length ? (fit / 100) * FOCUS_BONUS : 0),
+        eff,
+        sets: { ...acc.sets },
+        focusFit: fit,
+      });
       return;
     }
 
@@ -350,7 +427,9 @@ export function optimize(req: OptRequest): OptResult {
       const lowStats = finalizeStats(base, acc, bonus, rta);
       for (const [k, v] of maxEntries) if (lowStats[k] > v) return;
     }
-    const bound = objective === "eff" ? (accEff + sufEff[depth]) / 6 : scoreOf(optStats, 0, objective);
+    const bound = objective === "eff"
+      ? (accEff + sufEff[depth]) / 6 + (focusList.length ? FOCUS_BONUS : 0)
+      : scoreOf(optStats, 0, objective) + (focusList.length ? FOCUS_BONUS : 0);
     if (results.length >= limit && bound <= worst()) return;
 
     for (const cand of seq[depth].list) {

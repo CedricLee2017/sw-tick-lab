@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowRight, Copy, Loader2, Save, Sparkles, Wand2, Gauge, ChevronDown,
+  AlertTriangle, ArrowRight, Copy, Loader2, Save, Sparkles, Wand2, Gauge, ChevronDown, Plus, Target, X,
 } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
 import { useSummary } from "../lib/accountStats";
-import { MonsterPicker, MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statText } from "../components/ui";
+import { MonsterPicker, MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
-import { OBJECTIVE_LABEL, type Build, type Objective, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick } from "../lib/optimizer";
+import {
+  FOCUS_LIMIT, FOCUS_OPTIONS, OBJECTIVE_LABEL, normalizeFocus,
+  type Build, type Objective, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick,
+} from "../lib/optimizer";
 import { baseStats, setSummary, tickOf } from "../lib/stats";
-import type { Monster, Rune } from "../lib/types";
+import type { FocusEntry, Monster, Rune } from "../lib/types";
 
 const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
 const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2);
+
+const focusLabel = (key: StatKey) => FOCUS_OPTIONS.find((o) => o.key === key)?.label ?? key;
 
 /** 2/4/6 號位可選主屬性（type id 對應 SWEX） */
 const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
@@ -35,6 +40,8 @@ export default function OptimizerPage() {
   const settings = useStore((s) => s.settings);
   const bonus = settings.bonus;
   const patchBonus = useStore((s) => s.patchBonus);
+  const setFocus = useStore((s) => s.setFocus);
+  const focus = settings.focus ?? [];
   const summary = useSummary();
   const rta = settings.rta;
   const saveLoadout = useStore((s) => s.saveLoadout);
@@ -232,6 +239,7 @@ export default function OptimizerPage() {
       maxNodes: 4_000_000,
       mainFilters: mains,
       relaxSub: relax,
+      focus: normalizeFocus(focus),
     };
     const id = ++runId.current;
     const t0 = performance.now();
@@ -281,9 +289,9 @@ export default function OptimizerPage() {
 
   return (
     <>
-      <div className="grid" style={{ gridTemplateColumns: "minmax(330px, 380px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <div className="grid optimizer-grid">
         {/* ── 條件 ── */}
-        <div className="card" style={{ position: "sticky", top: 78 }}>
+        <div className="card optimizer-side">
           <div className="card-head">
             <div className="card-title">配符條件</div>
             <span className="chip gold"><Sparkles size={11} /> Tick 優先</span>
@@ -442,6 +450,8 @@ export default function OptimizerPage() {
               </select>
             </div>
 
+            <FocusEditor value={focus} onChange={setFocus} pool={pool} onPoolChange={setPool} />
+
             <details>
               <summary className="tiny dim" style={{ cursor: "pointer" }}>進階選項</summary>
               <div className="col" style={{ gap: 10, marginTop: 10 }}>
@@ -449,11 +459,6 @@ export default function OptimizerPage() {
                   <input type="checkbox" checked={allowEquipped} onChange={(e) => setAllowEquipped(e.target.checked)} />
                   允許使用已裝備在其它魔靈的符文
                 </label>
-                <div className="field">
-                  <label>每個位置候選符文數：{pool}</label>
-                  <input type="range" min={8} max={40} value={pool} onChange={(e) => setPool(Number(e.target.value))} />
-                  <span className="hint">越大越準，但計算越久</span>
-                </div>
                 <NumberField label="顯示結果數" value={limit} min={5} max={50} onChange={setLimit} />
                 <div className="row tiny dim" style={{ gap: 6 }}>
                   <AlertTriangle size={12} /> 條件越多、候選越多，運算時間越長。
@@ -461,9 +466,11 @@ export default function OptimizerPage() {
               </div>
             </details>
 
-            <button className="btn btn-primary" onClick={() => run()} disabled={running || !account} style={{ padding: "11px 14px" }}>
-              {running ? <><Loader2 size={15} className="spin" /> 運算中…</> : <><Wand2 size={15} /> 開始配符</>}
-            </button>
+            <div className="optimizer-actions">
+              <button className="btn btn-primary" onClick={() => run()} disabled={running || !account} style={{ padding: "11px 14px" }}>
+                {running ? <><Loader2 size={15} className="spin" /> 運算中…</> : <><Wand2 size={15} /> 開始配符</>}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -495,6 +502,11 @@ export default function OptimizerPage() {
                       {SET_BY_ID[r.set]?.name} ×{r.count}{relaxSub && r.count < 4 ? "（優先）" : ""}
                     </span>
                   ))}
+                  {focus.map((f) => (
+                    <span key={f.key} className="chip muted" title="焦點屬性：數值越高越優先進入候選池">
+                      <Target size={10} /> {focusLabel(f.key)} ×{f.weight}
+                    </span>
+                  ))}
                   <span className="chip gold">≥ {targetSpeed} 速</span>
                 </div>
               </div>
@@ -517,6 +529,7 @@ export default function OptimizerPage() {
               build={b}
               rta={rta}
               runeMap={runeMap}
+              focus={focus}
               ownerOf={(rid) => {
                 const u = account?.units.find((x) => x.runes.includes(rid));
                 return u ? monsterLabel(u.master) : "";
@@ -582,6 +595,7 @@ function BuildCard({
   onPlan,
   ownerOf,
   runeMap,
+  focus,
 }: {
   build: Build;
   index: number;
@@ -592,6 +606,7 @@ function BuildCard({
   onPlan: () => void;
   ownerOf: (runeId: number) => string;
   runeMap: Map<number, Rune>;
+  focus: FocusEntry[];
 }) {
   const s = build.stats;
   const mainSets = Object.entries(build.sets).sort((a, b) => b[1] - a[1]);
@@ -610,6 +625,11 @@ function BuildCard({
                 </span>
               ))}
               <span className="dim tiny">效率 {build.eff.toFixed(1)}%</span>
+              {focus.length > 0 && build.focusFit !== undefined && (
+                <span className="chip muted" style={{ padding: "1px 7px", fontSize: 10.5 }} title="焦點屬性契合度">
+                  <Target size={10} /> 焦點 {Math.round(build.focusFit)}%
+                </span>
+              )}
             </div>
             <div className="row wrap tiny" style={{ gap: 12, color: "var(--muted)" }}>
               <span>HP <b className="mono" style={{ color: "var(--text)" }}>{fmt(s.hp)}</b></span>
@@ -640,7 +660,7 @@ function BuildCard({
             </div>
           </div>
 
-          <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(232px, 1fr))", gap: 10 }}>
             {[1, 2, 3, 4, 5, 6].map((slot) => {
               const r = build.runes[slot - 1] ?? null;
               if (!r) return null;
@@ -649,8 +669,8 @@ function BuildCard({
                 <RuneCard
                   key={slot}
                   rune={r}
-                  compact
-                  owner={owner ? `在 ${owner}` : undefined}
+                  detail
+                  owner={owner || undefined}
                 />
               );
             })}
@@ -680,12 +700,23 @@ function PlanModal({
   const notify = useStore((s) => s.notify);
   const text = [
     `【${monsterName}】配符清單`,
-    `速度 ${build.stats.spd}（Tick ${build.stats.tick}）｜HP ${fmt(build.stats.hp)}｜DEF ${fmt(build.stats.def)}｜ATK ${fmt(build.stats.atk)}｜ACC ${build.stats.acc}%｜CR ${build.stats.cr}%｜CD ${build.stats.cd}%`,
-    `套裝：${Object.entries(build.sets).map(([id, c]) => `${SET_BY_ID[Number(id)]?.name}×${c}`).join(" ")}`,
+    `速度 ${build.stats.spd}（Tick ${build.stats.tick}）｜HP ${fmt(build.stats.hp)}｜DEF ${fmt(build.stats.def)}｜ATK ${fmt(build.stats.atk)}｜ACC ${build.stats.acc}%｜CR ${build.stats.cr}%｜CD ${build.stats.cd}%｜EHP ${fmt(build.stats.ehp)}`,
+    `套裝：${Object.entries(build.sets).map(([id, c]) => `${SET_BY_ID[Number(id)]?.name}×${c}`).join(" ")}｜平均效率 ${build.eff.toFixed(1)}%`,
     ...build.runes.filter(Boolean).map((r) => {
       const rn = r!;
       const owner = ownerOf(rn.id);
-      return `#${rn.slot} ${SET_BY_ID[rn.set]?.name} +${rn.level} 主屬 ${rn.main.t ? statText(rn.main.t, rn.main.v) : ""}${owner ? `（原在 ${owner}）` : ""}`;
+      const subs = rn.subs
+        .map((s) => `${statLabel(s.t)}+${s.v}${statSuffix(s.t)}${s.g > 0 ? `(磨石+${s.g})` : ""}`)
+        .join("、");
+      const prefix = rn.prefix?.t ? `｜固有 ${statText(rn.prefix.t, rn.prefix.v)}` : "";
+      return [
+        `#${rn.slot} ${SET_BY_ID[rn.set]?.name ?? `套裝${rn.set}`} +${rn.level}`,
+        `主屬 ${rn.main.t ? statText(rn.main.t, rn.main.v) : "—"}${prefix}`,
+        `副屬 ${subs || "—"}`,
+        `ID ${rn.id}`,
+        `原裝備 ${owner || "未裝備"}`,
+        `效率 ${rn.eff.toFixed(0)}%`,
+      ].join("｜");
     }),
   ].join("\n");
 
@@ -702,5 +733,111 @@ function PlanModal({
         <button className="btn btn-primary" onClick={onClose}>完成</button>
       </div>
     </Modal>
+  );
+}
+
+/** FOCUS 區塊：最多 5 組屬性 + 比重（對應 SWOP 的 FOCUS / SEARCH DEPTH） */
+function FocusEditor({
+  value,
+  onChange,
+  pool,
+  onPoolChange,
+}: {
+  value: FocusEntry[];
+  onChange: (v: FocusEntry[]) => void;
+  pool: number;
+  onPoolChange: (v: number) => void;
+}) {
+  const used = new Set(value.map((f) => f.key));
+  const total = value.reduce((s, f) => s + f.weight, 0);
+
+  const add = () => {
+    const next = FOCUS_OPTIONS.find((o) => !used.has(o.key));
+    if (!next) return;
+    onChange([...value, { key: next.key, weight: 6 }]);
+  };
+
+  return (
+    <div className="focus-panel">
+      <div className="row between" style={{ gap: 8 }}>
+        <div className="row" style={{ gap: 6 }}>
+          <Target size={13} className="gold" />
+          <span className="focus-title">焦點屬性 FOCUS</span>
+          <span className="tiny dim">{value.length}/{FOCUS_LIMIT}</span>
+        </div>
+        {value.length > 0 && (
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => onChange([])}>清除</button>
+        )}
+      </div>
+      <div className="hint" style={{ lineHeight: 1.5 }}>
+        最多 5 組。比重越高，該屬性數值高的符文越優先進入候選池（1 = 輕微、10 = 最優先）。
+      </div>
+      {value.length === 0 && (
+        <div className="tiny dim" style={{ lineHeight: 1.5 }}>
+          例：焦點 HP ×8 → 先抽出具高體力副屬性的符文，再從中挑出符合 Tick 的組合。
+        </div>
+      )}
+      {value.map((f, i) => (
+        <div className="focus-row" key={f.key}>
+          <select
+            className="select"
+            value={f.key}
+            onChange={(e) =>
+              onChange(value.map((x, j) => (j === i ? { ...x, key: e.target.value as StatKey } : x)))
+            }
+          >
+            {FOCUS_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key} disabled={o.key !== f.key && used.has(o.key)}>{o.label}</option>
+            ))}
+          </select>
+          <input
+            className="input mono"
+            type="number"
+            min={1}
+            max={10}
+            value={f.weight}
+            title="比重 1~10"
+            onChange={(e) => {
+              const w = Math.max(1, Math.min(10, Math.round(Number(e.target.value) || 1)));
+              onChange(value.map((x, j) => (j === i ? { ...x, weight: w } : x)));
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost btn-icon"
+            title="移除"
+            onClick={() => onChange(value.filter((_, j) => j !== i))}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+      {value.length < FOCUS_LIMIT && (
+        <button type="button" className="btn btn-sm btn-ghost" onClick={add} style={{ width: "100%" }}>
+          <Plus size={13} /> 新增焦點屬性
+        </button>
+      )}
+      {value.length > 0 && (
+        <div className="row between tiny dim">
+          <span>比重合計 {total}</span>
+          <span>數值愈高 → 愈優先被抽入</span>
+        </div>
+      )}
+      <div className="focus-depth">
+        <div className="row between">
+          <span className="tiny dim">搜尋深度（每個位置候選符文）</span>
+          <b className="mono" style={{ fontSize: 11.5 }}>{pool}</b>
+        </div>
+        <input
+          type="range"
+          min={8}
+          max={40}
+          value={pool}
+          onChange={(e) => onPoolChange(Number(e.target.value))}
+          style={{ width: "100%" }}
+        />
+        <div className="tiny dim">越大越準，但計算越久</div>
+      </div>
+    </div>
   );
 }

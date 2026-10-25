@@ -101,18 +101,24 @@ export function RuneCard({
   onClick,
   selected,
   compact,
+  detail,
 }: {
   rune: Rune;
   owner?: string;
   onClick?: () => void;
   selected?: boolean;
   compact?: boolean;
+  /** 完整資訊卡：副屬性、固有屬性、符文 ID、原裝備者、效率 */
+  detail?: boolean;
 }) {
   const set = SET_BY_ID[rune.set];
   const gradeClass = rune.grade >= 5 ? "legendary" : rune.grade === 4 ? "hero" : rune.grade === 3 ? "rare" : "";
+  const stars = ["", "★", "★★", "★★★", "★★★★", "★★★★★", "★★★★★★"][rune.grade] ?? "";
+  const showSubs = !compact || detail;
+  const eff = Math.round(rune.eff);
   return (
     <div
-      className={`rune ${gradeClass}`}
+      className={`rune ${gradeClass} ${detail ? "detail" : ""}`}
       onClick={onClick}
       style={{
         cursor: onClick ? "pointer" : undefined,
@@ -124,14 +130,28 @@ export function RuneCard({
         <div className="rune-set">
           <span className="rune-dot" style={{ background: setColor(rune.set) }} />
           {set?.name ?? `套裝${rune.set}`}
+          {rune.ancient && <span className="rune-tag">遠古</span>}
+          {rune.locked && <span className="rune-tag muted" title="已鎖定">鎖</span>}
         </div>
-        <span className="rune-slot">#{rune.slot}</span>
+        <span className="rune-slot">#{rune.slot} · +{rune.level}</span>
       </div>
       <div className="rune-main">{statText(rune.main.t, rune.main.v)}</div>
-      {!compact &&
+      {rune.prefix?.t > 0 && (
+        <div className="rune-sub rune-prefix">
+          <span>
+            {statLabel(rune.prefix.t)}
+            <span className="dim" style={{ fontSize: 9.5 }}> 固有</span>
+          </span>
+          <span><b>+{rune.prefix.v}{statSuffix(rune.prefix.t)}</b></span>
+        </div>
+      )}
+      {showSubs &&
         rune.subs.map((s, i) => (
           <div className="rune-sub" key={i}>
-            <span>{statLabel(s.t)}</span>
+            <span>
+              {statLabel(s.t)}
+              {s.gem > 0 && <span className="gem" title={`寶石 ${s.gem}`}> ◆</span>}
+            </span>
             <span>
               <b>+{s.v}{statSuffix(s.t)}</b>
               {s.g > 0 && <span className="g"> (+{s.g}{statSuffix(s.t)})</span>}
@@ -139,11 +159,17 @@ export function RuneCard({
           </div>
         ))}
       <div className="rune-sub" style={{ marginTop: 2 }}>
-        <span className="dim tiny">
-          {["", "★", "★★", "★★★", "★★★★", "★★★★★", "★★★★★★"][rune.grade]} +{rune.level}
-        </span>
-        <span className="dim tiny">{owner ? owner : "未裝備"}</span>
+        <span className="dim tiny">{stars} +{rune.level}</span>
+        {!detail && <span className="dim tiny">{owner ? owner : "未裝備"}</span>}
       </div>
+      {detail && (
+        <div className="rune-meta">
+          <div className="rune-meta-row"><span>符文 ID</span><b className="mono">{rune.id}</b></div>
+          <div className="rune-meta-row"><span>原裝備</span><b title={owner || "未裝備"}>{owner || "未裝備"}</b></div>
+          <div className="rune-meta-row"><span>效率</span><b className="gold">{eff}%</b></div>
+          <div className="bar" style={{ height: 4 }}><i style={{ width: `${Math.min(100, Math.max(0, eff))}%` }} /></div>
+        </div>
+      )}
     </div>
   );
 }

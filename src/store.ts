@@ -3,7 +3,7 @@ import { del, get, set } from "idb-keyval";
 import monstersJson from "./data/monsters.json";
 import { PARSE_VERSION, parseAccountJSON } from "./lib/parse";
 import { bonusFromBuildings, defaultBonus } from "./lib/stats";
-import type { Account, BonusConfig, Monster, Rune, Stats } from "./lib/types";
+import type { Account, BonusConfig, FocusEntry, Monster, Rune, Stats } from "./lib/types";
 
 export const MONSTERS = monstersJson as unknown as Monster[];
 export const MONSTER_MAP = new Map<number, Monster>(MONSTERS.map((m) => [m.id, m]));
@@ -31,7 +31,11 @@ export interface Settings {
   bonus: BonusConfig;
   rta: boolean;
   pool: number;
+  /** 配符焦點屬性（最多 5 組） */
+  focus: FocusEntry[];
 }
+
+const DEFAULT_SETTINGS = (): Settings => ({ bonus: defaultBonus(), rta: false, pool: 18, focus: [] });
 
 const ACCOUNT_KEY = "swtick:account";
 const SETTINGS_KEY = "swtick:settings";
@@ -56,6 +60,7 @@ interface Store {
   patchBonus: (patch: Partial<BonusConfig>) => void;
   setRta: (v: boolean) => void;
   setPool: (v: number) => void;
+  setFocus: (focus: FocusEntry[]) => void;
   saveLoadout: (l: Omit<Loadout, "id" | "createdAt">) => void;
   removeLoadout: (id: string) => void;
   notify: (msg: string, kind?: "ok" | "err") => void;
@@ -67,7 +72,7 @@ export const useStore = create<Store>((setState, getState) => ({
   ready: false,
   account: null,
   runeMap: new Map(),
-  settings: { bonus: defaultBonus(), rta: false, pool: 18 },
+  settings: DEFAULT_SETTINGS(),
   loadouts: [],
   toasts: [],
 
@@ -82,11 +87,15 @@ export const useStore = create<Store>((setState, getState) => ({
       const stale = !!stored && stored.parseVersion !== PARSE_VERSION;
       if (stale) await del(ACCOUNT_KEY);
       const acc = stale ? null : stored;
+      // 舊版 settings 沒有 focus 欄位，補上預設值
+      const saved = settings
+        ? { ...DEFAULT_SETTINGS(), ...settings, focus: settings.focus ?? [] }
+        : DEFAULT_SETTINGS();
       setState({
         ready: true,
         account: acc ?? null,
         runeMap: new Map((acc?.runes ?? []).map((r) => [r.id, r])),
-        settings: settings ?? { bonus: defaultBonus(), rta: false, pool: 18 },
+        settings: saved,
         loadouts: loadouts ?? [],
       });
       if (stale) getState().notify("解析規則已更新，請重新匯入 SWEX 存檔");
@@ -139,6 +148,12 @@ export const useStore = create<Store>((setState, getState) => ({
 
   setPool: (v) => {
     const settings = { ...getState().settings, pool: v };
+    setState({ settings });
+    void set(SETTINGS_KEY, settings);
+  },
+
+  setFocus: (focus) => {
+    const settings = { ...getState().settings, focus };
     setState({ settings });
     void set(SETTINGS_KEY, settings);
   },
