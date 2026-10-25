@@ -32,6 +32,7 @@ const engine = await import(`${pathToFileURL(BUNDLE).href}?t=${Date.now()}`);
 const {
   tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize, maxSpeedBound,
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
+  emptyAccum, addRuneToAccum, runeValue,
 } = engine;
 
 let passed = 0;
@@ -222,6 +223,69 @@ check("精煉（磨石）數值完整計入：速度 28 + 5 = 33、防禦 12 + 1
   assert.ok(r.eff > 0);
 });
 
+check("固定體力/攻擊/防禦主屬性會計入面板與符文價值", () => {
+  const mk = (id, t, v) => ({
+    rune_id: id, slot_no: 2, set_id: 1, class: 6, rank: 5, upgrade_curr: 15,
+    pri_eff: [t, v], prefix_eff: [0, 0], sec_eff: [],
+  });
+  const raw = {
+    unit_list: [],
+    runes: [mk(9201, 1, 2448), mk(9203, 3, 160), mk(9205, 5, 160)],
+    building_list: [],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "flat.json");
+  assert.equal(p.error, undefined, p.error);
+  const a = emptyAccum();
+  for (const r of p.account.runes) addRuneToAccum(a, r, true);
+  assert.equal(a.flatHp, 2448, "固定體力主屬性未計入");
+  assert.equal(a.flatAtk, 160, "固定攻擊主屬性未計入");
+  assert.equal(a.flatDef, 160, "固定防禦主屬性未計入");
+  const w = { hp: 1, atk: 1, def: 1, spd: 1, cr: 1, cd: 1, res: 1, acc: 1 };
+  for (const r of p.account.runes) {
+    assert.ok(runeValue(r, w) > 0, `主屬性 type ${r.main.t} 沒有被計分`);
+  }
+});
+
+check("主屬性『固定防禦』能找到固定值主屬性符文，並計入 DEF", () => {
+  const mk = (id, slot, set, mainT, mainV, spd) => ({
+    rune_id: id, slot_no: slot, set_id: set, class: 6, rank: 5, upgrade_curr: 15,
+    pri_eff: [mainT, mainV], prefix_eff: [0, 0],
+    sec_eff: spd ? [[8, spd, 0, 0]] : [],
+  });
+  const raw = {
+    unit_list: [],
+    runes: [
+      mk(9301, 1, 4, 3, 160, 10),
+      mk(9302, 2, 15, 8, 42, 10),
+      mk(9303, 3, 1, 5, 160, 10),
+      mk(9304, 4, 6, 2, 63, 10),
+      mk(9305, 5, 7, 1, 2448, 10),
+      mk(9306, 6, 17, 5, 160, 34),
+      mk(9307, 6, 18, 6, 63, 20),
+    ],
+    building_list: [],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "flat-opt.json");
+  assert.equal(p.error, undefined, p.error);
+  const bonus = {
+    towerSpd: 0, towerAtk: 0, towerHp: 0, towerDef: 0,
+    guildAtk: 0, guildHp: 0, guildDef: 0, guildCd: 0,
+    leadSpd: 0, buffSpd: 0, useGuild: false, useElementTower: false, grind: true,
+  };
+  const res = optimize({
+    base: { hp: 10000, atk: 700, def: 700, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 },
+    runes: p.account.runes,
+    required: [], min: { spd: 200 }, max: {}, objective: "spd",
+    bonus, limit: 5, pool: 18, allowEquipped: true, targetUnit: 0, rta: false,
+    maxNodes: 100_000, mainFilters: { 6: 5 },
+  });
+  assert.ok(res.builds.length > 0, "固定防禦主屬性應能找到組合");
+  assert.ok(res.builds.every((b) => b.runes[5]?.main.t === 5), "6 號位應全部是固定防禦");
+  assert.equal(res.builds[0].stats.spd, 226);
+  assert.equal(res.builds[0].stats.def, 1020, "固定防禦 +160 與 +160 應計入 DEF");
+  assert.ok(res.builds.some((b) => b.runes[5]?.id === 9306), "應用到固定防禦 +160 / 34 速的符文");
+});
+
 /* ── 4. 一鍵配符 ─────────────────────────────── */
 console.log("\n[4] 一鍵配符（迅速 ×4 + 意志 ×2，目標 Tick 5）");
 const velajuel = MONSTERS.find((m) => m.id === 17012);
@@ -306,7 +370,7 @@ check("主屬性篩選（#4 HP%、#6 攻擊%）", () => {
 
 /* ── 4b. Focus 焦點屬性 ───────────────────────── */
 console.log("\n[4b] Focus 焦點屬性加權");
-const { normalizeFocus, focusFitOf, runeValue, FOCUS_LIMIT } = engine;
+const { normalizeFocus, focusFitOf, FOCUS_LIMIT } = engine;
 
 check("normalizeFocus：最多 5 組、去重、比重限制 1~10", () => {
   assert.equal(FOCUS_LIMIT, 5);

@@ -38,19 +38,26 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "focus", label: "焦點契合" },
 ];
 
-/** 2/4/6 號位可選主屬性（type id 對應 SWEX） */
+/** 2/4/6 號位可選主屬性（type id 對應 SWEX；固定值與 % 分開選） */
 const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
   2: [
-    { v: 0, label: "不限" }, { v: 8, label: "速度" }, { v: 2, label: "HP%" },
-    { v: 4, label: "攻擊%" }, { v: 6, label: "防禦%" },
+    { v: 0, label: "不限（全部納入）" }, { v: 8, label: "速度" },
+    { v: 1, label: "固定體力" }, { v: 2, label: "體力%" },
+    { v: 3, label: "固定攻擊" }, { v: 4, label: "攻擊%" },
+    { v: 5, label: "固定防禦" }, { v: 6, label: "防禦%" },
   ],
   4: [
-    { v: 0, label: "不限" }, { v: 9, label: "暴擊率" }, { v: 10, label: "暴擊傷害" },
-    { v: 2, label: "HP%" }, { v: 4, label: "攻擊%" }, { v: 6, label: "防禦%" },
+    { v: 0, label: "不限（全部納入）" }, { v: 9, label: "暴擊率" }, { v: 10, label: "暴擊傷害" },
+    { v: 1, label: "固定體力" }, { v: 2, label: "體力%" },
+    { v: 3, label: "固定攻擊" }, { v: 4, label: "攻擊%" },
+    { v: 5, label: "固定防禦" }, { v: 6, label: "防禦%" },
   ],
   6: [
-    { v: 0, label: "不限" }, { v: 2, label: "HP%" }, { v: 4, label: "攻擊%" },
-    { v: 6, label: "防禦%" }, { v: 12, label: "效果命中" }, { v: 11, label: "效果抵抗" },
+    { v: 0, label: "不限（全部納入）" },
+    { v: 1, label: "固定體力" }, { v: 2, label: "體力%" },
+    { v: 3, label: "固定攻擊" }, { v: 4, label: "攻擊%" },
+    { v: 5, label: "固定防禦" }, { v: 6, label: "防禦%" },
+    { v: 12, label: "效果命中" }, { v: 11, label: "效果抵抗" },
   ],
 };
 
@@ -382,7 +389,19 @@ export default function OptimizerPage() {
             </div>
 
             <div className="field">
-              <label>主屬性（可選）</label>
+              <div className="row between">
+                <label>主屬性（可選）</label>
+                {Object.keys(mains).length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    style={{ padding: "1px 7px", fontSize: 10.5 }}
+                    onClick={() => setMains({})}
+                  >
+                    清除篩選
+                  </button>
+                )}
+              </div>
               <div className="grid g3" style={{ gap: 6 }}>
                 {[2, 4, 6].map((slot) => (
                   <select
@@ -403,6 +422,9 @@ export default function OptimizerPage() {
                     ))}
                   </select>
                 ))}
+              </div>
+              <div className="tiny dim" style={{ lineHeight: 1.5 }}>
+                固定值主屬性（例：防禦力 +160）請選「固定…」；選「不限」會納入全部。
               </div>
             </div>
 
