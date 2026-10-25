@@ -5,6 +5,7 @@ import {
   applySetBonuses,
   emptyAccum,
   finalizeStats,
+  tickOf,
   type BaseStats,
   type StatAccum,
 } from "./stats";
@@ -36,6 +37,10 @@ export interface OptRequest {
   targetUnit?: number;
   rta?: boolean;
   maxNodes?: number;
+  /** 指定每個位置的主屬性 type id（2/4/6），0 或未設定代表不限 */
+  mainFilters?: Partial<Record<number, number>>;
+  /** 允許破套：副套裝（2 件）只作優先，不強制剛好 2 件 */
+  relaxSub?: boolean;
 }
 
 export interface Build {
@@ -116,6 +121,18 @@ function runeValue(rune: Rune, w: Record<StatKey, number>): number {
 const FLAT_KEYS = ["flatHp", "flatAtk", "flatDef", "flatSpd", "flatCr", "flatCd", "flatRes", "flatAcc"] as const;
 const PCT_KEYS = ["pctHp", "pctAtk", "pctDef"] as const;
 
+/** 單顆符文提供的速度（含磨石） */
+export function runeSpeed(rune: Rune): number {
+  let v = 0;
+  const add = (t: number, value: number) => {
+    if (t === 7) v += value;
+  };
+  add(rune.main.t, rune.main.v);
+  add(rune.prefix.t, rune.prefix.v);
+  for (const s of rune.subs) add(s.t, s.v + s.g);
+  return v;
+}
+
 interface Cand {
   rune: Rune;
   d: StatAccum;
@@ -137,9 +154,13 @@ export function optimize(req: OptRequest): OptResult {
     targetUnit = 0,
     rta = false,
     maxNodes = 3_500_000,
+    mainFilters = {},
+    relaxSub = false,
   } = req;
 
-  const requiredSets = required.filter((r) => r.count > 0);
+  const allRequired = required.filter((r) => r.count > 0);
+  const requiredSets = relaxSub ? allRequired.filter((r) => r.count >= 4) : allRequired;
+  const softIds = new Set(relaxSub ? allRequired.filter((r) => r.count < 4).map((r) => r.set) : []);
   const requiredIds = new Set(requiredSets.map((r) => r.set));
   const anySet = requiredSets.length === 0;
   const requiredTotal = requiredSets.reduce((s, r) => s + r.count, 0);
@@ -154,26 +175,43 @@ export function optimize(req: OptRequest): OptResult {
 
   // 每個位置候選
   const slots: { slot: number; list: Cand[] }[] = [];
+  const maxCand = Math.min(40, Math.max(pool, 18) + 8);
+  const speedTarget = min.spd ?? 0;
   for (let slot = 1; slot <= 6; slot++) {
     let list = req.runes.filter((r) => r.slot === slot);
+    const mainT = mainFilters[slot] ?? 0;
+    if (mainT) list = list.filter((r) => r.main.t === mainT);
     if (!allowEquipped) list = list.filter((r) => r.occupied === 0 || r.occupied === targetUnit);
     if (strictSets) list = list.filter((r) => requiredIds.has(r.set));
     const scored = list
-      .map((r) => ({ r, v: runeValue(r, w) + r.eff * 0.02 }))
-      .sort((a, b) => b.v - a.v)
-      .map((x) => x.r);
+      .map((r) => ({ r, v: runeValue(r, w) + r.eff * 0.02, spd: runeSpeed(r) }))
+      .sort((a, b) => b.v - a.v);
 
-    let picked: Rune[];
-    if (!anySet && !strictSets && scored.length > pool) {
-      // 保留足夠的指定套裝候選，其餘名額留給其他套裝（例如 4 件主套 + 2 件副套）
-      const perSet = Math.max(4, Math.floor((pool * 0.7) / Math.max(1, requiredIds.size)));
-      const keep = new Set<Rune>();
-      for (const id of requiredIds) for (const r of scored.filter((x) => x.set === id).slice(0, perSet)) keep.add(r);
-      const rest = scored.filter((r) => !keep.has(r)).slice(0, Math.max(0, pool - keep.size));
-      picked = [...keep, ...rest];
+    // 候選不能只看加權分數：保留各指定套裝與最高速符文，
+    // 否則真實帳號（每位置數百顆）可能漏掉唯一能達標的組合。
+    const keep = new Map<number, Rune>();
+    const addTop = (arr: { r: Rune }[], n: number) => {
+      let added = 0;
+      for (const x of arr) {
+        if (added >= n) break;
+        if (keep.has(x.r.id)) continue;
+        keep.set(x.r.id, x.r);
+        added++;
+      }
+    };
+    for (const id of requiredIds) addTop(scored.filter((x) => x.r.set === id), 8);
+    for (const id of softIds) addTop(scored.filter((x) => x.r.set === id), 6);
+    addTop([...scored].sort((a, b) => b.spd - a.spd), 10);
+    addTop(scored, maxCand);
+    const picked = [...keep.values()].slice(0, maxCand);
+    if (speedTarget > 0) {
+      // 先搜尋速度最高的組合，較早找到可行解，後續剪枝才有效
+      const speedOf = new Map(scored.map((x) => [x.r.id, x.spd]));
+      picked.sort((a, b) => (speedOf.get(b.id) ?? 0) - (speedOf.get(a.id) ?? 0));
     } else {
-      picked = scored.slice(0, pool);
+      picked.sort((a, b) => runeValue(b, w) - runeValue(a, w));
     }
+
     slots.push({
       slot,
       list: picked.map((rune) => {
@@ -377,6 +415,57 @@ export function speedNeededForTick(
   const pct = bonus.towerSpd + bonus.leadSpd + bonus.buffSpd;
   const extra = Math.ceil((baseSpd * pct) / 100);
   return { target, runeSpeed: Math.max(0, target - baseSpd - extra), combat: target };
+}
+
+/**
+ * 目前符文「理論上」能達到的最高速度（上界，不考慮其他副屬性下限）。
+ * 用來在配符前就告訴使用者：這個 Tick 是否根本不可能。
+ */
+export function maxSpeedBound(req: {
+  base: BaseStats;
+  runes: Rune[];
+  required: { set: number; count: number }[];
+  bonus: BonusConfig;
+  rta?: boolean;
+  allowEquipped?: boolean;
+  targetUnit?: number;
+  mainFilters?: Partial<Record<number, number>>;
+  relaxSub?: boolean;
+}): { speed: number; tick: number; perSlot: number[]; missingSlots: number[] } {
+  const requiredSets = req.required.filter((r) => (req.relaxSub ? r.count >= 4 : r.count > 0));
+  const strict = requiredSets.length > 0 && requiredSets.reduce((s, r) => s + r.count, 0) >= 6;
+  const ids = new Set(requiredSets.map((r) => r.set));
+  const allowEquipped = req.allowEquipped ?? true;
+  const targetUnit = req.targetUnit ?? 0;
+  const mainFilters = req.mainFilters ?? {};
+
+  let flat = 0;
+  const perSlot: number[] = [];
+  const missingSlots: number[] = [];
+  for (let slot = 1; slot <= 6; slot++) {
+    const mainT = mainFilters[slot] ?? 0;
+    const list = req.runes.filter(
+      (r) =>
+        r.slot === slot &&
+        (!mainT || r.main.t === mainT) &&
+        (!strict || ids.has(r.set)) &&
+        (allowEquipped || r.occupied === 0 || r.occupied === targetUnit),
+    );
+    if (list.length === 0) missingSlots.push(slot);
+    const top = list.reduce((m, r) => Math.max(m, runeSpeed(r)), 0);
+    perSlot.push(top);
+    flat += top;
+  }
+
+  // 速度套裝（迅速）上界：只有可能湊到 4 件時才加
+  let setSpd = 0;
+  const swiftRequired = requiredSets.some((r) => r.set === 3 && r.count >= 4);
+  const canUseSwift = strict ? swiftRequired : true;
+  if (canUseSwift) setSpd = Math.ceil((req.base.spd * 25) / 100);
+
+  const pct = req.bonus.towerSpd + req.bonus.leadSpd + req.bonus.buffSpd;
+  const speed = req.base.spd + Math.ceil((req.base.spd * pct) / 100) + flat + setSpd;
+  return { speed, tick: tickOf(speed, req.rta), perSlot, missingSlots };
 }
 
 export function tickTable(from = 1, to = 20, rta = false): { tick: number; speed: number }[] {

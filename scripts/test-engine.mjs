@@ -30,7 +30,7 @@ if (build.status !== 0) throw new Error("rolldown bundle 失敗");
 
 const engine = await import(`${pathToFileURL(BUNDLE).href}?t=${Date.now()}`);
 const {
-  tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize,
+  tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize, maxSpeedBound,
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS,
 } = engine;
 
@@ -161,6 +161,42 @@ console.log("  · 前三名：");
 for (const [i, b] of result.builds.slice(0, 3).entries()) {
   console.log(`      ${i + 1}. ${b.stats.spd} 速 / Tick ${b.stats.tick} / HP ${b.stats.hp} / EHP ${b.stats.ehp} / 效率 ${b.eff.toFixed(1)}%`);
 }
+
+check("速度上界不低於實際最佳解", () => {
+  const bound = maxSpeedBound(req);
+  assert.ok(bound.speed >= result.builds[0].stats.spd, `上界 ${bound.speed} < 實際 ${result.builds[0].stats.spd}`);
+  assert.ok(bound.speed < speedForTick(3), `上界 ${bound.speed} 不合理（超過 Tick 3）`);
+});
+check("允許破套：只強制主套 4 件", () => {
+  const relaxed = optimize({
+    ...req,
+    required: [{ set: 11, count: 4 }, { set: 13, count: 2 }],
+    relaxSub: true,
+    min: { spd: 286 },
+    objective: "spd",
+    limit: 5,
+  });
+  assert.ok(relaxed.builds.length > 0, "破套模式沒有任何結果");
+  for (const b of relaxed.builds) {
+    assert.ok((b.sets[11] ?? 0) >= 4, "暴走不足 4 件");
+    assert.ok(b.stats.spd >= 286);
+  }
+});
+check("主屬性篩選（#4 HP%、#6 攻擊%）", () => {
+  const filtered = optimize({
+    ...req,
+    required: [],
+    min: { spd: 180 },
+    mainFilters: { 4: 2, 6: 4 },
+    limit: 3,
+  });
+  assert.ok(filtered.builds.length > 0, "主屬性篩選後沒有任何結果");
+  for (const b of filtered.builds) {
+    assert.equal(b.runes[3].main.t, 2, "#4 不是 HP% 主屬性");
+    assert.equal(b.runes[5].main.t, 4, "#6 不是攻擊%主屬性");
+    assert.ok(b.stats.spd >= 180);
+  }
+});
 
 /* ── 5. 出手順序 ─────────────────────────────── */
 console.log("\n[5] 出手順序模擬");

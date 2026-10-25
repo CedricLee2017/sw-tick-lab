@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import {
   UploadCloud, FileJson, Gauge, Wand2, ShieldCheck, Sparkles, BookOpen, ClipboardPaste, Trash2, Zap,
 } from "lucide-react";
-import { useStore } from "../store";
+import { monsterOf, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { Modal, fmt } from "../components/ui";
 import { buildingPct } from "../lib/stats";
@@ -15,6 +15,7 @@ export default function ImportPage() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = async (text: string, name: string) => {
@@ -22,7 +23,37 @@ export default function ImportPage() {
     const res = importText(text, name);
     setBusy(false);
     setWarnings(res.warnings ?? []);
+    setError(res.ok ? null : (res.error ?? "匯入失敗"));
     if (!res.ok) notify(res.error ?? "匯入失敗", "err");
+  };
+
+  const copyDiagnostics = async () => {
+    if (!account) return;
+    const slots: Record<string, number> = {};
+    const sets: Record<string, number> = {};
+    for (const r of account.runes) {
+      slots[r.slot] = (slots[r.slot] ?? 0) + 1;
+      sets[r.set] = (sets[r.set] ?? 0) + 1;
+    }
+    const info = {
+      fileName: account.fileName,
+      version: account.version,
+      units: account.units.length,
+      runes: account.runes.length,
+      artifacts: account.artifacts.length,
+      buildings: account.buildings.length,
+      speedTowerLevel: account.buildings.find((b) => b.id === 7)?.level ?? null,
+      unknownMasters: [...new Set(account.units.filter((u) => !monsterOf(u.master)).map((u) => u.master))].slice(0, 20),
+      slots,
+      sets,
+      warnings,
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(info, null, 2));
+      notify("已複製診斷資訊，可貼給我檢查");
+    } catch {
+      notify("瀏覽器不允許複製，請手動截圖", "err");
+    }
   };
 
   const handleFiles = async (files: FileList | null) => {
@@ -106,11 +137,30 @@ export default function ImportPage() {
         </div>
       </section>
 
+      {error && (
+        <div className="alert err" style={{ marginTop: 14 }}>
+          <div style={{ fontWeight: 700 }}>匯入失敗</div>
+          <div className="tiny" style={{ marginTop: 4 }}>{error}</div>
+        </div>
+      )}
+
       {warnings.length > 0 && (
         <div className="alert warn" style={{ marginTop: 14 }}>
           {warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
         </div>
       )}
+
+      {account && (() => {
+        const unknown = account.units.filter((u) => !monsterOf(u.master));
+        if (unknown.length === 0) return null;
+        const ids = [...new Set(unknown.map((u) => u.master))].slice(0, 8);
+        return (
+          <div className="alert warn" style={{ marginTop: 14 }}>
+            有 {unknown.length} 隻魔靈不在內建圖鑑中（master id：{ids.join("、")}）。
+            配符仍可使用，但這些魔靈不會顯示名稱與圖示；如果是新魔靈，請通知我更新圖鑑。
+          </div>
+        );
+      })()}
 
       {account && (
         <section style={{ marginTop: 22 }}>
@@ -122,6 +172,9 @@ export default function ImportPage() {
               </div>
               <div className="row">
                 <span className="chip green"><ShieldCheck size={12} /> 本機解析</span>
+                <button className="btn btn-sm btn-ghost" onClick={() => void copyDiagnostics()} title="只複製數量與格式資訊，不含符文內容">
+                  <ClipboardPaste size={13} /> 複製診斷
+                </button>
                 <button className="btn btn-sm btn-ghost" onClick={() => { if (confirm("確定要清除已載入的存檔？")) { void clearAccount(); notify("已清除存檔"); } }}>
                   <Trash2 size={13} /> 清除
                 </button>

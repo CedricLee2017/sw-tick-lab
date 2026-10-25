@@ -1,5 +1,6 @@
 /** SWEX / SWOP JSON 解析（寬容格式） */
 import { runeEfficiency } from "./stats";
+import { SET_BY_ID } from "./constants";
 import type { Account, Artifact, Rune, Unit } from "./types";
 
 const num = (v: unknown, d = 0): number => {
@@ -53,32 +54,52 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     return { account: null, error: "檔案不是有效的 JSON，請確認是 SWEX / SWOP 匯出的檔案。", warnings };
   }
 
-  // 允許 { data: {...} } 或 { account: {...} } 包一層
-  const candidates = [root, root?.data, root?.account, root?.player].filter(Boolean);
-  const body = candidates.find((c) => Array.isArray(c.unit_list) || Array.isArray(c.monsters));
+  // 允許 { data: {...} }、{ account: {...} }、{ save: {...} } 等包一層
+  const candidates = [root, root?.data, root?.account, root?.player, root?.save, root?.swop].filter(Boolean);
+  const body = candidates.find(
+    (c) => Array.isArray(c.unit_list) || Array.isArray(c.monsters) || Array.isArray(c.units),
+  );
   if (!body) {
+    const keys = root && typeof root === "object" ? Object.keys(root).slice(0, 8).join("、") : "";
     return {
       account: null,
-      error: "找不到 unit_list（魔靈清單）。請使用 SWEX / SWOP 匯出的 .json 檔案。",
+      error:
+        "找不到魔靈清單（unit_list / monsters / units）。請使用 SWEX / SWOP 匯出的 .json 檔案。" +
+        (keys ? `（偵測到的頂層欄位：${keys}）` : ""),
       warnings,
     };
   }
 
-  const rawUnits: any[] = body.unit_list ?? body.monsters ?? [];
-  const rawRunes: any[] = body.runes ?? body.rune_list ?? [];
+  const rawUnits: any[] = body.unit_list ?? body.monsters ?? body.units ?? [];
+  const rawRunes: any[] = body.runes ?? body.rune_list ?? body.runes_list ?? [];
   if (!Array.isArray(rawRunes) || rawRunes.length === 0) {
     return { account: null, error: "找不到 runes（符文清單），這個檔案可能不完整。", warnings };
   }
 
   const runes: Rune[] = [];
-  for (const r of rawRunes) {
-    if (!r) continue;
+  const seenIds = new Set<number>();
+  const unknownSets = new Set<number>();
+  let skippedRunes = 0;
+  let duplicateRunes = 0;
+  rawRunes.forEach((r: any, index: number) => {
+    if (!r) return;
     const set = num(r.set_id ?? r.set);
     const slot = num(r.slot_no ?? r.slot);
-    if (!set || !slot) continue;
+    if (!set || !slot) {
+      skippedRunes++;
+      return;
+    }
+    let id = num(r.rune_id ?? r.id);
+    if (!id) id = -(index + 1);
+    if (id > 0 && seenIds.has(id)) {
+      duplicateRunes++;
+      return;
+    }
+    if (id > 0) seenIds.add(id);
+    if (!SET_BY_ID[set]) unknownSets.add(set);
     const grade = Math.min(6, Math.max(1, num(r.class ?? r.grade, 6)));
     const rune: Rune = {
-      id: num(r.rune_id ?? r.id),
+      id,
       set,
       slot,
       grade,
@@ -94,6 +115,14 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     };
     rune.eff = runeEfficiency(rune).current;
     runes.push(rune);
+  });
+
+  if (skippedRunes > 0) warnings.push(`略過 ${skippedRunes} 顆缺少套裝或位置的符文。`);
+  if (duplicateRunes > 0) warnings.push(`略過 ${duplicateRunes} 顆重複 ID 的符文。`);
+  if (unknownSets.size > 0) {
+    warnings.push(
+      `未知套裝 ID：${[...unknownSets].slice(0, 8).join("、")}。符文數值仍會計算，但不會套用套裝效果。`,
+    );
   }
 
   const runeMap = new Map(runes.map((r) => [r.id, r]));
@@ -107,11 +136,15 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
   }
 
   const units: Unit[] = [];
+  let skippedUnits = 0;
   for (const u of rawUnits) {
     if (!u) continue;
     const id = num(u.unit_id ?? u.id);
     const master = num(u.unit_master_id ?? u.master_id);
-    if (!master) continue;
+    if (!master) {
+      skippedUnits++;
+      continue;
+    }
     let unitRunes: number[] = Array.isArray(u.rune_ids)
       ? u.rune_ids.map((x: unknown) => num(x)).filter(Boolean)
       : Array.isArray(u.runes)
@@ -155,6 +188,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     }))
     .filter((b: any) => b.id > 0);
 
+  if (skippedUnits > 0) warnings.push(`略過 ${skippedUnits} 筆缺少 unit_master_id 的魔靈資料。`);
   if (units.length === 0) warnings.push("檔案中沒有任何魔靈。");
   if (buildings.length === 0) warnings.push("找不到建築資料，速度圖騰預設為 15%。");
 

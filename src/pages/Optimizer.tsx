@@ -6,12 +6,28 @@ import { useStore, monsterLabel } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { MonsterPicker, MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statText } from "../components/ui";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
-import { OBJECTIVE_LABEL, type Build, type Objective, type OptRequest, type OptResult, scoreOf, speedNeededForTick } from "../lib/optimizer";
+import { OBJECTIVE_LABEL, type Build, type Objective, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick } from "../lib/optimizer";
 import { baseStats, setSummary } from "../lib/stats";
 import type { Monster, Rune } from "../lib/types";
 
 const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
 const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2);
+
+/** 2/4/6 號位可選主屬性（type id 對應 SWEX） */
+const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
+  2: [
+    { v: 0, label: "不限" }, { v: 7, label: "速度" }, { v: 2, label: "HP%" },
+    { v: 4, label: "攻擊%" }, { v: 6, label: "防禦%" },
+  ],
+  4: [
+    { v: 0, label: "不限" }, { v: 8, label: "暴擊率" }, { v: 9, label: "暴擊傷害" },
+    { v: 2, label: "HP%" }, { v: 4, label: "攻擊%" }, { v: 6, label: "防禦%" },
+  ],
+  6: [
+    { v: 0, label: "不限" }, { v: 2, label: "HP%" }, { v: 4, label: "攻擊%" },
+    { v: 6, label: "防禦%" }, { v: 11, label: "效果命中" }, { v: 10, label: "效果抵抗" },
+  ],
+};
 
 export default function OptimizerPage() {
   const account = useStore((s) => s.account);
@@ -35,6 +51,8 @@ export default function OptimizerPage() {
   const [allowEquipped, setAllowEquipped] = useState(true);
   const [pool, setPool] = useState(settings.pool);
   const [limit, setLimit] = useState(15);
+  const [mains, setMains] = useState<Partial<Record<number, number>>>({});
+  const [relaxSub, setRelaxSub] = useState(false);
 
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<OptResult | null>(null);
@@ -44,10 +62,41 @@ export default function OptimizerPage() {
 
   const workerRef = useRef<Worker | null>(null);
   const runId = useRef(0);
+  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    workerRef.current = new Worker(new URL("../lib/optimizer.worker.ts", import.meta.url), { type: "module" });
-    return () => workerRef.current?.terminate();
+    const clearTimer = () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("../lib/optimizer.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      setError("瀏覽器無法啟動配符運算模組，請重新整理頁面或改用 Chrome / Edge。");
+      return;
+    }
+    worker.onerror = (e) => {
+      console.error("optimizer worker error", e);
+      clearTimer();
+      setRunning(false);
+      setError("配符運算模組載入失敗（可能是網站剛更新，舊頁面找不到新檔案）。請重新整理頁面再試一次。");
+      worker.terminate();
+      if (workerRef.current === worker) workerRef.current = null;
+    };
+    worker.onmessageerror = () => {
+      clearTimer();
+      setRunning(false);
+      setError("配符運算資料傳輸失敗，請重新整理頁面再試一次。");
+    };
+    workerRef.current = worker;
+    return () => {
+      clearTimer();
+      worker.terminate();
+      if (workerRef.current === worker) workerRef.current = null;
+    };
   }, []);
 
   // 從速度實驗室帶入
@@ -81,10 +130,32 @@ export default function OptimizerPage() {
     return r;
   }, [mainSet, subSet]);
 
+  const bound = useMemo(
+    () =>
+      maxSpeedBound({
+        base,
+        runes: account?.runes ?? [],
+        required,
+        bonus,
+        rta,
+        allowEquipped,
+        targetUnit: boxMonster?.unit.id ?? 0,
+        mainFilters: mains,
+        relaxSub,
+      }),
+    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, relaxSub],
+  );
+
   const run = () => {
     if (!account) return;
     if (!monsterId) return notify("請先選擇魔靈", "err");
-    if (!workerRef.current) return;
+    if (!workerRef.current) return notify("配符運算模組未就緒，請重新整理頁面再試", "err");
+    if (targetSpeed > 0 && bound.speed < targetSpeed) {
+      return notify(
+        `目前符文即使全選最高速也只有約 ${bound.speed} 速（Tick ${bound.tick}），無法達到 ${targetSpeed} 速。請降低 Tick、放寬套裝或主屬性。`,
+        "err",
+      );
+    }
     setRunning(true);
     setError(null);
     setResult(null);
@@ -105,13 +176,19 @@ export default function OptimizerPage() {
       allowEquipped,
       targetUnit: boxMonster?.unit.id ?? 0,
       rta,
-      maxNodes: 3_500_000,
+      maxNodes: 4_000_000,
+      mainFilters: mains,
+      relaxSub,
     };
     const id = ++runId.current;
     const t0 = performance.now();
     const w = workerRef.current;
     const onMsg = (e: MessageEvent<{ id: number; res?: OptResult; error?: string }>) => {
       if (e.data.id !== id) return;
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
       w.removeEventListener("message", onMsg);
       setRunning(false);
       if (e.data.error) setError(e.data.error);
@@ -122,7 +199,20 @@ export default function OptimizerPage() {
       }
     };
     w.addEventListener("message", onMsg);
-    w.postMessage({ id, req });
+    timerRef.current = window.setTimeout(() => {
+      w.removeEventListener("message", onMsg);
+      setRunning(false);
+      setError("配符運算超過 30 秒，已停止。請降低候選符文數、減少條件，或重新整理頁面再試。");
+    }, 30_000);
+    try {
+      w.postMessage({ id, req });
+    } catch (err) {
+      w.removeEventListener("message", onMsg);
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+      setRunning(false);
+      setError(`無法啟動配符運算：${String(err)}`);
+    }
   };
 
   // 顯示目前裝備
@@ -168,6 +258,38 @@ export default function OptimizerPage() {
               </div>
             </div>
 
+            <div className="field">
+              <label>主屬性（可選）</label>
+              <div className="grid g3" style={{ gap: 6 }}>
+                {[2, 4, 6].map((slot) => (
+                  <select
+                    key={slot}
+                    className="select"
+                    value={mains[slot] ?? 0}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setMains((m) => {
+                        const next = { ...m };
+                        if (v) next[slot] = v; else delete next[slot];
+                        return next;
+                      });
+                    }}
+                  >
+                    {MAIN_OPTIONS[slot].map((o) => (
+                      <option key={o.v} value={o.v}>#{slot} {o.label}</option>
+                    ))}
+                  </select>
+                ))}
+              </div>
+            </div>
+
+            {subSet > 0 && (
+              <label className="row tiny" style={{ gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={relaxSub} onChange={(e) => setRelaxSub(e.target.checked)} />
+                允許破套：副套裝只作優先，不強制剛好 2 件
+              </label>
+            )}
+
             <div className="divider" />
 
             <div className="tabs" style={{ width: "100%" }}>
@@ -187,10 +309,41 @@ export default function OptimizerPage() {
                   <div className="kv"><span className="k">目標總速度</span><span className="v mono gold">{tickNeed.target}</span></div>
                   <div className="kv"><span className="k">建築+隊長+Buff</span><span className="v mono">+{Math.ceil((base.spd * (bonus.towerSpd + bonus.leadSpd + bonus.buffSpd)) / 100)}</span></div>
                   <div className="kv"><span className="k">符文至少需要</span><span className="v mono gold">{tickNeed.runeSpeed} 速</span></div>
+                  <div className="kv">
+                    <span className="k">目前符文上限</span>
+                    <span className={`v mono ${bound.speed < tickNeed.target ? "red" : "green"}`}>
+                      {bound.speed} 速 · T{bound.tick}
+                    </span>
+                  </div>
                 </div>
+                {bound.speed < tickNeed.target && (
+                  <div className="alert warn" style={{ padding: "8px 10px", fontSize: 11.5 }}>
+                    <div>
+                      以目前符文與套裝，最高約 {bound.speed} 速，無法達到 Tick {tick}（{tickNeed.target} 速）。
+                      {bound.missingSlots.length > 0 && ` 位置 ${bound.missingSlots.join("、")} 沒有可用符文。`}
+                    </div>
+                    <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                      <button className="btn btn-sm btn-ghost" onClick={() => setTick(bound.tick)}>
+                        改用 Tick {bound.tick}
+                      </button>
+                      {(mainSet > 0 || subSet > 0) && (
+                        <button className="btn btn-sm btn-ghost" onClick={() => { setMainSet(0); setSubSet(0); }}>
+                          清除套裝限制
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
-              <NumberField label="最低面板速度" value={speedTarget} min={0} max={500} onChange={setSpeedTarget} />
+              <NumberField
+                label="最低面板速度"
+                value={speedTarget}
+                min={0}
+                max={500}
+                onChange={setSpeedTarget}
+                hint={`目前符文上限 ${bound.speed} 速（Tick ${bound.tick}）`}
+              />
             )}
 
             <div className="grid g2">
@@ -245,7 +398,14 @@ export default function OptimizerPage() {
         {/* ── 結果 ── */}
         <div className="col" style={{ gap: 14 }}>
           {!account && <div className="alert warn">請先匯入存檔。</div>}
-          {error && <div className="alert err">{error}</div>}
+          {error && (
+            <div className="alert err">
+              <div>{error}</div>
+              <button className="btn btn-sm btn-ghost" style={{ marginTop: 8 }} onClick={() => location.reload()}>
+                重新載入頁面
+              </button>
+            </div>
+          )}
 
           {result && (
             <div className="card card-pad">
@@ -260,12 +420,21 @@ export default function OptimizerPage() {
                 <div className="row" style={{ gap: 6 }}>
                   {required.length > 0 && required.map((r) => (
                     <span key={r.set} className="chip" style={{ borderColor: setColor(r.set) + "55", color: setColor(r.set) }}>
-                      {SET_BY_ID[r.set]?.name} ×{r.count}
+                      {SET_BY_ID[r.set]?.name} ×{r.count}{relaxSub && r.count < 4 ? "（優先）" : ""}
                     </span>
                   ))}
                   <span className="chip gold">≥ {targetSpeed} 速</span>
                 </div>
               </div>
+              {result.builds.length === 0 && (
+                <div className="alert warn" style={{ marginTop: 10 }}>
+                  <div>找不到符合條件的配裝。</div>
+                  <div className="tiny" style={{ marginTop: 4 }}>
+                    目前符文上限約 {bound.speed} 速（Tick {bound.tick}）；候選 {fmt(result.candidates)} 顆。
+                    可嘗試：降低 Tick、把套裝改成「不限」、放寬主屬性/其他下限，或把候選符文數調高。
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
