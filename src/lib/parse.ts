@@ -25,12 +25,13 @@ function list(v: unknown): any[] {
 const isList = (v: unknown): boolean => Array.isArray(v) || (!!v && typeof v === "object");
 
 const STAT_NAME: Record<string, number> = {
-  hp: 1, "hp%": 2, atk: 3, "atk%": 4, def: 5, "def%": 6, spd: 7, speed: 7,
-  cr: 8, crate: 8, critrate: 8, "crit rate": 8, cd: 9, cdmg: 9, critdmg: 9,
-  "crit dmg": 9, "crit damage": 9, res: 10, resistance: 10, acc: 11, accuracy: 11,
+  hp: 1, "hp%": 2, atk: 3, "atk%": 4, def: 5, "def%": 6,
+  spd: 8, speed: 8, cr: 9, crate: 9, critrate: 9, "crit rate": 9,
+  cd: 10, cdmg: 10, critdmg: 10, "crit dmg": 10, "crit damage": 10,
+  res: 11, resistance: 11, acc: 12, accuracy: 12,
 };
 
-/** 屬性 type：數字 id、或 SWOP 常見的英文字串 */
+/** 屬性 type：數字 id、或 SWOP 常見的英文字串（對應 sw-exporter mapping.js） */
 function typeOf(v: unknown): number {
   const n = num(v);
   if (n) return n;
@@ -115,6 +116,9 @@ export interface ParseResult {
   warnings: string[];
 }
 
+/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級 */
+export const PARSE_VERSION = 2;
+
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
   let root: any;
@@ -139,32 +143,55 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
 
   const rawUnits: any[] = list(body.unit_list ?? body.monsters ?? body.units);
   const rawRunes: any[] = list(body.runes ?? body.rune_list ?? body.runes_list);
-  if (rawRunes.length === 0) {
+
+  // SWEX v1.1.0 的裝備中符文只會出現在 unit_list[].runes（top-level 只有未裝備符文），
+  // 因此兩邊都要收集，並以 rune_id 去重。owner 用來補上 occupied_id（部分格式為 0）。
+  const runeSources: { r: any; owner: number }[] = [];
+  for (const r of rawRunes) runeSources.push({ r, owner: 0 });
+  let nestedRunes = 0;
+  for (const u of rawUnits) {
+    if (!u || typeof u !== "object") continue;
+    const uid = num(u.unit_id ?? u.id);
+    for (const r of list(u.runes)) {
+      if (!r || typeof r !== "object") continue;
+      if (!num(r.rune_id ?? r.id)) continue;
+      runeSources.push({ r, owner: uid });
+      nestedRunes++;
+    }
+  }
+  if (runeSources.length === 0) {
     return { account: null, error: "找不到 runes（符文清單），這個檔案可能不完整。", warnings };
   }
 
   const runes: Rune[] = [];
+  const idToRune = new Map<number, Rune>();
   const seenIds = new Set<number>();
   const unknownSets = new Set<number>();
   let skippedRunes = 0;
   let duplicateRunes = 0;
-  rawRunes.forEach((r: any, index: number) => {
-    if (!r) return;
+  for (const { r, owner } of runeSources) {
+    if (!r) continue;
     const set = setOf(r.set_id ?? r.set ?? r.setName ?? r.set_name);
     const slot = num(r.slot_no ?? r.slot);
     if (!set || !slot) {
       skippedRunes++;
-      return;
+      continue;
     }
     let id = num(r.rune_id ?? r.id);
-    if (!id) id = -(index + 1);
+    if (!id) id = -(runes.length + skippedRunes + 1);
     if (id > 0 && seenIds.has(id)) {
       duplicateRunes++;
-      return;
+      const existing = idToRune.get(id);
+      if (existing && owner && !existing.occupied) existing.occupied = owner;
+      continue;
     }
     if (id > 0) seenIds.add(id);
     if (!SET_BY_ID[set]) unknownSets.add(set);
-    const grade = Math.min(6, Math.max(1, num(r.class ?? r.grade ?? r.stars, 6)));
+    // 遠古符文：class / rank 會 +10（例如 class 16 = 遠古 6★、rank 15 = 遠古傳說）
+    const rawClass = num(r.class ?? r.stars ?? r.grade, 6);
+    const rawRank = num(r.rank, 0);
+    const ancient = truthy(r.ancient) || rawClass > 10 || rawRank > 10;
+    const grade = Math.min(6, Math.max(1, rawClass > 10 ? rawClass - 10 : rawClass));
     const rune: Rune = {
       id,
       set,
@@ -174,16 +201,21 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       main: pair(r.pri_eff ?? r.main ?? r.mainStat),
       prefix: pair(r.prefix_eff ?? r.prefix),
       subs: subs(r.sec_eff ?? r.subs ?? r.substats),
-      occupied: num(r.occupied_id ?? r.occupied ?? r.equippedBy ?? r.equipped_by),
-      ancient: truthy(r.ancient),
+      occupied: num(r.occupied_id ?? r.occupied ?? r.equippedBy ?? r.equipped_by) || owner,
+      ancient,
       locked: truthy(r.locked),
       eff: 0,
       effMax: 100,
     };
     rune.eff = runeEfficiency(rune).current;
     runes.push(rune);
-  });
+    if (id > 0) idToRune.set(id, rune);
+  }
 
+  if (nestedRunes > 0) {
+    // 只作為除錯資訊，不影響使用
+    warnings.push(`已從魔靈身上補齊裝備中的符文 ${nestedRunes} 顆（總計 ${runes.length} 顆）。`);
+  }
   if (skippedRunes > 0) warnings.push(`略過 ${skippedRunes} 顆缺少套裝或位置的符文。`);
   if (duplicateRunes > 0) warnings.push(`略過 ${duplicateRunes} 顆重複 ID 的符文。`);
   if (unknownSets.size > 0) {
@@ -248,16 +280,32 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     level: Math.min(15, num(a.level, 0)),
   }));
 
-  const buildings = list(body.building_list ?? body.buildings)
-    .map((b: any) => ({
-      id: num(b.building_master_id ?? b.master_id ?? b.id),
-      level: num(b.building_level ?? b.level),
-    }))
-    .filter((b: any) => b.id > 0);
+  const rawBuildings = list(body.building_list ?? body.buildings).filter(
+    (b: any) => b && typeof b === "object" && num(b.building_master_id ?? b.master_id ?? b.id) > 0,
+  );
+  // SWEX v1.1.0 的 building_list 只有位置，沒有等級；此時不可把圖騰加成覆蓋成 0%。
+  const levelsKnown = rawBuildings.some(
+    (b: any) => b.building_level !== undefined || b.level !== undefined,
+  );
+  const buildings = levelsKnown
+    ? rawBuildings
+        .map((b: any) => ({
+          id: num(b.building_master_id ?? b.master_id ?? b.id),
+          level: num(b.building_level ?? b.level),
+        }))
+        .filter((b: any) => b.id > 0)
+    : [];
 
   if (skippedUnits > 0) warnings.push(`略過 ${skippedUnits} 筆缺少 unit_master_id 的魔靈資料。`);
   if (units.length === 0) warnings.push("檔案中沒有任何魔靈。");
-  if (buildings.length === 0) warnings.push("找不到建築資料，速度圖騰預設為 15%。");
+  if (rawBuildings.length > 0 && !levelsKnown) {
+    warnings.push(
+      `此匯出檔的 ${rawBuildings.length} 筆建築資料沒有等級欄位，無法自動套用圖騰。` +
+        "速度圖騰暫用預設 15%，請到「設定」確認實際等級。",
+    );
+  } else if (rawBuildings.length === 0) {
+    warnings.push("找不到建築資料，速度圖騰預設為 15%。");
+  }
 
   const wizard = body.wizard_info?.wizard_name ?? body.wizard_info?.wizard_id ?? "";
   const version = body.unit_list ? (body.runes?.[0]?.ancient !== undefined ? "SWEX / SWOP" : "SWEX") : "未知";
@@ -266,6 +314,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     account: {
       fileName,
       importedAt: Date.now(),
+      parseVersion: PARSE_VERSION,
       wizard: String(wizard ?? ""),
       units,
       runes,

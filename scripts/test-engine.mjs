@@ -141,12 +141,57 @@ check("容忍多層包裝 / 物件索引 / 字串屬性", () => {
   assert.deepEqual(p.account.units[0].runes, [101]);
   assert.equal(p.account.runes.length, 1);
   assert.equal(p.account.runes[0].set, 3);
-  assert.equal(p.account.runes[0].main.t, 7);
+  assert.equal(p.account.runes[0].main.t, 8);
   assert.equal(p.account.runes[0].main.v, 42);
   assert.equal(p.account.runes[0].prefix.t, 2);
-  assert.equal(p.account.runes[0].subs[0].t, 8);
+  assert.equal(p.account.runes[0].subs[0].t, 9);
   assert.equal(p.account.runes[0].subs[1].g, 2);
   assert.deepEqual(p.account.buildings, [{ id: 7, level: 15 }]);
+});
+
+check("SWEX v1.1.0：合併裝備符文、遠古 class/rank、無建築等級", () => {
+  const raw = {
+    unit_list: [
+      {
+        unit_id: 501,
+        unit_master_id: 17012,
+        class: 6,
+        unit_level: 40,
+        runes: [
+          {
+            rune_id: 9001, occupied_id: 501, slot_no: 2, set_id: 13, class: 6, rank: 5, upgrade_curr: 15,
+            pri_eff: [8, 42], prefix_eff: [0, 0], sec_eff: [[8, 10, 4, 0], [12, 8, 0, 0]],
+          },
+          {
+            rune_id: 9002, occupied_id: 501, slot_no: 6, set_id: 15, class: 16, rank: 15, upgrade_curr: 15,
+            pri_eff: [12, 48], prefix_eff: [11, 6], sec_eff: [],
+          },
+        ],
+      },
+    ],
+    runes: [
+      {
+        rune_id: 9003, occupied_id: 0, slot_no: 4, set_id: 13, class: 6, rank: 5, upgrade_curr: 15,
+        pri_eff: [9, 58], prefix_eff: [0, 0], sec_eff: [[8, 5, 0, 0]],
+      },
+    ],
+    building_list: [{ building_master_id: 7, building_id: 1 }, { building_master_id: 9, building_id: 2 }],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "swex.json");
+  assert.equal(p.error, undefined, p.error);
+  assert.equal(p.account.runes.length, 3, "裝備中的符文沒有被合併");
+  assert.deepEqual(p.account.units[0].runes, [9001, 9002]);
+  const r1 = p.account.runes.find((r) => r.id === 9001);
+  assert.equal(r1.main.t, 8);
+  assert.equal(r1.subs[0].t, 8);
+  assert.equal(r1.subs[1].t, 12);
+  assert.equal(r1.set, 13);
+  const r2 = p.account.runes.find((r) => r.id === 9002);
+  assert.equal(r2.grade, 6, "遠古符文星級應為 class - 10");
+  assert.equal(r2.ancient, true);
+  assert.equal(r2.occupied, 501);
+  assert.equal(p.account.buildings.length, 0, "沒有等級時不應假造 0 等建築");
+  assert.ok(p.warnings.some((w) => w.includes("沒有等級欄位")), "應提示建築沒有等級");
 });
 
 /* ── 4. 一鍵配符 ─────────────────────────────── */
@@ -158,7 +203,7 @@ const bonus = bonusFromBuildings(account.buildings, { leadSpd: 28 });
 const req = {
   base,
   runes: account.runes,
-  required: [{ set: 3, count: 4 }, { set: 13, count: 2 }],
+  required: [{ set: 3, count: 4 }, { set: 15, count: 2 }],
   min: { spd: 286 },
   max: {},
   objective: "spd",
@@ -184,7 +229,7 @@ for (const [i, b] of result.builds.entries()) {
     assert.ok(b.stats.tick <= 5, `Tick 為 ${b.stats.tick}`);
     assert.equal(b.runes.filter(Boolean).length, 6);
     assert.ok((b.sets[3] ?? 0) >= 4, "迅速不足 4 件");
-    assert.ok((b.sets[13] ?? 0) >= 2, "意志不足 2 件");
+    assert.ok((b.sets[15] ?? 0) >= 2, "意志不足 2 件");
     const slots = b.runes.filter(Boolean).map((r) => r.slot).sort();
     assert.deepEqual(slots, [1, 2, 3, 4, 5, 6], "位置重複或缺漏");
   });
@@ -203,7 +248,7 @@ check("速度上界不低於實際最佳解", () => {
 check("允許破套：只強制主套 4 件", () => {
   const relaxed = optimize({
     ...req,
-    required: [{ set: 11, count: 4 }, { set: 13, count: 2 }],
+    required: [{ set: 13, count: 4 }, { set: 15, count: 2 }],
     relaxSub: true,
     min: { spd: 286 },
     objective: "spd",
@@ -211,7 +256,7 @@ check("允許破套：只強制主套 4 件", () => {
   });
   assert.ok(relaxed.builds.length > 0, "破套模式沒有任何結果");
   for (const b of relaxed.builds) {
-    assert.ok((b.sets[11] ?? 0) >= 4, "暴走不足 4 件");
+    assert.ok((b.sets[13] ?? 0) >= 4, "暴走不足 4 件");
     assert.ok(b.stats.spd >= 286);
   }
 });

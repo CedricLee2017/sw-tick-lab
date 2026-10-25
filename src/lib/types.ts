@@ -65,6 +65,8 @@ export interface Unit {
 export interface Account {
   fileName: string;
   importedAt: number;
+  /** 解析規則版本；舊快取會在新版載入時要求重新匯入 */
+  parseVersion?: number;
   wizard: string;
   units: Unit[];
   runes: Rune[];

@@ -42,8 +42,8 @@ export default function RunesPage() {
       if (sort === "eff") return b.eff - a.eff;
       if (sort === "grade") return b.grade - a.grade || b.eff - a.eff;
       if (sort === "slot") return a.slot - b.slot || b.eff - a.eff;
-      const sa = a.subs.find((s) => s.t === 7)?.v ?? 0;
-      const sb = b.subs.find((s) => s.t === 7)?.v ?? 0;
+      const sa = a.subs.find((s) => s.t === 8)?.v ?? 0;
+      const sb = b.subs.find((s) => s.t === 8)?.v ?? 0;
       return sb - sa || b.eff - a.eff;
     });
     return arr;

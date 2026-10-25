@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { del, get, set } from "idb-keyval";
 import monstersJson from "./data/monsters.json";
-import { parseAccountJSON } from "./lib/parse";
+import { PARSE_VERSION, parseAccountJSON } from "./lib/parse";
 import { bonusFromBuildings, defaultBonus } from "./lib/stats";
 import type { Account, BonusConfig, Monster, Rune, Stats } from "./lib/types";
 
@@ -73,11 +73,15 @@ export const useStore = create<Store>((setState, getState) => ({
 
   hydrate: async () => {
     try {
-      const [acc, settings, loadouts] = await Promise.all([
+      const [stored, settings, loadouts] = await Promise.all([
         get<Account>(ACCOUNT_KEY),
         get<Settings>(SETTINGS_KEY),
         get<Loadout[]>(LOADOUT_KEY),
       ]);
+      // 舊版解析（stat/set ID 錯位、漏掉裝備符文）不可沿用，要求重新匯入
+      const stale = !!stored && stored.parseVersion !== PARSE_VERSION;
+      if (stale) await del(ACCOUNT_KEY);
+      const acc = stale ? null : stored;
       setState({
         ready: true,
         account: acc ?? null,
@@ -85,6 +89,7 @@ export const useStore = create<Store>((setState, getState) => ({
         settings: settings ?? { bonus: defaultBonus(), rta: false, pool: 18 },
         loadouts: loadouts ?? [],
       });
+      if (stale) getState().notify("解析規則已更新，請重新匯入 SWEX 存檔");
     } catch {
       setState({ ready: true });
     }
@@ -93,11 +98,11 @@ export const useStore = create<Store>((setState, getState) => ({
   importText: (text, fileName) => {
     const { account, error, warnings } = parseAccountJSON(text, fileName);
     if (!account) return { ok: false, error, warnings };
-    // 自動套用存檔中的建築等級（沒有建築資料時保留目前設定）
+    // 自動套用存檔中的建築等級；若匯出檔沒有建築等級，保留目前設定（0 時回到預設 15%）
     const prev = getState().settings;
     const settings: Settings = account.buildings.length > 0
       ? { ...prev, bonus: bonusFromBuildings(account.buildings, prev.bonus) }
-      : prev;
+      : { ...prev, bonus: { ...prev.bonus, towerSpd: prev.bonus.towerSpd || 15 } };
     setState({
       account,
       runeMap: new Map(account.runes.map((r) => [r.id, r])),
@@ -108,7 +113,9 @@ export const useStore = create<Store>((setState, getState) => ({
     const speedTower = account.buildings.find((b) => b.id === 7);
     getState().notify(
       `已載入 ${account.units.length} 隻魔靈 / ${account.runes.length} 顆符文` +
-        (speedTower ? ` · 速度圖騰 ${settings.bonus.towerSpd}%` : ""),
+        (speedTower
+          ? ` · 速度圖騰 ${settings.bonus.towerSpd}%`
+          : ` · 建築等級未提供，速度圖騰沿用 ${settings.bonus.towerSpd}%`),
     );
     return { ok: true, warnings };
   },

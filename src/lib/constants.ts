@@ -15,7 +15,11 @@ export const STAT_META: Record<StatKey, { label: string; short: string; suffix: 
   acc: { label: "效果命中", short: "ACC", suffix: "%", max: 100 },
 };
 
-/** 符文屬性 type id（SWEX / SWOP 格式） */
+/**
+ * 符文屬性 type id（SWEX / SWOP 格式，對應 sw-exporter app/mapping.js）
+ * 1~6 = 三圍固定值/百分比，8 = 速度，9 = 暴擊率，10 = 暴擊傷害，11 = 抵抗，12 = 命中。
+ * 7 在官方對應表中不存在（舊版本曾誤用為速度），因此不再解析。
+ */
 export const STAT_TYPES: Record<number, { key: StatKey; pct: boolean; label: string }> = {
   1: { key: "hp", pct: false, label: "體力" },
   2: { key: "hp", pct: true, label: "體力%" },
@@ -23,12 +27,15 @@ export const STAT_TYPES: Record<number, { key: StatKey; pct: boolean; label: str
   4: { key: "atk", pct: true, label: "攻擊力%" },
   5: { key: "def", pct: false, label: "防禦力" },
   6: { key: "def", pct: true, label: "防禦力%" },
-  7: { key: "spd", pct: false, label: "速度" },
-  8: { key: "cr", pct: false, label: "暴擊率" },
-  9: { key: "cd", pct: false, label: "暴擊傷害" },
-  10: { key: "res", pct: false, label: "效果抵抗" },
-  11: { key: "acc", pct: false, label: "效果命中" },
+  8: { key: "spd", pct: false, label: "速度" },
+  9: { key: "cr", pct: false, label: "暴擊率" },
+  10: { key: "cd", pct: false, label: "暴擊傷害" },
+  11: { key: "res", pct: false, label: "效果抵抗" },
+  12: { key: "acc", pct: false, label: "效果命中" },
 };
+
+/** 速度的 stat type id（集中定義，避免各處寫死） */
+export const SPD_TYPE = 8;
 
 export interface RuneSetDef {
   id: number;
@@ -40,7 +47,10 @@ export interface RuneSetDef {
   note?: string;
 }
 
-/** 套裝效果（id 對應遊戲 set_id） */
+/**
+ * 套裝效果（set_id 對應 sw-exporter app/mapping.js）
+ * 注意：9 與 12 不是有效套裝；暴走 = 13、意志 = 15（舊版常數曾经整體偏移）。
+ */
 export const RUNE_SETS: RuneSetDef[] = [
   { id: 1, name: "能量", en: "Energy", pieces: 2, stat: "hp", value: 15 },
   { id: 2, name: "守護", en: "Guard", pieces: 2, stat: "def", value: 15 },
@@ -50,21 +60,22 @@ export const RUNE_SETS: RuneSetDef[] = [
   { id: 6, name: "集中", en: "Focus", pieces: 2, stat: "acc", value: 20 },
   { id: 7, name: "忍耐", en: "Endure", pieces: 2, stat: "res", value: 20 },
   { id: 8, name: "猛攻", en: "Fatal", pieces: 4, stat: "atk", value: 35 },
-  { id: 9, name: "絕望", en: "Despair", pieces: 4, note: "技能攻擊 25% 機率暈眩" },
-  { id: 10, name: "吸血", en: "Vampire", pieces: 4, note: "造成傷害 35% 轉為回復" },
-  { id: 11, name: "暴走", en: "Violent", pieces: 4, note: "每回合 22% 機率追加回合" },
-  { id: 12, name: "反擊", en: "Nemesis", pieces: 2, note: "被攻擊時依傷害提升攻速條" },
-  { id: 13, name: "意志", en: "Will", pieces: 2, note: "開場免疫負面效果 1 回合" },
-  { id: 14, name: "保護", en: "Shield", pieces: 2, note: "開場獲得 15% 體力護盾" },
-  { id: 15, name: "復仇", en: "Revenge", pieces: 2, note: "15% 機率反擊" },
-  { id: 16, name: "破壞", en: "Destroy", pieces: 2, note: "攻擊時破壞敵方體力上限" },
-  { id: 17, name: "鬥志", en: "Fight", pieces: 2, stat: "atk", value: 8 },
-  { id: 18, name: "決心", en: "Determination", pieces: 2, stat: "def", value: 8 },
-  { id: 19, name: "強化", en: "Enhance", pieces: 2, stat: "hp", value: 8 },
-  { id: 20, name: "命中", en: "Accuracy", pieces: 2, stat: "acc", value: 10 },
-  { id: 21, name: "寬容", en: "Tolerance", pieces: 2, stat: "res", value: 10 },
-  { id: 22, name: "封印", en: "Seal", pieces: 2, note: "攻擊時降低敵方效果命中" },
-  { id: 23, name: "無形", en: "Intangible", pieces: 99, note: "二覺專用" },
+  { id: 10, name: "絕望", en: "Despair", pieces: 4, note: "技能攻擊 25% 機率暈眩" },
+  { id: 11, name: "吸血", en: "Vampire", pieces: 4, note: "造成傷害 35% 轉為回復" },
+  { id: 13, name: "暴走", en: "Violent", pieces: 4, note: "每回合 22% 機率追加回合" },
+  { id: 14, name: "反擊", en: "Nemesis", pieces: 2, note: "被攻擊時依傷害提升攻速條" },
+  { id: 15, name: "意志", en: "Will", pieces: 2, note: "開場免疫負面效果 1 回合" },
+  { id: 16, name: "保護", en: "Shield", pieces: 2, note: "開場獲得 15% 體力護盾" },
+  { id: 17, name: "復仇", en: "Revenge", pieces: 2, note: "15% 機率反擊" },
+  { id: 18, name: "破壞", en: "Destroy", pieces: 2, note: "攻擊時破壞敵方體力上限" },
+  { id: 19, name: "鬥志", en: "Fight", pieces: 2, stat: "atk", value: 8 },
+  { id: 20, name: "決心", en: "Determination", pieces: 2, stat: "def", value: 8 },
+  { id: 21, name: "強化", en: "Enhance", pieces: 2, stat: "hp", value: 8 },
+  { id: 22, name: "命中", en: "Accuracy", pieces: 2, stat: "acc", value: 10 },
+  { id: 23, name: "寬容", en: "Tolerance", pieces: 2, stat: "res", value: 10 },
+  { id: 24, name: "封印", en: "Seal", pieces: 2, note: "攻擊時 15% 機率封印 1 回合，暫時關閉對方套裝效果" },
+  { id: 25, name: "無形", en: "Intangible", pieces: 2, note: "可補足 1 件缺失的套裝（每個魔靈限 1 顆）" },
+  { id: 99, name: "遠古", en: "Immemorial", pieces: 99, note: "遠古符文標記，不列入套裝效果計算" },
 ];
 
 export const SET_BY_ID: Record<number, RuneSetDef> = Object.fromEntries(RUNE_SETS.map((s) => [s.id, s]));

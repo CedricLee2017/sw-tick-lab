@@ -16,16 +16,16 @@ const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2);
 /** 2/4/6 號位可選主屬性（type id 對應 SWEX） */
 const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
   2: [
-    { v: 0, label: "不限" }, { v: 7, label: "速度" }, { v: 2, label: "HP%" },
+    { v: 0, label: "不限" }, { v: 8, label: "速度" }, { v: 2, label: "HP%" },
     { v: 4, label: "攻擊%" }, { v: 6, label: "防禦%" },
   ],
   4: [
-    { v: 0, label: "不限" }, { v: 8, label: "暴擊率" }, { v: 9, label: "暴擊傷害" },
+    { v: 0, label: "不限" }, { v: 9, label: "暴擊率" }, { v: 10, label: "暴擊傷害" },
     { v: 2, label: "HP%" }, { v: 4, label: "攻擊%" }, { v: 6, label: "防禦%" },
   ],
   6: [
     { v: 0, label: "不限" }, { v: 2, label: "HP%" }, { v: 4, label: "攻擊%" },
-    { v: 6, label: "防禦%" }, { v: 11, label: "效果命中" }, { v: 10, label: "效果抵抗" },
+    { v: 6, label: "防禦%" }, { v: 12, label: "效果命中" }, { v: 11, label: "效果抵抗" },
   ],
 };
 

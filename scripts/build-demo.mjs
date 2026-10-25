@@ -37,7 +37,7 @@ for (const name of NAMES) {
 /* ── 符文 ─────────────────────────────────────── */
 const SLOT_MAIN = {
   1: { t: 3, v: 160 }, // 攻擊力 +160
-  2: { t: 7, v: 42 }, // 速度 +42
+  2: { t: 8, v: 42 }, // 速度 +42
   3: { t: 5, v: 160 }, // 防禦力 +160
   5: { t: 1, v: 2448 }, // 體力 +2448
 };
@@ -45,36 +45,36 @@ const SLOT4_MAINS = [
   { t: 2, v: 63 }, { t: 4, v: 63 }, { t: 6, v: 63 }, { t: 2, v: 63 },
 ];
 const SLOT6_MAINS = [
-  { t: 2, v: 63 }, { t: 4, v: 63 }, { t: 6, v: 63 }, { t: 11, v: 64 }, { t: 10, v: 64 },
+  { t: 2, v: 63 }, { t: 4, v: 63 }, { t: 6, v: 63 }, { t: 12, v: 64 }, { t: 11, v: 64 },
 ];
 
-/** 每個位置 24 顆：確保迅速 / 暴走 / 意志都有足夠候選 */
+/** 每個位置 24 顆：確保迅速 / 暴走 / 意志都有足夠候選（set_id 依 sw-exporter） */
 const SET_PLAN = [
   3, 3, 3, 3, 3, 3,
-  11, 11, 11, 11, 11, 11,
-  13, 13, 13, 13, 13,
+  13, 13, 13, 13, 13, 13,
+  15, 15, 15, 15, 15,
   1, 1, 1,
   4, 4,
   5,
   6,
 ];
 
-const SUB_TYPES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const SUB_TYPES = [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12];
 const SUB_RANGE = {
   1: [400, 1500], 2: [8, 34], 3: [25, 80], 4: [8, 34], 5: [25, 80], 6: [8, 34],
-  7: [12, 24], 8: [7, 25], 9: [10, 30], 10: [8, 32], 11: [8, 32],
+  8: [12, 24], 9: [7, 25], 10: [10, 30], 11: [8, 32], 12: [8, 32],
 };
 const GRIND_RANGE = {
   1: [80, 250], 2: [2, 5], 3: [6, 18], 4: [2, 5], 5: [6, 18], 6: [2, 5],
-  7: [2, 5], 8: [2, 4], 9: [2, 5], 10: [2, 5], 11: [2, 5],
+  8: [2, 5], 9: [2, 4], 10: [2, 5], 11: [2, 5], 12: [2, 5],
 };
 
 function makeSubs(mainType, forceSpeed) {
   const pool = SUB_TYPES.filter((t) => t !== mainType);
   const chosen = [];
-  if (forceSpeed && mainType !== 7) {
-    chosen.push(7);
-    pool.splice(pool.indexOf(7), 1);
+  if (forceSpeed && mainType !== 8) {
+    chosen.push(8);
+    pool.splice(pool.indexOf(8), 1);
   }
   while (chosen.length < 4 && pool.length) {
     chosen.push(pool.splice(Math.floor(rand() * pool.length), 1)[0]);
@@ -98,7 +98,7 @@ for (let slot = 1; slot <= 6; slot++) {
     else if (slot === 4) main = SLOT4_MAINS[i % SLOT4_MAINS.length];
     else main = SLOT6_MAINS[i % SLOT6_MAINS.length];
 
-    const forceSpeed = main.t !== 7 && (set === 3 || set === 11 || set === 13 || rand() < 0.45);
+    const forceSpeed = main.t !== 8 && (set === 3 || set === 13 || rand() < 0.45);
     const subs = makeSubs(main.t, forceSpeed);
 
     let prefix = [0, 0];

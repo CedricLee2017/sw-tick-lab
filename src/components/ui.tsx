@@ -151,9 +151,9 @@ export function RuneCard({
 export function setColor(id: number): string {
   const c: Record<number, string> = {
     1: "#f2c65c", 2: "#7fb3ff", 3: "#43d98a", 4: "#ff9f6b", 5: "#ff6b6b", 6: "#b07cff",
-    7: "#8fd6a8", 8: "#ff7a52", 9: "#c084fc", 10: "#ef4444", 11: "#f97316", 12: "#38bdf8",
-    13: "#fbbf24", 14: "#60a5fa", 15: "#f472b6", 16: "#94a3b8", 17: "#fb923c", 18: "#4ade80",
-    19: "#facc15", 20: "#a78bfa", 21: "#34d399", 22: "#e879f9", 23: "#cbd5e1",
+    7: "#8fd6a8", 8: "#ff7a52", 10: "#c084fc", 11: "#ef4444", 13: "#f97316", 14: "#38bdf8",
+    15: "#fbbf24", 16: "#60a5fa", 17: "#f472b6", 18: "#94a3b8", 19: "#fb923c", 20: "#4ade80",
+    21: "#facc15", 22: "#a78bfa", 23: "#34d399", 24: "#e879f9", 25: "#cbd5e1", 99: "#f8fafc",
   };
   return c[id] ?? "#8b9cc0";
 }

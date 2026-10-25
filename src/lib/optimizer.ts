@@ -1,5 +1,5 @@
 /** 配符運算引擎（分支定界） */
-import { SUB_STAT_MAX, STAT_TYPES, SET_BY_ID, type StatKey } from "./constants";
+import { SPD_TYPE, SUB_STAT_MAX, STAT_TYPES, SET_BY_ID, type StatKey } from "./constants";
 import {
   addRuneToAccum,
   applySetBonuses,
@@ -87,11 +87,11 @@ const MAX_STAT_NAME: Record<number, string> = {
   4: "ATK%",
   5: "DEF flat",
   6: "DEF%",
-  7: "SPD",
-  8: "CRate",
-  9: "CDmg",
-  10: "RES",
-  11: "ACC",
+  8: "SPD",
+  9: "CRate",
+  10: "CDmg",
+  11: "RES",
+  12: "ACC",
 };
 
 export function scoreOf(stats: Stats, eff: number, objective: Objective): number {
@@ -125,7 +125,7 @@ const PCT_KEYS = ["pctHp", "pctAtk", "pctDef"] as const;
 export function runeSpeed(rune: Rune): number {
   let v = 0;
   const add = (t: number, value: number) => {
-    if (t === 7) v += value;
+    if (t === SPD_TYPE) v += value;
   };
   add(rune.main.t, rune.main.v);
   add(rune.prefix.t, rune.prefix.v);

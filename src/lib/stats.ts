@@ -17,11 +17,11 @@ const MAX_STAT_NAME: Record<number, string> = {
   4: "ATK%",
   5: "DEF flat",
   6: "DEF%",
-  7: "SPD",
-  8: "CRate",
-  9: "CDmg",
-  10: "RES",
-  11: "ACC",
+  8: "SPD",
+  9: "CRate",
+  10: "CDmg",
+  11: "RES",
+  12: "ACC",
 };
 
 export interface BaseStats {
