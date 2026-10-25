@@ -124,6 +124,9 @@ export default function App() {
           <div className="row tiny dim" style={{ padding: "0 8px", gap: 6 }}>
             <CircleDot size={12} /> {settings.rta ? "RTA Tick 模式" : "一般 Tick 模式"}
           </div>
+          <div className="tiny dim" style={{ padding: "0 8px", opacity: 0.65 }}>
+            版本 {__BUILD_TIME__.replace(/-/g, ".")}
+          </div>
         </div>
       </aside>
 
