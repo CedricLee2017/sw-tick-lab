@@ -7,7 +7,7 @@ import { useSummary } from "../lib/accountStats";
 import { MonsterPicker, MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statText } from "../components/ui";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import { OBJECTIVE_LABEL, type Build, type Objective, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick } from "../lib/optimizer";
-import { baseStats, setSummary } from "../lib/stats";
+import { baseStats, setSummary, tickOf } from "../lib/stats";
 import type { Monster, Rune } from "../lib/types";
 
 const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
@@ -133,6 +133,11 @@ export default function OptimizerPage() {
     if (!summary.views.some((v) => v.monster.id === monsterId)) setMonsterId(0);
   }, [monsterId, summary]);
 
+  // 破套只在「主套 4 件 + 副套 2 件」同時存在時有意義
+  useEffect(() => {
+    if (relaxSub && !(mainSet > 0 && subSet > 0)) setRelaxSub(false);
+  }, [mainSet, subSet, relaxSub]);
+
   const base = useMemo(() => {
     if (boxMonster) return boxMonster.base;
     if (anyMonster) return baseStats(anyMonster, 6, 40);
@@ -165,15 +170,44 @@ export default function OptimizerPage() {
     [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, relaxSub],
   );
 
-  const run = () => {
+  /** 嚴格 4+2 不可能時，破套模式的速度上界（只用來判斷是否值得自動再試） */
+  const relaxBound = useMemo(
+    () =>
+      mainSet > 0 && subSet > 0 && !relaxSub
+        ? maxSpeedBound({
+            base,
+            runes: account?.runes ?? [],
+            required,
+            bonus,
+            rta,
+            allowEquipped,
+            targetUnit: boxMonster?.unit.id ?? 0,
+            mainFilters: mains,
+            relaxSub: true,
+          })
+        : null,
+    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, mainSet, subSet, relaxSub],
+  );
+
+  const run = (opts: { relaxOverride?: boolean; auto?: boolean } = {}) => {
+    const relax = opts.relaxOverride ?? relaxSub;
     if (!account) return;
     if (!monsterId) return notify("請先選擇魔靈", "err");
     if (!workerRef.current) return notify("配符運算模組未就緒，請重新整理頁面再試", "err");
-    if (targetSpeed > 0 && bound.speed < targetSpeed) {
+    const canRelax = mainSet > 0 && subSet > 0 && !relax;
+    const maxSpeed = Math.max(bound.speed, canRelax && relaxBound ? relaxBound.speed : 0);
+    if (!opts.auto && targetSpeed > 0 && maxSpeed < targetSpeed) {
       return notify(
-        `目前符文即使全選最高速也只有約 ${bound.speed} 速（Tick ${bound.tick}），無法達到 ${targetSpeed} 速。請降低 Tick、放寬套裝或主屬性。`,
+        `目前符文即使全選最高速也只有約 ${maxSpeed} 速（Tick ${tickOf(maxSpeed, rta)}），無法達到 ${targetSpeed} 速。請降低 Tick、放寬套裝或主屬性。`,
         "err",
       );
+    }
+    // 嚴格 4+2 不夠快，但破套可以達標 → 自動改用破套
+    if (!opts.auto && canRelax && relaxBound && bound.speed < targetSpeed && relaxBound.speed >= targetSpeed) {
+      notify("嚴格 4+2 速度不足，已自動改用破套模式");
+      setRelaxSub(true);
+      run({ relaxOverride: true, auto: true });
+      return;
     }
     setRunning(true);
     setError(null);
@@ -197,7 +231,7 @@ export default function OptimizerPage() {
       rta,
       maxNodes: 4_000_000,
       mainFilters: mains,
-      relaxSub,
+      relaxSub: relax,
     };
     const id = ++runId.current;
     const t0 = performance.now();
@@ -214,7 +248,15 @@ export default function OptimizerPage() {
       else if (e.data.res) {
         setResult({ ...e.data.res, ms: Math.round(performance.now() - t0) });
         setOpenIdx(0);
-        if (e.data.res.builds.length === 0) notify("找不到符合條件的配裝，試著放寬條件或增加候選符文", "err");
+        if (e.data.res.builds.length === 0) {
+          if (mainSet > 0 && subSet > 0 && !relax && !opts.auto) {
+            notify("嚴格 4+2 沒有結果，已自動改用破套模式再算一次");
+            setRelaxSub(true);
+            run({ relaxOverride: true, auto: true });
+            return;
+          }
+          notify("找不到符合條件的配裝，試著放寬條件或增加候選符文", "err");
+        }
       }
     };
     w.addEventListener("message", onMsg);
@@ -307,7 +349,7 @@ export default function OptimizerPage() {
               </div>
             </div>
 
-            {subSet > 0 && (
+            {mainSet > 0 && subSet > 0 && (
               <label className="row tiny" style={{ gap: 8, cursor: "pointer" }}>
                 <input type="checkbox" checked={relaxSub} onChange={(e) => setRelaxSub(e.target.checked)} />
                 允許破套：副套裝只作優先，不強制剛好 2 件
@@ -344,12 +386,18 @@ export default function OptimizerPage() {
                   <div className="alert warn" style={{ padding: "8px 10px", fontSize: 11.5 }}>
                     <div>
                       以目前符文與套裝，最高約 {bound.speed} 速，無法達到 Tick {tick}（{tickNeed.target} 速）。
+                      {relaxBound && relaxBound.speed >= tickNeed.target && " 但開啟破套後可達標。"}
                       {bound.missingSlots.length > 0 && ` 位置 ${bound.missingSlots.join("、")} 沒有可用符文。`}
                     </div>
-                    <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                    <div className="row wrap" style={{ gap: 6, marginTop: 6 }}>
                       <button className="btn btn-sm btn-ghost" onClick={() => setTick(bound.tick)}>
                         改用 Tick {bound.tick}
                       </button>
+                      {relaxBound && relaxBound.speed >= tickNeed.target && (
+                        <button className="btn btn-sm btn-primary" onClick={() => setRelaxSub(true)}>
+                          開啟破套（可達 {relaxBound.speed} 速）
+                        </button>
+                      )}
                       {(mainSet > 0 || subSet > 0) && (
                         <button className="btn btn-sm btn-ghost" onClick={() => { setMainSet(0); setSubSet(0); }}>
                           清除套裝限制
@@ -413,7 +461,7 @@ export default function OptimizerPage() {
               </div>
             </details>
 
-            <button className="btn btn-primary" onClick={run} disabled={running || !account} style={{ padding: "11px 14px" }}>
+            <button className="btn btn-primary" onClick={() => run()} disabled={running || !account} style={{ padding: "11px 14px" }}>
               {running ? <><Loader2 size={15} className="spin" /> 運算中…</> : <><Wand2 size={15} /> 開始配符</>}
             </button>
           </div>
