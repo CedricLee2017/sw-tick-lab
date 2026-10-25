@@ -115,6 +115,39 @@ check("符文都有 6 個位置", () => {
   const slots = new Set(account.runes.map((r) => r.slot));
   assert.deepEqual([...slots].sort(), [1, 2, 3, 4, 5, 6]);
 });
+check("容忍多層包裝 / 物件索引 / 字串屬性", () => {
+  const wrapped = JSON.stringify({
+    save: {
+      data: {
+        unit_list: {
+          1: { unit_id: 11, unit_master_id: 17012, stars: 6, level: 40, runes: { 0: { rune_id: 101 } } },
+        },
+        runes: {
+          101: {
+            id: 101, set: "Swift", slot: 1, grade: 6, level: 15,
+            main: { type: "SPD", value: 42 },
+            prefix: { type: "HP%", value: 8 },
+            subs: [{ type: "CRate", value: 10 }, { t: 11, v: 8, g: 2 }],
+          },
+        },
+        buildings: { 7: { building_master_id: 7, building_level: 15 } },
+      },
+    },
+  });
+  const p = parseAccountJSON(wrapped, "wrapped.json");
+  assert.equal(p.error, undefined, p.error);
+  assert.equal(p.account.units.length, 1);
+  assert.equal(p.account.units[0].stars, 6);
+  assert.deepEqual(p.account.units[0].runes, [101]);
+  assert.equal(p.account.runes.length, 1);
+  assert.equal(p.account.runes[0].set, 3);
+  assert.equal(p.account.runes[0].main.t, 7);
+  assert.equal(p.account.runes[0].main.v, 42);
+  assert.equal(p.account.runes[0].prefix.t, 2);
+  assert.equal(p.account.runes[0].subs[0].t, 8);
+  assert.equal(p.account.runes[0].subs[1].g, 2);
+  assert.deepEqual(p.account.buildings, [{ id: 7, level: 15 }]);
+});
 
 /* ── 4. 一鍵配符 ─────────────────────────────── */
 console.log("\n[4] 一鍵配符（迅速 ×4 + 意志 ×2，目標 Tick 5）");

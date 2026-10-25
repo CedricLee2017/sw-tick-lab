@@ -1,6 +1,6 @@
 /** SWEX / SWOP JSON 解析（寬容格式） */
 import { runeEfficiency } from "./stats";
-import { SET_BY_ID } from "./constants";
+import { RUNE_SETS, SET_BY_ID } from "./constants";
 import type { Account, Artifact, Rune, Unit } from "./types";
 
 const num = (v: unknown, d = 0): number => {
@@ -9,28 +9,97 @@ const num = (v: unknown, d = 0): number => {
   return d;
 };
 
+const truthy = (v: unknown): boolean => {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "string") return v === "1" || v.toLowerCase() === "true";
+  return num(v) > 0;
+};
+
+/** 清單可以是陣列，也可能是以 id 為 key 的物件（部分存檔格式） */
+function list(v: unknown): any[] {
+  if (Array.isArray(v)) return v;
+  if (v && typeof v === "object") return Object.values(v as Record<string, any>);
+  return [];
+}
+
+const isList = (v: unknown): boolean => Array.isArray(v) || (!!v && typeof v === "object");
+
+const STAT_NAME: Record<string, number> = {
+  hp: 1, "hp%": 2, atk: 3, "atk%": 4, def: 5, "def%": 6, spd: 7, speed: 7,
+  cr: 8, crate: 8, critrate: 8, "crit rate": 8, cd: 9, cdmg: 9, critdmg: 9,
+  "crit dmg": 9, "crit damage": 9, res: 10, resistance: 10, acc: 11, accuracy: 11,
+};
+
+/** 屬性 type：數字 id、或 SWOP 常見的英文字串 */
+function typeOf(v: unknown): number {
+  const n = num(v);
+  if (n) return n;
+  if (typeof v === "string") {
+    const k = v.trim().toLowerCase().replace(/\s+/g, " ");
+    if (STAT_NAME[k]) return STAT_NAME[k];
+    if (STAT_NAME[k.replace(/\s/g, "")]) return STAT_NAME[k.replace(/\s/g, "")];
+  }
+  return 0;
+}
+
+/** 套裝：數字 set_id、或英文 / 中文套裝名 */
+function setOf(v: unknown): number {
+  const n = num(v);
+  if (n) return n;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    const found = RUNE_SETS.find(
+      (x) => x.en.toLowerCase() === s || x.name === v.trim() || String(x.id) === s,
+    );
+    if (found) return found.id;
+  }
+  return 0;
+}
+
+/** 在 JSON 內找同時含有魔靈與符文清單的物件（容忍多層包裝） */
+function findBody(root: any): any | null {
+  const seen = new Set<object>();
+  const queue: { node: any; depth: number }[] = [{ node: root, depth: 0 }];
+  let unitsOnly: any = null;
+  while (queue.length > 0) {
+    const { node, depth } = queue.shift()!;
+    if (!node || typeof node !== "object" || seen.has(node)) continue;
+    seen.add(node);
+    const units = node.unit_list ?? node.monsters ?? node.units;
+    const runes = node.runes ?? node.rune_list ?? node.runes_list;
+    if (isList(units)) {
+      if (isList(runes)) return node;
+      unitsOnly ??= node;
+    }
+    if (depth >= 3) continue;
+    for (const v of Object.values(node)) {
+      if (v && typeof v === "object") queue.push({ node: v, depth: depth + 1 });
+    }
+  }
+  return unitsOnly;
+}
+
 function pair(v: unknown): { t: number; v: number } {
-  if (Array.isArray(v)) return { t: num(v[0]), v: num(v[1]) };
+  if (Array.isArray(v)) return { t: typeOf(v[0]), v: num(v[1]) };
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;
-    return { t: num(o.type ?? o.t), v: num(o.value ?? o.v) };
+    return { t: typeOf(o.type ?? o.t ?? o.stat), v: num(o.value ?? o.v ?? o.val) };
   }
   return { t: 0, v: 0 };
 }
 
 function subs(v: unknown): Rune["subs"] {
-  if (!Array.isArray(v)) return [];
-  return v
+  return list(v)
     .map((s) => {
       if (Array.isArray(s)) {
-        return { t: num(s[0]), v: num(s[1]), g: num(s[2]), gem: num(s[3]) };
+        return { t: typeOf(s[0]), v: num(s[1]), g: num(s[2]), gem: num(s[3]) };
       }
       if (s && typeof s === "object") {
         const o = s as Record<string, unknown>;
         return {
-          t: num(o.type ?? o.t),
-          v: num(o.value ?? o.v),
-          g: num(o.grind ?? o.g),
+          t: typeOf(o.type ?? o.t ?? o.stat),
+          v: num(o.value ?? o.v ?? o.val),
+          g: num(o.grind ?? o.g ?? o.grindValue),
           gem: num(o.gem ?? o.gemstone),
         };
       }
@@ -38,6 +107,7 @@ function subs(v: unknown): Rune["subs"] {
     })
     .filter((s) => s.t > 0);
 }
+
 
 export interface ParseResult {
   account: Account | null;
@@ -54,11 +124,8 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     return { account: null, error: "檔案不是有效的 JSON，請確認是 SWEX / SWOP 匯出的檔案。", warnings };
   }
 
-  // 允許 { data: {...} }、{ account: {...} }、{ save: {...} } 等包一層
-  const candidates = [root, root?.data, root?.account, root?.player, root?.save, root?.swop].filter(Boolean);
-  const body = candidates.find(
-    (c) => Array.isArray(c.unit_list) || Array.isArray(c.monsters) || Array.isArray(c.units),
-  );
+  // 允許 { data: {...} }、{ account: {...} }、{ save: {...} } 等包一層，或更深層
+  const body = findBody(root);
   if (!body) {
     const keys = root && typeof root === "object" ? Object.keys(root).slice(0, 8).join("、") : "";
     return {
@@ -70,9 +137,9 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     };
   }
 
-  const rawUnits: any[] = body.unit_list ?? body.monsters ?? body.units ?? [];
-  const rawRunes: any[] = body.runes ?? body.rune_list ?? body.runes_list ?? [];
-  if (!Array.isArray(rawRunes) || rawRunes.length === 0) {
+  const rawUnits: any[] = list(body.unit_list ?? body.monsters ?? body.units);
+  const rawRunes: any[] = list(body.runes ?? body.rune_list ?? body.runes_list);
+  if (rawRunes.length === 0) {
     return { account: null, error: "找不到 runes（符文清單），這個檔案可能不完整。", warnings };
   }
 
@@ -83,7 +150,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
   let duplicateRunes = 0;
   rawRunes.forEach((r: any, index: number) => {
     if (!r) return;
-    const set = num(r.set_id ?? r.set);
+    const set = setOf(r.set_id ?? r.set ?? r.setName ?? r.set_name);
     const slot = num(r.slot_no ?? r.slot);
     if (!set || !slot) {
       skippedRunes++;
@@ -97,19 +164,19 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     }
     if (id > 0) seenIds.add(id);
     if (!SET_BY_ID[set]) unknownSets.add(set);
-    const grade = Math.min(6, Math.max(1, num(r.class ?? r.grade, 6)));
+    const grade = Math.min(6, Math.max(1, num(r.class ?? r.grade ?? r.stars, 6)));
     const rune: Rune = {
       id,
       set,
       slot,
       grade,
       level: Math.min(15, Math.max(0, num(r.upgrade_curr ?? r.level, 0))),
-      main: pair(r.pri_eff ?? r.main),
+      main: pair(r.pri_eff ?? r.main ?? r.mainStat),
       prefix: pair(r.prefix_eff ?? r.prefix),
-      subs: subs(r.sec_eff ?? r.subs),
-      occupied: num(r.occupied_id ?? r.occupied),
-      ancient: !!num(r.ancient),
-      locked: !!num(r.locked),
+      subs: subs(r.sec_eff ?? r.subs ?? r.substats),
+      occupied: num(r.occupied_id ?? r.occupied ?? r.equippedBy ?? r.equipped_by),
+      ancient: truthy(r.ancient),
+      locked: truthy(r.locked),
       eff: 0,
       effMax: 100,
     };
@@ -140,15 +207,15 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
   for (const u of rawUnits) {
     if (!u) continue;
     const id = num(u.unit_id ?? u.id);
-    const master = num(u.unit_master_id ?? u.master_id);
+    const master = num(u.unit_master_id ?? u.master_id ?? u.masterId);
     if (!master) {
       skippedUnits++;
       continue;
     }
-    let unitRunes: number[] = Array.isArray(u.rune_ids)
-      ? u.rune_ids.map((x: unknown) => num(x)).filter(Boolean)
-      : Array.isArray(u.runes)
-        ? u.runes.map((x: any) => num(x?.rune_id ?? x?.id ?? x)).filter(Boolean)
+    let unitRunes: number[] = isList(u.rune_ids)
+      ? list(u.rune_ids).map((x: unknown) => num(x)).filter(Boolean)
+      : isList(u.runes)
+        ? list(u.runes).map((x: any) => num(x?.rune_id ?? x?.id ?? x)).filter(Boolean)
         : [];
     unitRunes = unitRunes.filter((rid) => runeMap.has(rid));
     // 若沒有 rune_ids，用 occupied_id 反推
@@ -160,30 +227,30 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     units.push({
       id,
       master,
-      stars: Math.min(6, Math.max(1, num(u.class ?? u.stars, 6))),
+      stars: Math.min(6, Math.max(1, num(u.class ?? u.stars ?? u.star, 6))),
       level: num(u.unit_level ?? u.level, 40),
       runes: unitRunes.slice(0, 6),
-      artifacts: (u.artifacts ?? []).map((a: any) => num(a?.rid ?? a?.artifact_id ?? a)).filter(Boolean),
-      locked: !!num(u.locked),
+      artifacts: list(u.artifacts ?? u.artifact_ids).map((a: any) => num(a?.rid ?? a?.artifact_id ?? a)).filter(Boolean),
+      locked: truthy(u.locked),
     });
   }
 
-  const rawArtifacts: any[] = body.artifacts ?? body.artifact_list ?? [];
+  const rawArtifacts: any[] = list(body.artifacts ?? body.artifact_list);
   const artifacts: Artifact[] = rawArtifacts.map((a: any) => ({
     id: num(a.rid ?? a.artifact_id ?? a.id),
     type: num(a.type ?? a.artifact_type, 1),
     attr: num(a.attribute ?? a.attr),
     occupied: num(a.occupied_id ?? a.occupied),
     main: pair(a.pri_eff ?? a.main),
-    subs: Array.isArray(a.sec_eff)
-      ? a.sec_eff.map((s: any) => (Array.isArray(s) ? { t: num(s[0]), v: num(s[1]) } : { t: num(s?.type), v: num(s?.value) }))
-      : [],
+    subs: list(a.sec_eff)
+      .map((s: any) => (Array.isArray(s) ? { t: typeOf(s[0]), v: num(s[1]) } : { t: typeOf(s?.type ?? s?.t), v: num(s?.value ?? s?.v) }))
+      .filter((s) => s.t > 0),
     level: Math.min(15, num(a.level, 0)),
   }));
 
-  const buildings = (body.building_list ?? body.buildings ?? [])
+  const buildings = list(body.building_list ?? body.buildings)
     .map((b: any) => ({
-      id: num(b.building_master_id ?? b.id),
+      id: num(b.building_master_id ?? b.master_id ?? b.id),
       level: num(b.building_level ?? b.level),
     }))
     .filter((b: any) => b.id > 0);

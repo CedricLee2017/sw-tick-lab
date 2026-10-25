@@ -223,10 +223,13 @@ export function MonsterPicker({
   value,
   onChange,
   placeholder = "搜尋魔靈（英文名）…",
+  options,
 }: {
   value: number;
   onChange: (id: number) => void;
   placeholder?: string;
+  /** 限制定單，例如只列出帳號內擁有的魔靈 */
+  options?: Monster[];
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -243,13 +246,13 @@ export function MonsterPicker({
 
   const list = useMemo(() => {
     const term = q.trim().toLowerCase();
-    let arr = MONSTERS;
+    let arr = options ?? MONSTERS;
     if (term) arr = arr.filter((x) => x.name.toLowerCase().includes(term));
     return arr
       .slice()
       .sort((a, b) => (b.nat - a.nat) || a.name.localeCompare(b.name))
       .slice(0, 120);
-  }, [q]);
+  }, [q, options]);
 
   return (
     <div ref={ref} style={{ position: "relative" }}>

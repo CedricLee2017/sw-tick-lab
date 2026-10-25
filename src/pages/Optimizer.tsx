@@ -114,6 +114,25 @@ export default function OptimizerPage() {
   const boxMonster = useMemo(() => (monsterId ? summary?.views.find((v) => v.monster.id === monsterId) : undefined), [monsterId, summary]);
   const anyMonster: Monster | undefined = boxMonster?.monster;
 
+  /** 只列出帳號內實際擁有的魔靈（同一隻多份只顯示一次） */
+  const ownedMonsters = useMemo(() => {
+    if (!summary) return [] as Monster[];
+    const seen = new Set<number>();
+    const out: Monster[] = [];
+    for (const v of summary.views) {
+      if (seen.has(v.monster.id)) continue;
+      seen.add(v.monster.id);
+      out.push(v.monster);
+    }
+    return out;
+  }, [summary]);
+
+  // 換帳號或草稿留有已不存在的魔靈時，避免用泛用基礎值計算
+  useEffect(() => {
+    if (!monsterId || !summary) return;
+    if (!summary.views.some((v) => v.monster.id === monsterId)) setMonsterId(0);
+  }, [monsterId, summary]);
+
   const base = useMemo(() => {
     if (boxMonster) return boxMonster.base;
     if (anyMonster) return baseStats(anyMonster, 6, 40);
@@ -230,7 +249,12 @@ export default function OptimizerPage() {
           <div className="card-pad col" style={{ gap: 13 }}>
             <div className="field">
               <label>魔靈</label>
-              <MonsterPicker value={monsterId} onChange={setMonsterId} />
+              <MonsterPicker
+                value={monsterId}
+                onChange={setMonsterId}
+                options={account ? ownedMonsters : undefined}
+                placeholder={account ? "搜尋帳號內的魔靈…" : "搜尋魔靈（英文名）…"}
+              />
               {anyMonster && (
                 <div className="row tiny dim" style={{ gap: 6, marginTop: 2 }}>
                   <span>基礎速度 {base.spd}</span>

@@ -433,35 +433,71 @@ export function maxSpeedBound(req: {
   relaxSub?: boolean;
 }): { speed: number; tick: number; perSlot: number[]; missingSlots: number[] } {
   const requiredSets = req.required.filter((r) => (req.relaxSub ? r.count >= 4 : r.count > 0));
-  const strict = requiredSets.length > 0 && requiredSets.reduce((s, r) => s + r.count, 0) >= 6;
+  const requiredTotal = requiredSets.reduce((s, r) => s + r.count, 0);
+  const strict = requiredSets.length > 0 && requiredTotal >= 6;
   const ids = new Set(requiredSets.map((r) => r.set));
   const allowEquipped = req.allowEquipped ?? true;
   const targetUnit = req.targetUnit ?? 0;
   const mainFilters = req.mainFilters ?? {};
 
-  let flat = 0;
   const perSlot: number[] = [];
   const missingSlots: number[] = [];
+  /** 每個位置：任意符文的最高速、各指定套裝的最高速、迅速最高速 */
+  const slotData: { any: number; bySet: Map<number, number>; swift: number }[] = [];
   for (let slot = 1; slot <= 6; slot++) {
     const mainT = mainFilters[slot] ?? 0;
     const list = req.runes.filter(
       (r) =>
         r.slot === slot &&
         (!mainT || r.main.t === mainT) &&
-        (!strict || ids.has(r.set)) &&
         (allowEquipped || r.occupied === 0 || r.occupied === targetUnit),
     );
+    const bySet = new Map<number, number>();
+    let any = 0;
+    let swift = 0;
+    for (const r of list) {
+      const spd = runeSpeed(r);
+      any = Math.max(any, spd);
+      if (r.set === 3) swift = Math.max(swift, spd);
+      if (ids.has(r.set)) bySet.set(r.set, Math.max(bySet.get(r.set) ?? 0, spd));
+    }
     if (list.length === 0) missingSlots.push(slot);
-    const top = list.reduce((m, r) => Math.max(m, runeSpeed(r)), 0);
-    perSlot.push(top);
-    flat += top;
+    perSlot.push(any);
+    slotData.push({ any, bySet, swift });
   }
 
-  // 速度套裝（迅速）上界：只有可能湊到 4 件時才加
+  let flat = 0;
   let setSpd = 0;
-  const swiftRequired = requiredSets.some((r) => r.set === 3 && r.count >= 4);
-  const canUseSwift = strict ? swiftRequired : true;
-  if (canUseSwift) setSpd = Math.ceil((req.base.spd * 25) / 100);
+  if (strict) {
+    // 六格都必須來自指定套裝（只取每個位置該套裝的最高速）
+    for (const s of slotData) flat += Math.max(0, ...[...ids].map((id) => s.bySet.get(id) ?? 0));
+    slotData.forEach((s, i) => {
+      if (![...ids].some((id) => s.bySet.has(id)) && !missingSlots.includes(i + 1)) missingSlots.push(i + 1);
+    });
+    if (requiredSets.some((r) => r.set === 3 && r.count >= 4)) {
+      setSpd = Math.ceil((req.base.spd * 25) / 100);
+    }
+  } else if (requiredSets.length > 0) {
+    // 例：主套 4 件 + 破套。先取每位置最高速，再挑損失最小的位置換成指定套裝。
+    flat = slotData.reduce((s, x) => s + x.any, 0);
+    for (const rs of requiredSets) {
+      const losses: { loss: number; slot: number }[] = [];
+      slotData.forEach((s, i) => {
+        const v = s.bySet.get(rs.set);
+        if (v === undefined) return;
+        losses.push({ loss: s.any - v, slot: i + 1 });
+      });
+      losses.sort((a, b) => a.loss - b.loss);
+      const take = Math.min(rs.count, losses.length);
+      flat -= losses.slice(0, take).reduce((s, x) => s + x.loss, 0);
+      if (rs.set === 3 && rs.count >= 4) setSpd = Math.ceil((req.base.spd * 25) / 100);
+    }
+  } else {
+    flat = slotData.reduce((s, x) => s + x.any, 0);
+    if (slotData.filter((s) => s.swift > 0).length >= 4) {
+      setSpd = Math.ceil((req.base.spd * 25) / 100);
+    }
+  }
 
   const pct = req.bonus.towerSpd + req.bonus.leadSpd + req.bonus.buffSpd;
   const speed = req.base.spd + Math.ceil((req.base.spd * pct) / 100) + flat + setSpd;
