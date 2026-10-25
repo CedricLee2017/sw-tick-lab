@@ -660,20 +660,31 @@ function BuildCard({
             </div>
           </div>
 
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(232px, 1fr))", gap: 10 }}>
-            {[1, 2, 3, 4, 5, 6].map((slot) => {
-              const r = build.runes[slot - 1] ?? null;
-              if (!r) return null;
-              const owner = ownerOf(r.id);
-              return (
-                <RuneCard
-                  key={slot}
-                  rune={r}
-                  detail
-                  owner={owner || undefined}
-                />
-              );
-            })}
+          <div className="rune-wheel-head">
+            <span className="rune-wheel-title">符文盤</span>
+            <span className="tiny dim">依遊戲位置排列：1 上 → 順時針 2…6</span>
+          </div>
+          <div className="rune-wheel-wrap">
+            <div className="rune-wheel">
+              {[1, 2, 3, 4, 5, 6].map((slot) => {
+                const r = build.runes[slot - 1] ?? null;
+                return (
+                  <div className="rune-wheel-cell" data-slot={slot} style={{ gridArea: `rs${slot}` }} key={slot}>
+                    {r ? (
+                      <RuneCard rune={r} detail owner={ownerOf(r.id) || undefined} />
+                    ) : (
+                      <div className="rune rune-empty">
+                        <div className="rune-top">
+                          <span className="rune-set dim">未裝備</span>
+                          <span className="rune-slot">#{slot}</span>
+                        </div>
+                        <div className="tiny dim">這個位置沒有符文</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div className="row" style={{ marginTop: 12, gap: 8 }}>

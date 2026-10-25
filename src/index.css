@@ -289,6 +289,39 @@ p { margin: 0; }
 .rune-meta-row b.gold { color: var(--gold); }
 .rune-meta .bar { margin-top: 3px; }
 
+/* ── rune wheel（依遊戲符文盤：1 上 → 順時針 2…6） ── */
+.rune-wheel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin: 0 0 8px;
+}
+.rune-wheel-title { font-size: 12px; font-weight: 700; letter-spacing: .03em; }
+.rune-wheel-wrap { container-type: inline-size; }
+.rune-wheel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    "rs6 rs1 rs2"
+    "rs5 rs4 rs3";
+  gap: 10px;
+  padding: 9px 0;
+}
+.rune-wheel-cell { min-width: 0; display: flex; }
+.rune-wheel-cell[data-slot="1"] { transform: translateY(-9px); }
+.rune-wheel-cell[data-slot="4"] { transform: translateY(9px); }
+.rune-wheel-cell > .rune { flex: 1 1 auto; }
+.rune-wheel .rune-slot { color: var(--gold); opacity: .75; }
+.rune-empty { border-style: dashed; background: transparent; opacity: .6; justify-content: flex-start; }
+
+@container (max-width: 700px) {
+  .rune-wheel {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-areas: none;
+    padding: 0;
+  }
+  .rune-wheel-cell { grid-area: auto !important; }
+  .rune-wheel-cell[data-slot] { transform: none; }
+}
+
 /* ── focus ────────────────────────────────────────── */
 .focus-panel {
   border: 1px solid rgba(242, 198, 92, .24);
