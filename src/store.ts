@@ -35,7 +35,7 @@ export interface Settings {
   focus: FocusEntry[];
 }
 
-const DEFAULT_SETTINGS = (): Settings => ({ bonus: defaultBonus(), rta: false, pool: 18, focus: [] });
+const DEFAULT_SETTINGS = (): Settings => ({ bonus: defaultBonus(), rta: false, pool: 15, focus: [] });
 
 const ACCOUNT_KEY = "swtick:account";
 const SETTINGS_KEY = "swtick:settings";
@@ -91,6 +91,8 @@ export const useStore = create<Store>((setState, getState) => ({
       const saved = settings
         ? { ...DEFAULT_SETTINGS(), ...settings, focus: settings.focus ?? [] }
         : DEFAULT_SETTINGS();
+      // 候選符文上限已改為 15 顆，舊設定若存了 18 要在載入時收斂
+      saved.pool = Math.min(15, Math.max(6, Math.round(saved.pool ?? 15)));
       // v2 起建築預設全滿等（含暴擊傷害圖騰、屬性攻擊塔）。舊設定沒有
       // elementAtk 欄位，代表建築仍是 0%，直接升級為滿等（保留隊長技 / Buff）。
       if (settings && (settings.bonus as Partial<BonusConfig> | undefined)?.elementAtk === undefined) {
@@ -157,7 +159,7 @@ export const useStore = create<Store>((setState, getState) => ({
   },
 
   setPool: (v) => {
-    const settings = { ...getState().settings, pool: v };
+    const settings = { ...getState().settings, pool: Math.min(15, Math.max(6, Math.round(v))) };
     setState({ settings });
     void set(SETTINGS_KEY, settings);
   },

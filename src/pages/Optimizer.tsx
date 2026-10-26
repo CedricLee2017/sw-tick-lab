@@ -94,7 +94,7 @@ export default function OptimizerPage() {
   const [limits, setLimits] = useState<Partial<Record<StatKey, number>>>({});
   const [allowEquipped, setAllowEquipped] = useState(true);
   const [pool, setPool] = useState(settings.pool);
-  const [budget, setBudget] = useState(8_000_000);
+  const [budget, setBudget] = useState(12_000_000);
   const [mains, setMains] = useState<Partial<Record<number, number>>>({});
   const [relaxSub, setRelaxSub] = useState(false);
 
@@ -740,7 +740,7 @@ export default function OptimizerPage() {
                   <select className="select" value={budget} onChange={(e) => setBudget(Number(e.target.value))}>
                     <option value={2_000_000}>快速 · 200 萬（約 1–2 秒）</option>
                     <option value={8_000_000}>標準 · 800 萬（約 4–5 秒）</option>
-                    <option value={24_000_000}>完整 · 2,400 萬（約 12–15 秒）</option>
+                    <option value={12_000_000}>完整 · 1,200 萬（約 8 秒，涵蓋 15 顆全空間）</option>
                     <option value={40_000_000}>極限 · 4,000 萬（約 25–30 秒）</option>
                   </select>
                   <span className="hint">組合空間超過預算時會提前停止，結果可能不完整。</span>
@@ -792,12 +792,14 @@ export default function OptimizerPage() {
                   <div className="card-title">找到 {fmt(result.count)} 組配裝</div>
                   <div className="card-sub">
                     候選 {fmt(result.candidates)} 顆 · 組合空間 {fmt(result.space)} 組 · 檢查節點 {fmt(result.nodes)} · {result.ms} ms
-                    {result.overflow && (
-                      <span className="red"> · 結果超過 200 萬組，只保留前 200 萬組（可增加條件縮小範圍）</span>
-                    )}
-                    {result.truncated && !result.overflow && (
+                    {result.truncated && (
                       <span className="red">
                         {" "}· 已達節點上限，只檢查了 {(Math.min(100, (result.nodes / Math.max(1, result.space)) * 100)).toFixed(1)}%（可把「搜尋預算」改成完整或極限）
+                      </span>
+                    )}
+                    {result.overflow && (
+                      <span className="red">
+                        {" "}· 符合條件的組合超過 200 萬組，只保留前 200 萬組（可加「其他面板下限」縮小範圍）
                       </span>
                     )}
                   </div>
@@ -1184,7 +1186,7 @@ function FocusEditor({
       </div>
       <div className="hint" style={{ lineHeight: 1.5 }}>
         最多 5 組。比重越高，該屬性數值高的符文越優先被選進候選池（1 = 輕微、10 = 最優先）。
-        有設定焦點時，每個位置就是用這裡的比重挑出最符合的 18 顆符文。
+        有設定焦點時，每個位置就是用這裡的比重挑出最符合的 15 顆符文。
       </div>
       {value.length === 0 && (
         <div className="tiny dim" style={{ lineHeight: 1.5 }}>
@@ -1239,18 +1241,18 @@ function FocusEditor({
       )}
       <div className="focus-depth">
         <div className="row between">
-          <span className="tiny dim">每位置候選符文（上限 18）</span>
+          <span className="tiny dim">每位置候選符文（上限 15）</span>
           <b className="mono" style={{ fontSize: 11.5 }}>{pool}</b>
         </div>
         <input
           type="range"
           min={6}
-          max={18}
+          max={15}
           value={pool}
           onChange={(e) => onPoolChange(Number(e.target.value))}
           style={{ width: "100%" }}
         />
-        <div className="tiny dim">18 顆約 3,400 萬組；每少 1 顆組合數約少一半</div>
+        <div className="tiny dim">15 顆 = 1,139 萬組（可用「完整」預算一次算完）；每少 1 顆組合數約少一半</div>
       </div>
     </div>
   );

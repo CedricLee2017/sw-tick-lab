@@ -363,7 +363,7 @@ export function optimize(req: OptRequest): OptResult {
   if (focusRank) for (const f of focusList) wRank[f.key] = f.weight;
   const rankValue = (r: Rune) => runeValue(r, wRank, focusRank ? undefined : focusWeight) + r.eff * 0.01;
 
-  // 每個位置候選：上限 18 顆
+  // 每個位置候選：上限 15 顆（15⁶ = 11,390,625 組，一次「完整」預算就能全部算完）
   // 符文 id 可能超過 32 位元（SWEX 是 64-bit），所以結果只存「密集索引」，還原時再查表
   const runeTable: number[] = [];
   const denseOf = new Map<number, number>();
@@ -377,7 +377,7 @@ export function optimize(req: OptRequest): OptResult {
     return i;
   };
   const slots: { slot: number; list: Cand[] }[] = [];
-  const maxCand = Math.min(18, Math.max(6, pool));
+  const maxCand = Math.min(15, Math.max(6, pool));
   const speedTarget = min.spd ?? 0;
   for (let slot = 1; slot <= 6; slot++) {
     let list = req.runes.filter((r) => r.slot === slot);
@@ -499,8 +499,8 @@ export function optimize(req: OptRequest): OptResult {
   let count = 0;
   const push = (idx: number[], stats: Stats, score: number, eff: number, fit: number) => {
     if (count >= MAX_RESULTS) {
+      // 結果池滿了就停止搜尋，但這不代表「搜尋被中斷」：空間可能已經全部算完
       overflow = true;
-      truncated = true;
       return;
     }
     if (!cur || cur.n >= CHUNK) {
@@ -557,7 +557,7 @@ export function optimize(req: OptRequest): OptResult {
   };
 
   const dfs = (depth: number) => {
-    if (truncated) return;
+    if (truncated || overflow) return;
 
     if (depth === 6) {
       // 最後仍要驗證套裝件數（深度 5 的可行性檢查只能保證「還來得及」）
@@ -650,7 +650,7 @@ export function optimize(req: OptRequest): OptResult {
       acc.pctAtk -= dlt.pctAtk;
       acc.pctDef -= dlt.pctDef;
 
-      if (truncated) return;
+      if (truncated || overflow) return;
     }
   };
 
