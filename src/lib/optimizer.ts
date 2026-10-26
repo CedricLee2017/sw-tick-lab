@@ -11,8 +11,6 @@ import {
 } from "./stats";
 import type { BonusConfig, FocusEntry, Rune, Stats } from "./types";
 
-export type Objective = "spd" | "ehp" | "hp" | "atk" | "def" | "eff" | "score";
-
 /** Focus 區塊最多可選幾組屬性 */
 export const FOCUS_LIMIT = 5;
 
@@ -67,25 +65,13 @@ export function focusFitOf(stats: Stats, focus: FocusEntry[] | undefined): numbe
   return total > 0 ? (sum / total) * 100 : 0;
 }
 
-export const OBJECTIVE_LABEL: Record<Objective, string> = {
-  spd: "速度優先",
-  ehp: "有效體力 (EHP)",
-  hp: "體力優先",
-  atk: "攻擊力優先",
-  def: "防禦力優先",
-  eff: "符文效率",
-  score: "綜合評分",
-};
-
 export interface OptRequest {
   base: BaseStats;
   runes: Rune[];
   required: { set: number; count: number }[];
   min: Partial<Record<StatKey, number>>;
   max: Partial<Record<StatKey, number>>;
-  objective: Objective;
   bonus: BonusConfig;
-  limit: number;
   pool: number;
   allowEquipped: boolean;
   targetUnit?: number;
@@ -112,11 +98,126 @@ export interface Build {
 }
 
 export interface OptResult {
-  builds: Build[];
+  /** 符合條件的組合總數 */
+  count: number;
+  /** 每組 6 顆符文 id（長度 count×6，依位置 1..6） */
+  runeIds: Int32Array;
+  /** 每組面板數值（長度 count×8，順序同 STAT_KEYS） */
+  statValues: Float32Array;
+  /** 每組綜合評分（含焦點加分） */
+  scores: Float32Array;
+  /** 每組符文效率平均 */
+  effs: Float32Array;
+  /** 每組焦點契合度（沒有 FOCUS 時為 0） */
+  focusFits: Float32Array;
+  /** 依綜合評分由高到低排序的索引 */
+  order: Int32Array;
+  /** 需求套裝（還原無形符文補套裝後的件數用） */
+  requiredSets: { set: number; count: number }[];
+  /** 是否使用無形符文補套裝 */
+  intangible: boolean;
   nodes: number;
+  /** 達到節點上限，搜尋被中斷（結果可能不完整） */
   truncated: boolean;
+  /** 結果超過記憶體安全上限，只保留前面部分 */
+  overflow: boolean;
   candidates: number;
+  /** 候選符文的完整組合空間（各位置候選數相乘），用來判斷「算完」需要多少節點 */
+  space: number;
   ms: number;
+}
+
+/** 面板數值在 statValues 裡的順序 */
+export const STAT_KEYS: StatKey[] = ["hp", "atk", "def", "spd", "cr", "cd", "res", "acc"];
+
+/** 結果最多保留幾組（避免幾百萬組把瀏覽器記憶體吃光） */
+export const MAX_RESULTS = 2_000_000;
+
+const EMPTY_RESULT = (
+  requiredSets: { set: number; count: number }[] = [],
+  intangible = false,
+): OptResult => ({
+  count: 0,
+  runeIds: new Int32Array(0),
+  statValues: new Float32Array(0),
+  scores: new Float32Array(0),
+  effs: new Float32Array(0),
+  focusFits: new Float32Array(0),
+  order: new Int32Array(0),
+  requiredSets,
+  intangible,
+  nodes: 0,
+  truncated: false,
+  overflow: false,
+  candidates: 0,
+  space: 0,
+  ms: 0,
+});
+
+/** 從結果取出第 i 組的面板數值 */
+export function statsAt(res: OptResult, i: number, rta = false): Stats {
+  const o = i * 8;
+  const hp = res.statValues[o];
+  const atk = res.statValues[o + 1];
+  const def = res.statValues[o + 2];
+  const spd = res.statValues[o + 3];
+  return {
+    hp,
+    atk,
+    def,
+    spd,
+    cr: res.statValues[o + 4],
+    cd: res.statValues[o + 5],
+    res: res.statValues[o + 6],
+    acc: res.statValues[o + 7],
+    ehp: Math.floor((hp * (1140 + 3.5 * def)) / 1000),
+    tick: tickOf(spd, rta),
+  };
+}
+
+/** 把壓縮結果的第 i 組還原成 Build（只在使用時才建立物件） */
+export function buildAt(
+  res: OptResult,
+  i: number,
+  runeById: Map<number, Rune>,
+  rta = false,
+): Build {
+  const runes: (Rune | null)[] = [];
+  const sets: Record<number, number> = {};
+  const base = i * 6;
+  for (let k = 0; k < 6; k++) {
+    const r = runeById.get(res.runeIds[base + k]) ?? null;
+    runes.push(r);
+    if (r) sets[r.set] = (sets[r.set] ?? 0) + 1;
+  }
+  // 無形符文：把缺少的 1 件補到需求套裝上（與引擎計算時的套裝加成一致）
+  if (res.intangible) {
+    let wild = sets[25] ?? 0;
+    for (const rs of res.requiredSets) {
+      const have = sets[rs.set] ?? 0;
+      if (have < rs.count && wild > 0 && rs.count - have === 1) {
+        sets[rs.set] = have + 1;
+        wild--;
+      }
+    }
+  }
+  return {
+    runes,
+    stats: statsAt(res, i, rta),
+    score: res.scores[i],
+    eff: res.effs[i],
+    sets,
+    focusFit: res.focusFits[i],
+  };
+}
+
+/** 一次還原多組（測試與匯出用；UI 只還原目前頁面） */
+export function buildsOf(res: OptResult, runes: Rune[], rta = false, max = res.count): Build[] {
+  const runeById = new Map(runes.map((r) => [r.id, r]));
+  const n = Math.min(res.count, max);
+  const out: Build[] = new Array(n);
+  for (let k = 0; k < n; k++) out[k] = buildAt(res, res.order[k], runeById, rta);
+  return out;
 }
 
 const NORM: Record<StatKey, number> = {
@@ -128,16 +229,6 @@ const NORM: Record<StatKey, number> = {
   cd: 100,
   res: 70,
   acc: 70,
-};
-
-const OBJ_WEIGHT: Record<Objective, Partial<Record<StatKey, number>>> = {
-  spd: { spd: 10 },
-  ehp: { hp: 4, def: 3 },
-  hp: { hp: 8 },
-  atk: { atk: 8 },
-  def: { def: 8 },
-  eff: {},
-  score: { spd: 6, hp: 2, atk: 2, def: 2, cr: 2, cd: 1, acc: 1.5, res: 1 },
 };
 
 const MAX_STAT_NAME: Record<number, string> = {
@@ -154,12 +245,17 @@ const MAX_STAT_NAME: Record<number, string> = {
   12: "ACC",
 };
 
-export function scoreOf(stats: Stats, eff: number, objective: Objective): number {
-  if (objective === "eff") return eff;
-  const w = OBJ_WEIGHT[objective];
+/**
+ * 綜合評分：只當作「沒有指定排序時的預設順序」與搜尋剪枝用的啟發值。
+ * 真正的排序在結果產生之後才由 UI 依使用者選的欄位決定。
+ */
+export const SCORE_WEIGHT: Partial<Record<StatKey, number>> = {
+  spd: 6, hp: 2, atk: 2, def: 2, cr: 2, cd: 1, acc: 1.5, res: 1,
+};
+
+export function scoreOf(stats: Stats): number {
   let s = 0;
-  for (const k of Object.keys(w) as StatKey[]) s += (w[k] ?? 0) * (stats[k] / NORM[k]);
-  if (objective === "ehp") s += stats.ehp / 80;
+  for (const k of Object.keys(SCORE_WEIGHT) as StatKey[]) s += (SCORE_WEIGHT[k] ?? 0) * (stats[k] / NORM[k]);
   return s;
 }
 
@@ -210,9 +306,7 @@ export function optimize(req: OptRequest): OptResult {
     required,
     min,
     max,
-    objective,
     bonus,
-    limit = 20,
     pool = 18,
     allowEquipped = true,
     targetUnit = 0,
@@ -241,15 +335,27 @@ export function optimize(req: OptRequest): OptResult {
   /** 需求件數剛好佔滿六格時，就只能用指定套裝 */
   const strictSets = !anySet && requiredTotal >= 6;
 
-  // 啟發式權重
+  // 啟發式權重：只用來決定「哪些符文先進入候選池」，不影響最終排序
   const w: Record<StatKey, number> = { hp: 0.15, atk: 0.15, def: 0.15, spd: 0.3, cr: 0.15, cd: 0.1, res: 0.1, acc: 0.15 };
-  for (const k of Object.keys(OBJ_WEIGHT[objective]) as StatKey[]) w[k] += (OBJ_WEIGHT[objective][k] ?? 0) * 0.5;
+  for (const k of Object.keys(SCORE_WEIGHT) as StatKey[]) w[k] += (SCORE_WEIGHT[k] ?? 0) * 0.5;
   for (const k of Object.keys(min) as StatKey[]) w[k] += 4;
-  if (objective === "eff") for (const k of Object.keys(w) as StatKey[]) w[k] += 0.35;
 
-  // 每個位置候選
+  /**
+   * 候選排序權重：
+   * - 有設定 FOCUS 時，完全以 FOCUS 比重決定（沒被焦點的屬性權重為 0），
+   *   這樣每個位置挑出來的就是「最符合焦點」的 18 顆。
+   * - 沒有 FOCUS 時才退回通用綜合權重。
+   */
+  const focusRank = focusList.length > 0;
+  const wRank: Record<StatKey, number> = focusRank
+    ? { hp: 0, atk: 0, def: 0, spd: 0, cr: 0, cd: 0, res: 0, acc: 0 }
+    : w;
+  if (focusRank) for (const f of focusList) wRank[f.key] = f.weight;
+  const rankValue = (r: Rune) => runeValue(r, wRank, focusRank ? undefined : focusWeight) + r.eff * 0.01;
+
+  // 每個位置候選：上限 18 顆
   const slots: { slot: number; list: Cand[] }[] = [];
-  const maxCand = Math.min(40, Math.max(pool, 18) + 8);
+  const maxCand = Math.min(18, Math.max(6, pool));
   const speedTarget = min.spd ?? 0;
   for (let slot = 1; slot <= 6; slot++) {
     let list = req.runes.filter((r) => r.slot === slot);
@@ -258,11 +364,11 @@ export function optimize(req: OptRequest): OptResult {
     if (!allowEquipped) list = list.filter((r) => r.occupied === 0 || r.occupied === targetUnit);
     if (strictSets) list = list.filter((r) => requiredIds.has(r.set) || (intangible && r.set === INTANGIBLE_ID));
     const scored = list
-      .map((r) => ({ r, v: runeValue(r, w, focusWeight) + r.eff * 0.02, spd: runeSpeed(r) }))
+      .map((r) => ({ r, v: rankValue(r), spd: runeSpeed(r) }))
       .sort((a, b) => b.v - a.v);
 
-    // 候選不能只看加權分數：保留各指定套裝與最高速符文，
-    // 否則真實帳號（每位置數百顆）可能漏掉唯一能達標的組合。
+    // 名額有限（18 顆），先保留「維持可行」的少量符文，其餘全部給 FOCUS 排序。
+    // 不保留的話，真實帳號可能湊不出指定套裝或達不到速度下限。
     const keep = new Map<number, Rune>();
     const addTop = (arr: { r: Rune }[], n: number) => {
       let added = 0;
@@ -273,9 +379,9 @@ export function optimize(req: OptRequest): OptResult {
         added++;
       }
     };
-    for (const id of requiredIds) addTop(scored.filter((x) => x.r.set === id), 8);
-    for (const id of softIds) addTop(scored.filter((x) => x.r.set === id), 6);
-    addTop([...scored].sort((a, b) => b.spd - a.spd), 10);
+    for (const id of requiredIds) addTop(scored.filter((x) => x.r.set === id), 4);
+    for (const id of softIds) addTop(scored.filter((x) => x.r.set === id), 2);
+    if (speedTarget > 0) addTop([...scored].sort((a, b) => b.spd - a.spd), 5);
     addTop(scored, maxCand);
     const picked = [...keep.values()].slice(0, maxCand);
     if (speedTarget > 0) {
@@ -283,7 +389,7 @@ export function optimize(req: OptRequest): OptResult {
       const speedOf = new Map(scored.map((x) => [x.r.id, x.spd]));
       picked.sort((a, b) => (speedOf.get(b.id) ?? 0) - (speedOf.get(a.id) ?? 0));
     } else {
-      picked.sort((a, b) => runeValue(b, w, focusWeight) - runeValue(a, w, focusWeight));
+      picked.sort((a, b) => rankValue(b) - rankValue(a));
     }
 
     slots.push({
@@ -296,8 +402,11 @@ export function optimize(req: OptRequest): OptResult {
     });
   }
 
+  /** 完整組合空間：各位置候選數相乘（判斷「全部算完」需要多少節點） */
+  const space = slots.reduce((a, s) => a * s.list.length, 1);
+
   if (slots.some((s) => s.list.length === 0)) {
-    return { builds: [], nodes: 0, truncated: false, candidates: 0, ms: 0 };
+    return EMPTY_RESULT(requiredSets, intangible);
   }
 
   // 運算順序：2 → 4 → 6 → 1 → 3 → 5
@@ -308,19 +417,15 @@ export function optimize(req: OptRequest): OptResult {
   // 後綴最大值
   const suf: Record<string, number[]> = {};
   for (const k of [...FLAT_KEYS, ...PCT_KEYS]) suf[k] = new Array(7).fill(0);
-  const sufEff = new Array(7).fill(0);
   const sufSet: Record<number, number[]> = {};
   for (const id of requiredIds) sufSet[id] = new Array(7).fill(0);
 
   for (let d = 5; d >= 0; d--) {
     const mx: Record<string, number> = {};
-    let mxEff = 0;
     for (const c of seq[d].list) {
       for (const k of [...FLAT_KEYS, ...PCT_KEYS]) mx[k] = Math.max(mx[k] ?? 0, (c.d as any)[k]);
-      mxEff = Math.max(mxEff, c.eff);
     }
     for (const k of [...FLAT_KEYS, ...PCT_KEYS]) suf[k][d] = suf[k][d + 1] + (mx[k] ?? 0);
-    sufEff[d] = sufEff[d + 1] + mxEff;
     for (const id of requiredIds) sufSet[id][d] = sufSet[id][d + 1] + (seq[d].list.some((c) => c.rune.set === id) ? 1 : 0);
   }
 
@@ -347,23 +452,61 @@ export function optimize(req: OptRequest): OptResult {
   const minEntries = Object.entries(min).filter(([, v]) => typeof v === "number" && Number.isFinite(v)) as [StatKey, number][];
   const maxEntries = Object.entries(max).filter(([, v]) => typeof v === "number" && Number.isFinite(v)) as [StatKey, number][];
 
-  const results: Build[] = [];
   const acc = emptyAccum();
   const chosen: (Rune | null)[] = new Array(7).fill(null);
   let nodes = 0;
   let accEff = 0;
   let truncated = false;
+  let overflow = false;
 
-  const worst = () => (results.length < limit ? -Infinity : results[results.length - 1].score);
-
-  const push = (b: Build) => {
-    if (results.length < limit) {
-      results.push(b);
-      results.sort((x, y) => y.score - x.score);
-    } else if (b.score > results[results.length - 1].score) {
-      results[results.length - 1] = b;
-      results.sort((x, y) => y.score - x.score);
+  // ── 結果池：保留「所有」符合條件的組合，但用 typed array 分塊儲存 ──
+  // 一個 Build 物件約 700 bytes，上百萬組會吃掉近 1 GB；
+  // 這裡只存「符文 id + 面板數值 + 分數」，需要顯示時才用 buildAt() 還原。
+  const CHUNK = 16384;
+  type Chunk = {
+    ids: Int32Array;
+    stats: Float32Array;
+    scores: Float32Array;
+    effs: Float32Array;
+    fits: Float32Array;
+    n: number;
+  };
+  const chunks: Chunk[] = [];
+  let cur: Chunk | null = null;
+  let count = 0;
+  const push = (runes: (Rune | null)[], stats: Stats, score: number, eff: number, fit: number) => {
+    if (count >= MAX_RESULTS) {
+      overflow = true;
+      truncated = true;
+      return;
     }
+    if (!cur || cur.n >= CHUNK) {
+      cur = {
+        ids: new Int32Array(CHUNK * 6),
+        stats: new Float32Array(CHUNK * 8),
+        scores: new Float32Array(CHUNK),
+        effs: new Float32Array(CHUNK),
+        fits: new Float32Array(CHUNK),
+        n: 0,
+      };
+      chunks.push(cur);
+    }
+    const k = cur.n++;
+    const ib = k * 6;
+    for (let s = 0; s < 6; s++) cur.ids[ib + s] = runes[s]?.id ?? 0;
+    const o = k * 8;
+    cur.stats[o] = stats.hp;
+    cur.stats[o + 1] = stats.atk;
+    cur.stats[o + 2] = stats.def;
+    cur.stats[o + 3] = stats.spd;
+    cur.stats[o + 4] = stats.cr;
+    cur.stats[o + 5] = stats.cd;
+    cur.stats[o + 6] = stats.res;
+    cur.stats[o + 7] = stats.acc;
+    cur.scores[k] = score;
+    cur.effs[k] = eff;
+    cur.fits[k] = fit;
+    count++;
   };
 
   const optimistic = (depth: number): Stats => {
@@ -415,14 +558,13 @@ export function optimize(req: OptRequest): OptResult {
       for (const [k, v] of maxEntries) if (stats[k] > v) return;
       const eff = accEff / 6;
       const fit = focusFitOf(stats, focusList);
-      push({
-        runes: chosen.slice(1),
+      push(
+        chosen.slice(1),
         stats,
-        score: scoreOf(stats, eff, objective) + (focusList.length ? (fit / 100) * FOCUS_BONUS : 0),
+        scoreOf(stats) + (focusList.length ? (fit / 100) * FOCUS_BONUS : 0),
         eff,
-        sets: { ...a.sets },
-        focusFit: fit,
-      });
+        fit,
+      );
       return;
     }
 
@@ -442,10 +584,7 @@ export function optimize(req: OptRequest): OptResult {
       const lowStats = finalizeStats(base, acc, bonus, rta);
       for (const [k, v] of maxEntries) if (lowStats[k] > v) return;
     }
-    const bound = objective === "eff"
-      ? (accEff + sufEff[depth]) / 6 + (focusList.length ? FOCUS_BONUS : 0)
-      : scoreOf(optStats, 0, objective) + (focusList.length ? FOCUS_BONUS : 0);
-    if (results.length >= limit && bound <= worst()) return;
+    // 保留所有可行組合，不做分數上界剪枝。
 
     for (const cand of seq[depth].list) {
       nodes++;
@@ -494,7 +633,42 @@ export function optimize(req: OptRequest): OptResult {
 
   dfs(0);
 
-  return { builds: results, nodes, truncated, candidates, ms: Date.now() - t0 };
+  // 合併分塊，排序留到最後一次做（UI 每頁只還原 30 組）
+  const runeIds = new Int32Array(count * 6);
+  const statValues = new Float32Array(count * 8);
+  const scores = new Float32Array(count);
+  const effs = new Float32Array(count);
+  const focusFits = new Float32Array(count);
+  let off = 0;
+  for (const c of chunks) {
+    runeIds.set(c.ids.subarray(0, c.n * 6), off * 6);
+    statValues.set(c.stats.subarray(0, c.n * 8), off * 8);
+    scores.set(c.scores.subarray(0, c.n), off);
+    effs.set(c.effs.subarray(0, c.n), off);
+    focusFits.set(c.fits.subarray(0, c.n), off);
+    off += c.n;
+  }
+  const rank = new Int32Array(count);
+  for (let i = 0; i < count; i++) rank[i] = i;
+  rank.sort((a, b) => scores[b] - scores[a] || a - b);
+
+  return {
+    count,
+    runeIds,
+    statValues,
+    scores,
+    effs,
+    focusFits,
+    order: rank,
+    requiredSets,
+    intangible,
+    nodes,
+    truncated,
+    overflow,
+    candidates,
+    space,
+    ms: Date.now() - t0,
+  };
 }
 
 /** tick → 所需總速度 / 符文速度 */

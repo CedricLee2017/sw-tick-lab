@@ -12,8 +12,8 @@ import {
 } from "../lib/damage";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import {
-  FOCUS_LIMIT, FOCUS_OPTIONS, OBJECTIVE_LABEL, normalizeFocus,
-  type Build, type Objective, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick,
+  FOCUS_LIMIT, FOCUS_OPTIONS, STAT_KEYS, buildAt, normalizeFocus, statsAt,
+  type Build, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick,
 } from "../lib/optimizer";
 import { baseStats, setSummary, tickOf, statsForRunes } from "../lib/stats";
 import type { FocusEntry, Monster, Rune, Stats } from "../lib/types";
@@ -23,13 +23,16 @@ const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25 && s.id !
 
 const focusLabel = (key: StatKey) => FOCUS_OPTIONS.find((o) => o.key === key)?.label ?? key;
 
+/** 每頁顯示幾組配裝（結果可能有上千組，全部渲染會卡） */
+const PAGE_SIZE = 30;
+
 /** 結果排序欄位（對應 SWOP 的排序方式） */
 type SortKey =
   | "recommended" | "spd" | "hp" | "def" | "atk" | "ehp"
   | "cr" | "cd" | "res" | "acc" | "eff" | "focus" | "dmg";
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-  { key: "recommended", label: "推薦排序" },
+  { key: "recommended", label: "綜合評分（預設）" },
   { key: "spd", label: "速度" },
   { key: "hp", label: "體力" },
   { key: "def", label: "防禦" },
@@ -89,10 +92,9 @@ export default function OptimizerPage() {
   const [tick, setTick] = useState(5);
   const [speedTarget, setSpeedTarget] = useState(250);
   const [limits, setLimits] = useState<Partial<Record<StatKey, number>>>({});
-  const [objective, setObjective] = useState<Objective>("score");
   const [allowEquipped, setAllowEquipped] = useState(true);
   const [pool, setPool] = useState(settings.pool);
-  const [limit, setLimit] = useState(15);
+  const [budget, setBudget] = useState(8_000_000);
   const [mains, setMains] = useState<Partial<Record<number, number>>>({});
   const [relaxSub, setRelaxSub] = useState(false);
 
@@ -103,6 +105,7 @@ export default function OptimizerPage() {
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("recommended");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+  const [page, setPage] = useState(0);
 
   const [skillData, setSkillData] = useState<SkillData | null>(null);
   const [skillLoading, setSkillLoading] = useState(true);
@@ -320,14 +323,12 @@ export default function OptimizerPage() {
       required,
       min,
       max: {},
-      objective,
       bonus: { ...bonus, grind: true },
-      limit,
       pool,
       allowEquipped,
       targetUnit: boxMonster?.unit.id ?? 0,
       rta,
-      maxNodes: 4_000_000,
+      maxNodes: budget,
       mainFilters: mains,
       relaxSub: relax,
       intangible,
@@ -348,7 +349,7 @@ export default function OptimizerPage() {
       else if (e.data.res) {
         setResult({ ...e.data.res, ms: Math.round(performance.now() - t0) });
         setOpenIdx(0);
-        if (e.data.res.builds.length === 0) {
+        if (e.data.res.count === 0) {
           if (hasFour && hasTwo && !relax && !opts.auto) {
             notify("嚴格套裝沒有結果，已自動改用破套模式再算一次");
             setRelaxSub(true);
@@ -363,8 +364,8 @@ export default function OptimizerPage() {
     timerRef.current = window.setTimeout(() => {
       w.removeEventListener("message", onMsg);
       setRunning(false);
-      setError("配符運算超過 30 秒，已停止。請降低候選符文數、減少條件，或重新整理頁面再試。");
-    }, 30_000);
+      setError("配符運算超過 60 秒，已停止。請降低候選符文數、減少條件，或把搜尋預算改成「快速」再試。");
+    }, 60_000);
     try {
       w.postMessage({ id, req });
     } catch (err) {
@@ -419,18 +420,41 @@ export default function OptimizerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dmgSkill?.id]);
 
-  const damageByBuild = useMemo(() => {
+  /** 傷害計算獨立於全局面板：可單獨決定是否計入公會建築 */
+  const dmgBonus = useMemo(() => ({ ...bonus, useGuild: dmgOpts.useGuild, grind: true }), [bonus, dmgOpts.useGuild]);
+
+  const calcDamage = (builds: Build[]) => {
     const map = new Map<Build, { dmg: DamageResult; stats: Stats }>();
-    if (!result || !dmgOn || !dmgSkill) return map;
-    // 傷害計算獨立於全局面板：可單獨決定是否計入公會建築
-    const dmgBonus = { ...bonus, useGuild: dmgOpts.useGuild, grind: true };
-    for (const b of result.builds) {
+    if (!dmgSkill) return map;
+    for (const b of builds) {
       const runes = b.runes.filter((r): r is Rune => !!r);
       const stats = statsForRunes(base, runes, dmgBonus, rta);
       map.set(b, { dmg: computeSkillDamage(stats, dmgSkill, dmgOpts), stats });
     }
     return map;
-  }, [result, dmgOn, dmgSkill, dmgOpts, base, bonus, rta]);
+  };
+
+  /** 依傷害排序時才需要全部結果的傷害（用壓縮結果的面板值，不必重建 Build） */
+  const damageAll = useMemo(() => {
+    if (!result || !dmgOn || !dmgSkill || sortKey !== "dmg") return null;
+    const n = result.count;
+    const arr = new Float32Array(n);
+    // 傷害面板的公會建築開關和配符設定不同時，才需要逐組重算面板
+    const guildMismatch = dmgOpts.useGuild !== bonus.useGuild;
+    for (let i = 0; i < n; i++) {
+      const stats = guildMismatch
+        ? statsForRunes(
+            base,
+            buildAt(result, i, runeMap, rta).runes.filter((r): r is Rune => !!r),
+            dmgBonus,
+            rta,
+          )
+        : statsAt(result, i, rta);
+      arr[i] = computeSkillDamage(stats, dmgSkill, dmgOpts).total;
+    }
+    return arr;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, dmgOn, dmgSkill, sortKey, dmgBonus, dmgOpts, base, rta, bonus.useGuild, runeMap]);
 
   const sortOptions = useMemo(() => {
     if (!dmgOn || !dmgSkill) return SORT_OPTIONS;
@@ -445,30 +469,64 @@ export default function OptimizerPage() {
     if (sortKey === "dmg" && (!dmgOn || !dmgSkill)) setSortKey("recommended");
   }, [sortKey, dmgOn, dmgSkill]);
 
-  /** 依使用者選定的數值重新排序（不影響配符運算結果） */
-  const sortedBuilds = useMemo<Build[]>(() => {
+  /**
+   * 依使用者選定的數值重新排序：只排「索引」，
+   * 不建立上百萬個 Build 物件（每頁只還原 30 組）。
+   */
+  const sortedOrder = useMemo<ArrayLike<number>>(() => {
     if (!result) return [];
-    if (sortKey === "recommended") return result.builds;
-    const valueOf = (b: Build) => {
-      if (sortKey === "eff") return b.eff;
-      if (sortKey === "focus") return b.focusFit ?? 0;
-      if (sortKey === "dmg") return damageByBuild.get(b)?.dmg.total ?? 0;
-      return b.stats[sortKey];
-    };
-    return result.builds
-      .map((b, i) => ({ b, i, v: valueOf(b) }))
-      .sort((a, z) => {
-        const d = z.v - a.v;
-        return (sortDir === "desc" ? d : -d) || a.i - z.i;
-      })
-      .map((x) => x.b);
-  }, [result, sortKey, sortDir, damageByBuild]);
+    const n = result.count;
+    if (sortKey === "recommended") return result.order;
+    const idx = new Int32Array(n);
+    for (let i = 0; i < n; i++) idx[i] = i;
+    const keys = new Float32Array(n);
+    const si = STAT_KEYS.indexOf(sortKey as StatKey);
+    for (let i = 0; i < n; i++) {
+      if (sortKey === "eff") keys[i] = result.effs[i];
+      else if (sortKey === "focus") keys[i] = result.focusFits[i];
+      else if (sortKey === "dmg") keys[i] = damageAll ? damageAll[i] : 0;
+      else if (sortKey === "ehp") {
+        const o = i * 8;
+        keys[i] = Math.floor((result.statValues[o] * (1140 + 3.5 * result.statValues[o + 2])) / 1000);
+      } else keys[i] = result.statValues[i * 8 + si];
+    }
+    idx.sort((a, b) => (sortDir === "desc" ? keys[b] - keys[a] : keys[a] - keys[b]) || a - b);
+    return idx;
+  }, [result, sortKey, sortDir, damageAll]);
+
+  const total = result?.count ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageIndices = useMemo(() => {
+    const start = page * PAGE_SIZE;
+    const out: number[] = [];
+    for (let i = start; i < Math.min(sortedOrder.length, start + PAGE_SIZE); i++) out.push(sortedOrder[i]);
+    return out;
+  }, [sortedOrder, page]);
+
+  const pageBuilds = useMemo(
+    () => (result ? pageIndices.map((i) => buildAt(result, i, runeMap, rta)) : []),
+    [result, pageIndices, runeMap, rta],
+  );
+
+  /** 畫面上只算這一頁的傷害 */
+  const damageByBuild = useMemo(() => {
+    if (!dmgOn || !dmgSkill) return new Map<Build, { dmg: DamageResult; stats: Stats }>();
+    return calcDamage(pageBuilds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dmgOn, dmgSkill, pageBuilds, dmgBonus, dmgOpts, base, rta]);
+
+  /** 「配符清單」彈窗只需要目前這一組 */
+  const planBuild = useMemo(
+    () => (result && planIdx >= 0 ? buildAt(result, sortedOrder[planIdx], runeMap, rta) : undefined),
+    [result, planIdx, sortedOrder, runeMap, rta],
+  );
 
   // 換排序時把展開的卡片與配符清單歸零，避免指到別組
   useEffect(() => {
     if (!result) return;
-    setOpenIdx(0);
+    setOpenIdx(-1);
     setPlanIdx(-1);
+    setPage(0);
   }, [sortKey, sortDir, result]);
 
   // 焦點被清空時，排序欄位不要停在已不存在的選項
@@ -668,13 +726,6 @@ export default function OptimizerPage() {
               <NumberField label="暴擊率 CR %" value={limits.cr ?? 0} onChange={(v) => setLimits((l) => ({ ...l, cr: v }))} max={100} />
             </div>
 
-            <div className="field">
-              <label>排序目標</label>
-              <select className="select" value={objective} onChange={(e) => setObjective(e.target.value as Objective)}>
-                {Object.entries(OBJECTIVE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-
             <FocusEditor value={focus} onChange={setFocus} pool={pool} onPoolChange={setPool} />
 
             <details>
@@ -684,7 +735,16 @@ export default function OptimizerPage() {
                   <input type="checkbox" checked={allowEquipped} onChange={(e) => setAllowEquipped(e.target.checked)} />
                   允許使用已裝備在其它魔靈的符文
                 </label>
-                <NumberField label="顯示結果數" value={limit} min={5} max={50} onChange={setLimit} />
+                <div className="field">
+                  <label>搜尋預算（節點上限）</label>
+                  <select className="select" value={budget} onChange={(e) => setBudget(Number(e.target.value))}>
+                    <option value={2_000_000}>快速 · 200 萬（約 1–2 秒）</option>
+                    <option value={8_000_000}>標準 · 800 萬（約 4–5 秒）</option>
+                    <option value={24_000_000}>完整 · 2,400 萬（約 12–15 秒）</option>
+                    <option value={40_000_000}>極限 · 4,000 萬（約 25–30 秒）</option>
+                  </select>
+                  <span className="hint">組合空間超過預算時會提前停止，結果可能不完整。</span>
+                </div>
                 <div className="row tiny dim" style={{ gap: 6 }}>
                   <AlertTriangle size={12} /> 條件越多、候選越多，運算時間越長。
                 </div>
@@ -729,10 +789,17 @@ export default function OptimizerPage() {
             <div className="card card-pad">
               <div className="row between wrap" style={{ gap: 10 }}>
                 <div>
-                  <div className="card-title">找到 {result.builds.length} 組配裝</div>
+                  <div className="card-title">找到 {fmt(result.count)} 組配裝</div>
                   <div className="card-sub">
-                    候選 {fmt(result.candidates)} 顆 · 檢查節點 {fmt(result.nodes)} · {result.ms} ms
-                    {result.truncated && <span className="red"> · 已達節點上限，結果可能不是最佳</span>}
+                    候選 {fmt(result.candidates)} 顆 · 組合空間 {fmt(result.space)} 組 · 檢查節點 {fmt(result.nodes)} · {result.ms} ms
+                    {result.overflow && (
+                      <span className="red"> · 結果超過 200 萬組，只保留前 200 萬組（可增加條件縮小範圍）</span>
+                    )}
+                    {result.truncated && !result.overflow && (
+                      <span className="red">
+                        {" "}· 已達節點上限，只檢查了 {(Math.min(100, (result.nodes / Math.max(1, result.space)) * 100)).toFixed(1)}%（可把「搜尋預算」改成完整或極限）
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6 }}>
@@ -777,7 +844,7 @@ export default function OptimizerPage() {
                   </>
                 )}
               </div>
-              {result.builds.length === 0 && (
+              {result.count === 0 && (
                 <div className="alert warn" style={{ marginTop: 10 }}>
                   <div>找不到符合條件的配裝。</div>
                   <div className="tiny" style={{ marginTop: 4 }}>
@@ -789,35 +856,68 @@ export default function OptimizerPage() {
             </div>
           )}
 
-          {result && sortedBuilds.map((b, i) => (
-            <BuildCard
-              key={b.runes.map((r) => r?.id ?? 0).join("-") || i}
-              index={i}
-              build={b}
-              rta={rta}
-              runeMap={runeMap}
-              focus={focus}
-              damage={damageByBuild.get(b)?.dmg}
-              damageStats={damageByBuild.get(b)?.stats}
-              damageSkill={dmgSkill}
-              guildOn={dmgOpts.useGuild}
-              ownerOf={(rid) => {
-                const u = account?.units.find((x) => x.runes.includes(rid));
-                return u ? monsterLabel(u.master) : "";
-              }}
-              open={openIdx === i}
-              onToggle={() => setOpenIdx(openIdx === i ? -1 : i)}
-              onSave={() => {
-                saveLoadout({
-                  name: `${anyMonster?.name ?? "魔靈"} · Tick ${b.stats.tick}`,
-                  monsterId,
-                  runeIds: b.runes.filter(Boolean).map((r) => r!.id),
-                  stats: b.stats,
-                });
-              }}
-              onPlan={() => setPlanIdx(i)}
-            />
-          ))}
+          {result && pageBuilds.map((b, i) => {
+            const gi = page * PAGE_SIZE + i;
+            return (
+              <BuildCard
+                key={b.runes.map((r) => r?.id ?? 0).join("-") || gi}
+                index={gi}
+                build={b}
+                rta={rta}
+                runeMap={runeMap}
+                focus={focus}
+                damage={damageByBuild.get(b)?.dmg}
+                damageStats={damageByBuild.get(b)?.stats}
+                damageSkill={dmgSkill}
+                guildOn={dmgOpts.useGuild}
+                ownerOf={(rid) => {
+                  const u = account?.units.find((x) => x.runes.includes(rid));
+                  return u ? monsterLabel(u.master) : "";
+                }}
+                open={openIdx === gi}
+                onToggle={() => setOpenIdx(openIdx === gi ? -1 : gi)}
+                onSave={() => {
+                  saveLoadout({
+                    name: `${anyMonster?.name ?? "魔靈"} · Tick ${b.stats.tick}`,
+                    monsterId,
+                    runeIds: b.runes.filter(Boolean).map((r) => r!.id),
+                    stats: b.stats,
+                  });
+                }}
+                onPlan={() => setPlanIdx(gi)}
+              />
+            );
+          })}
+
+          {result && total > PAGE_SIZE && (
+            <div className="row between wrap" style={{ gap: 8 }}>
+              <button className="btn btn-sm" onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>
+                <ArrowRight size={13} style={{ transform: "rotate(180deg)" }} /> 上一頁
+              </button>
+              <span className="tiny dim mono">
+                第 {page * PAGE_SIZE + 1}–{Math.min(total, (page + 1) * PAGE_SIZE)} 組 / 共 {fmt(total)} 組
+              </span>
+              <div className="row" style={{ gap: 4, alignItems: "center" }}>
+                <input
+                  className="input mono"
+                  type="number"
+                  min={1}
+                  max={pageCount}
+                  value={page + 1}
+                  onChange={(e) => {
+                    const v = Math.max(1, Math.min(pageCount, Math.round(Number(e.target.value) || 1)));
+                    setPage(v - 1);
+                  }}
+                  style={{ width: 72, padding: "4px 6px", textAlign: "center" }}
+                  title="跳到指定頁"
+                />
+                <span className="tiny dim">/ {fmt(pageCount)} 頁</span>
+              </div>
+              <button className="btn btn-sm" onClick={() => setPage(Math.min(pageCount - 1, page + 1))} disabled={page >= pageCount - 1}>
+                下一頁 <ArrowRight size={13} />
+              </button>
+            </div>
+          )}
 
           {!result && !running && (
             <div className="card empty" style={{ padding: "60px 20px" }}>
@@ -833,15 +933,15 @@ export default function OptimizerPage() {
             <div className="card empty" style={{ padding: "60px 20px" }}>
               <Loader2 size={34} className="spin" style={{ color: "var(--gold)", marginBottom: 12 }} />
               <div style={{ fontWeight: 600 }}>正在搜尋最佳組合…</div>
-              <div className="tiny dim" style={{ marginTop: 4 }}>候選數約 {fmt(pool * 6)} 顆，通常需要 1–3 秒</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>候選數約 {fmt(pool * 6)} 顆，通常需要 1–5 秒</div>
             </div>
           )}
         </div>
       </div>
 
-      {planIdx >= 0 && planIdx < sortedBuilds.length && (
+      {planIdx >= 0 && planIdx < total && planBuild && (
         <PlanModal
-          build={sortedBuilds[planIdx]}
+          build={planBuild}
           monsterName={anyMonster?.name ?? "魔靈"}
           ownerOf={(rid) => {
             const u = account?.units.find((x) => x.runes.includes(rid));
@@ -940,7 +1040,7 @@ function BuildCard({
             <div className="col" style={{ gap: 6 }}>
               <div className="kv"><span className="k">EHP（有效體力）</span><span className="v mono">{fmt(s.ehp)}</span></div>
               <div className="kv"><span className="k">套裝</span><span className="v">{setSummary(build.sets)}</span></div>
-              <div className="kv"><span className="k">綜合評分</span><span className="v mono">{scoreOf(s, build.eff, "score").toFixed(1)}</span></div>
+              <div className="kv"><span className="k">綜合評分</span><span className="v mono">{scoreOf(s).toFixed(1)}</span></div>
               {damage && damageSkill && (
                 <>
                   <div className="kv">
@@ -1083,7 +1183,8 @@ function FocusEditor({
         )}
       </div>
       <div className="hint" style={{ lineHeight: 1.5 }}>
-        最多 5 組。比重越高，該屬性數值高的符文越優先進入候選池（1 = 輕微、10 = 最優先）。
+        最多 5 組。比重越高，該屬性數值高的符文越優先被選進候選池（1 = 輕微、10 = 最優先）。
+        有設定焦點時，每個位置就是用這裡的比重挑出最符合的 18 顆符文。
       </div>
       {value.length === 0 && (
         <div className="tiny dim" style={{ lineHeight: 1.5 }}>
@@ -1138,18 +1239,18 @@ function FocusEditor({
       )}
       <div className="focus-depth">
         <div className="row between">
-          <span className="tiny dim">搜尋深度（每個位置候選符文）</span>
+          <span className="tiny dim">每位置候選符文（上限 18）</span>
           <b className="mono" style={{ fontSize: 11.5 }}>{pool}</b>
         </div>
         <input
           type="range"
-          min={8}
-          max={40}
+          min={6}
+          max={18}
           value={pool}
           onChange={(e) => onPoolChange(Number(e.target.value))}
           style={{ width: "100%" }}
         />
-        <div className="tiny dim">越大越準，但計算越久</div>
+        <div className="tiny dim">18 顆約 3,400 萬組；每少 1 顆組合數約少一半</div>
       </div>
     </div>
   );

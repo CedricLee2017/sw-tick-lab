@@ -312,8 +312,8 @@ export default function SettingsPage() {
             <div className="divider" />
             <div className="field">
               <label>每個位置候選符文數：{settings.pool}</label>
-              <input type="range" min={8} max={40} value={settings.pool} onChange={(e) => setPool(Number(e.target.value))} />
-              <span className="hint">數值越大越精準，配符時間也會增加。預設 18。</span>
+              <input type="range" min={6} max={18} value={settings.pool} onChange={(e) => setPool(Number(e.target.value))} />
+              <span className="hint">上限 18 顆（約 3,400 萬組）。有設定 FOCUS 時，這 18 顆由焦點比重挑選。</span>
             </div>
           </div>
         </div>

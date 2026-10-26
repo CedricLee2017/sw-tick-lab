@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 配符引擎 / Tick 公式自動測試
  * 用法：npm test
  *
@@ -33,7 +33,7 @@ const {
   tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize, maxSpeedBound,
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
-  defaultBonus, finalizeStats, statsForRunes,
+  defaultBonus, finalizeStats, statsForRunes, buildsOf,
 } = engine;
 
 let passed = 0;
@@ -317,15 +317,16 @@ check("主屬性『固定防禦』能找到固定值主屬性符文，並計入 
   const res = optimize({
     base: { hp: 10000, atk: 700, def: 700, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 },
     runes: p.account.runes,
-    required: [], min: { spd: 200 }, max: {}, objective: "spd",
-    bonus, limit: 5, pool: 18, allowEquipped: true, targetUnit: 0, rta: false,
+    required: [], min: { spd: 200 }, max: {},     bonus, pool: 18, allowEquipped: true, targetUnit: 0, rta: false,
     maxNodes: 100_000, mainFilters: { 6: 5 },
   });
-  assert.ok(res.builds.length > 0, "固定防禦主屬性應能找到組合");
-  assert.ok(res.builds.every((b) => b.runes[5]?.main.t === 5), "6 號位應全部是固定防禦");
-  assert.equal(res.builds[0].stats.spd, 226);
-  assert.equal(res.builds[0].stats.def, 1020, "固定防禦 +160 與 +160 應計入 DEF");
-  assert.ok(res.builds.some((b) => b.runes[5]?.id === 9306), "應用到固定防禦 +160 / 34 速的符文");
+  const builds = buildsOf(res, p.account.runes);
+  assert.ok(builds.length > 0, "固定防禦主屬性應能找到組合");
+  assert.ok(builds.every((b) => b.runes[5]?.main.t === 5), "6 號位應全部是固定防禦");
+  const fastest = builds.reduce((a, b) => (b.stats.spd > a.stats.spd ? b : a));
+  assert.equal(fastest.stats.spd, 226, "最高速應為 226");
+  assert.equal(fastest.stats.def, 1020, "固定防禦 +160 與 +160 應計入 DEF");
+  assert.ok(builds.some((b) => b.runes[5]?.id === 9306), "應用到固定防禦 +160 / 34 速的符文");
 });
 
 /* ── 4. 一鍵配符 ─────────────────────────────── */
@@ -340,9 +341,7 @@ const req = {
   required: [{ set: 3, count: 4 }, { set: 15, count: 2 }],
   min: { spd: 286 },
   max: {},
-  objective: "spd",
-  bonus,
-  limit: 5,
+    bonus,
   pool: 18,
   allowEquipped: true,
   targetUnit: 0,
@@ -353,11 +352,12 @@ const req = {
 const t0 = performance.now();
 const result = optimize(req);
 const elapsed = Math.round(performance.now() - t0);
+const resultBuilds = buildsOf(result, account.runes, false, 20);
 
 check("找到至少一組配裝", () => {
-  assert.ok(result.builds.length > 0, "沒有任何結果");
+  assert.ok(result.count > 0, "沒有任何結果");
 });
-for (const [i, b] of result.builds.entries()) {
+for (const [i, b] of resultBuilds.entries()) {
   check(`第 ${i + 1} 組：速度 ${b.stats.spd} / Tick ${b.stats.tick}、套裝符合`, () => {
     assert.ok(b.stats.spd >= 286, `速度只有 ${b.stats.spd}`);
     assert.ok(b.stats.tick <= 5, `Tick 為 ${b.stats.tick}`);
@@ -368,15 +368,15 @@ for (const [i, b] of result.builds.entries()) {
     assert.deepEqual(slots, [1, 2, 3, 4, 5, 6], "位置重複或缺漏");
   });
 }
-console.log(`  · 候選符文 ${result.candidates} 顆 · 節點 ${result.nodes.toLocaleString()} · ${elapsed} ms${result.truncated ? "（已達節點上限）" : ""}`);
+console.log(`  · 共 ${result.count.toLocaleString()} 組 · 候選符文 ${result.candidates} 顆 · 節點 ${result.nodes.toLocaleString()} · ${elapsed} ms${result.truncated ? "（已達節點上限）" : ""}`);
 console.log("  · 前三名：");
-for (const [i, b] of result.builds.slice(0, 3).entries()) {
+for (const [i, b] of resultBuilds.slice(0, 3).entries()) {
   console.log(`      ${i + 1}. ${b.stats.spd} 速 / Tick ${b.stats.tick} / HP ${b.stats.hp} / EHP ${b.stats.ehp} / 效率 ${b.eff.toFixed(1)}%`);
 }
 
 check("速度上界不低於實際最佳解", () => {
   const bound = maxSpeedBound(req);
-  assert.ok(bound.speed >= result.builds[0].stats.spd, `上界 ${bound.speed} < 實際 ${result.builds[0].stats.spd}`);
+  assert.ok(bound.speed >= resultBuilds[0].stats.spd, `上界 ${bound.speed} < 實際 ${resultBuilds[0].stats.spd}`);
   assert.ok(bound.speed < speedForTick(3), `上界 ${bound.speed} 不合理（超過 Tick 3）`);
 });
 check("允許破套：只強制主套 4 件", () => {
@@ -385,11 +385,9 @@ check("允許破套：只強制主套 4 件", () => {
     required: [{ set: 13, count: 4 }, { set: 15, count: 2 }],
     relaxSub: true,
     min: { spd: 286 },
-    objective: "spd",
-    limit: 5,
   });
-  assert.ok(relaxed.builds.length > 0, "破套模式沒有任何結果");
-  for (const b of relaxed.builds) {
+  assert.ok(relaxed.count > 0, "破套模式沒有任何結果");
+  for (const b of buildsOf(relaxed, account.runes, false, 50)) {
     assert.ok((b.sets[13] ?? 0) >= 4, "暴走不足 4 件");
     assert.ok(b.stats.spd >= 286);
   }
@@ -399,11 +397,9 @@ check("3×2 件套（能量 + 刀刃 + 意志）", () => {
     ...req,
     required: [{ set: 1, count: 2 }, { set: 4, count: 2 }, { set: 15, count: 2 }],
     min: {},
-    objective: "score",
-    limit: 5,
   });
-  assert.ok(tri.builds.length > 0, "3×2 件套沒有任何結果");
-  for (const b of tri.builds) {
+  assert.ok(tri.count > 0, "3×2 件套沒有任何結果");
+  for (const b of buildsOf(tri, account.runes, false, 50)) {
     assert.ok((b.sets[1] ?? 0) >= 2, "能量不足 2 件");
     assert.ok((b.sets[4] ?? 0) >= 2, "刀刃不足 2 件");
     assert.ok((b.sets[15] ?? 0) >= 2, "意志不足 2 件");
@@ -440,17 +436,18 @@ check("無形符文補足缺少的套裝", () => {
     base: { hp: 10000, atk: 700, def: 700, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 },
     runes: p.account.runes,
     required: [{ set: 5, count: 4 }, { set: 4, count: 2 }],
-    min: {}, max: {}, objective: "score", bonus: bonus0,
-    limit: 5, pool: 18, allowEquipped: true, targetUnit: 0, rta: false, maxNodes: 100_000,
+    min: {}, max: {}, bonus: bonus0,
+    pool: 18, allowEquipped: true, targetUnit: 0, rta: false, maxNodes: 100_000,
   };
   const withInt = optimize({ ...opts, intangible: true });
-  assert.ok(withInt.builds.length > 0, "有無形時應能組成 4+2");
-  assert.equal(withInt.builds[0].sets[5], 4, "無形沒有補足憤怒套裝");
-  assert.equal(withInt.builds[0].sets[4], 2);
-  assert.equal(withInt.builds[0].stats.cd, 90, "憤怒 +40 暴傷未套用");
-  assert.equal(withInt.builds[0].stats.cr, 27, "刀刃 +12 暴率未套用");
+  assert.ok(withInt.count > 0, "有無形時應能組成 4+2");
+  const withIntBuilds = buildsOf(withInt, p.account.runes, false, 5);
+  assert.equal(withIntBuilds[0].sets[5], 4, "無形沒有補足憤怒套裝");
+  assert.equal(withIntBuilds[0].sets[4], 2);
+  assert.equal(withIntBuilds[0].stats.cd, 90, "憤怒 +40 暴傷未套用");
+  assert.equal(withIntBuilds[0].stats.cr, 27, "刀刃 +12 暴率未套用");
   const without = optimize({ ...opts, intangible: false });
-  assert.equal(without.builds.length, 0, "沒有無形時不應能組成 4+2");
+  assert.equal(without.count, 0, "沒有無形時不應能組成 4+2");
 });
 
 check("主屬性篩選（#4 HP%、#6 攻擊%）", () => {
@@ -459,10 +456,9 @@ check("主屬性篩選（#4 HP%、#6 攻擊%）", () => {
     required: [],
     min: { spd: 180 },
     mainFilters: { 4: 2, 6: 4 },
-    limit: 3,
   });
-  assert.ok(filtered.builds.length > 0, "主屬性篩選後沒有任何結果");
-  for (const b of filtered.builds) {
+  assert.ok(filtered.count > 0, "主屬性篩選後沒有任何結果");
+  for (const b of buildsOf(filtered, account.runes, false, 50)) {
     assert.equal(b.runes[3].main.t, 2, "#4 不是 HP% 主屬性");
     assert.equal(b.runes[5].main.t, 4, "#6 不是攻擊%主屬性");
     assert.ok(b.stats.spd >= 180);
@@ -515,22 +511,22 @@ check("焦點權重會把高 HP 符文排到高速度符文前面", () => {
 const focusedRun = optimize({
   ...req,
   min: { spd: 286 },
-  objective: "spd",
-  focus: [{ key: "hp", weight: 10 }, { key: "spd", weight: 8 }],
+    focus: [{ key: "hp", weight: 10 }, { key: "spd", weight: 8 }],
 });
 check("Focus 套用到配符：仍符合速度條件，且附上焦點契合度", () => {
-  assert.ok(focusedRun.builds.length > 0, "加上 Focus 後沒有任何結果");
-  for (const b of focusedRun.builds) {
+  assert.ok(focusedRun.count > 0, "加上 Focus 後沒有任何結果");
+  const builds = buildsOf(focusedRun, account.runes, false, 50);
+  for (const b of builds) {
     assert.ok(b.stats.spd >= 286, `速度只有 ${b.stats.spd}`);
     assert.ok(typeof b.focusFit === "number", "缺少 focusFit");
     assert.ok(b.focusFit >= 0 && b.focusFit <= 100, `focusFit 超出範圍：${b.focusFit}`);
   }
-  for (let i = 1; i < focusedRun.builds.length; i++) {
-    assert.ok(focusedRun.builds[i - 1].score >= focusedRun.builds[i].score, "結果沒有依分數排序");
+  for (let i = 1; i < builds.length; i++) {
+    assert.ok(builds[i - 1].score >= builds[i].score, "結果沒有依分數排序");
   }
 });
-console.log(`  · 無 Focus 第一名：${result.builds[0].stats.spd} 速 / HP ${result.builds[0].stats.hp} / 焦點契合 ${Math.round(focusFitOf(result.builds[0].stats, [{ key: "hp", weight: 10 }, { key: "spd", weight: 8 }]))}%`);
-console.log(`  · 有 Focus 第一名：${focusedRun.builds[0].stats.spd} 速 / HP ${focusedRun.builds[0].stats.hp} / 焦點契合 ${Math.round(focusedRun.builds[0].focusFit)}%`);
+console.log(`  · 無 Focus 第一名：${resultBuilds[0].stats.spd} 速 / HP ${resultBuilds[0].stats.hp} / 焦點契合 ${Math.round(focusFitOf(resultBuilds[0].stats, [{ key: "hp", weight: 10 }, { key: "spd", weight: 8 }]))}%`);
+console.log(`  · 有 Focus 第一名：${buildsOf(focusedRun, account.runes, false, 1)[0].stats.spd} 速 / HP ${buildsOf(focusedRun, account.runes, false, 1)[0].stats.hp} / 焦點契合 ${Math.round(buildsOf(focusedRun, account.runes, false, 1)[0].focusFit)}%`);
 
 /* ── 5. 出手順序 ─────────────────────────────── */
 console.log("\n[5] 出手順序模擬");
