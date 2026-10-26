@@ -15,8 +15,8 @@ import {
   FOCUS_LIMIT, FOCUS_OPTIONS, OBJECTIVE_LABEL, normalizeFocus,
   type Build, type Objective, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick,
 } from "../lib/optimizer";
-import { baseStats, setSummary, tickOf } from "../lib/stats";
-import type { FocusEntry, Monster, Rune } from "../lib/types";
+import { baseStats, setSummary, tickOf, statsForRunes } from "../lib/stats";
+import type { FocusEntry, Monster, Rune, Stats } from "../lib/types";
 
 const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
 const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25 && s.id !== 99);
@@ -124,6 +124,8 @@ export default function OptimizerPage() {
     ignoreDef: false,
     aliveEnemies: 1,
     alliesAlive: 4,
+    // 與 SWOP 傷害選項預設一致：公會建築預設不計入
+    useGuild: false,
   });
   const patchDmg = (patch: Partial<DamageOptions>) => setDmgOpts((o) => ({ ...o, ...patch }));
 
@@ -418,11 +420,17 @@ export default function OptimizerPage() {
   }, [dmgSkill?.id]);
 
   const damageByBuild = useMemo(() => {
-    const map = new Map<Build, DamageResult>();
+    const map = new Map<Build, { dmg: DamageResult; stats: Stats }>();
     if (!result || !dmgOn || !dmgSkill) return map;
-    for (const b of result.builds) map.set(b, computeSkillDamage(b.stats, dmgSkill, dmgOpts));
+    // 傷害計算獨立於全局面板：可單獨決定是否計入公會建築
+    const dmgBonus = { ...bonus, useGuild: dmgOpts.useGuild, grind: true };
+    for (const b of result.builds) {
+      const runes = b.runes.filter((r): r is Rune => !!r);
+      const stats = statsForRunes(base, runes, dmgBonus, rta);
+      map.set(b, { dmg: computeSkillDamage(stats, dmgSkill, dmgOpts), stats });
+    }
     return map;
-  }, [result, dmgOn, dmgSkill, dmgOpts]);
+  }, [result, dmgOn, dmgSkill, dmgOpts, base, bonus, rta]);
 
   const sortOptions = useMemo(() => {
     if (!dmgOn || !dmgSkill) return SORT_OPTIONS;
@@ -444,7 +452,7 @@ export default function OptimizerPage() {
     const valueOf = (b: Build) => {
       if (sortKey === "eff") return b.eff;
       if (sortKey === "focus") return b.focusFit ?? 0;
-      if (sortKey === "dmg") return damageByBuild.get(b)?.total ?? 0;
+      if (sortKey === "dmg") return damageByBuild.get(b)?.dmg.total ?? 0;
       return b.stats[sortKey];
     };
     return result.builds
@@ -789,8 +797,10 @@ export default function OptimizerPage() {
               rta={rta}
               runeMap={runeMap}
               focus={focus}
-              damage={damageByBuild.get(b)}
+              damage={damageByBuild.get(b)?.dmg}
+              damageStats={damageByBuild.get(b)?.stats}
               damageSkill={dmgSkill}
+              guildOn={dmgOpts.useGuild}
               ownerOf={(rid) => {
                 const u = account?.units.find((x) => x.runes.includes(rid));
                 return u ? monsterLabel(u.master) : "";
@@ -858,7 +868,9 @@ function BuildCard({
   runeMap,
   focus,
   damage,
+  damageStats,
   damageSkill,
+  guildOn,
 }: {
   build: Build;
   index: number;
@@ -871,7 +883,9 @@ function BuildCard({
   runeMap: Map<number, Rune>;
   focus: FocusEntry[];
   damage?: DamageResult;
+  damageStats?: Stats;
   damageSkill?: Skill;
+  guildOn: boolean;
 }) {
   const s = build.stats;
   const mainSets = Object.entries(build.sets).sort((a, b) => b[1] - a[1]);
@@ -896,8 +910,8 @@ function BuildCard({
                 </span>
               )}
               {damage && damageSkill && (
-                <span className="chip gold" style={{ padding: "1px 7px", fontSize: 10.5 }} title={`S${damageSkill.slot} ${damageSkill.n} · ${damage.hits} 段 · 每段 ${fmt(damage.perHit)}`}>
-                  傷害 {fmt(damage.total)}
+                <span className="chip gold" style={{ padding: "1px 7px", fontSize: 10.5 }} title={`S${damageSkill.slot} ${damageSkill.n} · ${damage.hits} 段 · 每段 ${fmt(damage.perHit)} · 總計 ${fmt(damage.total)}${damageStats ? ` · 傷害用面板 ATK ${fmt(damageStats.atk)} / CD ${damageStats.cd}%` : ""}`}>
+                  傷害 {fmt(damage.perHit)}{damage.hits > 1 ? ` ×${damage.hits} = ${fmt(damage.total)}` : ""}
                 </span>
               )}
             </div>
@@ -937,6 +951,12 @@ function BuildCard({
                     <span className="k">每段 × 段數</span>
                     <span className="v mono">{fmt(damage.perHit)} × {damage.hits}</span>
                   </div>
+                  {damageStats && (
+                    <div className="kv">
+                      <span className="k">傷害用面板{guildOn ? "（含公會建築）" : "（未含公會建築）"}</span>
+                      <span className="v mono">ATK {fmt(damageStats.atk)} · CD {damageStats.cd}%</span>
+                    </div>
+                  )}
                 </>
               )}
             </div>

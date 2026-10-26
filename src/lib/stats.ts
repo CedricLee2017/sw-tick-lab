@@ -168,18 +168,22 @@ export function applySetBonuses(a: StatAccum, base: BaseStats) {
 
 export function defaultBonus(partial: Partial<BonusConfig> = {}): BonusConfig {
   return {
+    // 建築一律預設滿等（競技場圖騰 + 屬性塔 + 公會旗幟）
     towerSpd: 15,
-    towerAtk: 0,
-    towerHp: 0,
-    towerDef: 0,
-    guildAtk: 0,
-    guildHp: 0,
-    guildDef: 0,
-    guildCd: 0,
+    towerAtk: 20,
+    towerHp: 20,
+    towerDef: 20,
+    towerCd: 25,
+    elementAtk: 21,
+    guildAtk: 20,
+    guildHp: 20,
+    guildDef: 20,
+    guildCd: 25,
     leadSpd: 0,
     buffSpd: 0,
+    // 與 SWOP 預設一致：一般建築全滿，公會旗幟預設不計入（可手動開啟）
     useGuild: false,
-    useElementTower: false,
+    useElementTower: true,
     grind: true,
     ...partial,
   };
@@ -204,17 +208,18 @@ export function finalizeStats(
   bonus: BonusConfig,
   rta = false,
 ): Stats {
-  const pctHp = a.pctHp + bonus.towerHp + (bonus.useGuild ? bonus.guildHp : 0);
-  const pctAtk = a.pctAtk + bonus.towerAtk + (bonus.useGuild ? bonus.guildAtk : 0);
-  const pctDef = a.pctDef + bonus.towerDef + (bonus.useGuild ? bonus.guildDef : 0);
-  const pctSpd = bonus.towerSpd + bonus.leadSpd + bonus.buffSpd;
+  const pctHp = a.pctHp + (bonus.towerHp ?? 0) + (bonus.useGuild ? bonus.guildHp : 0);
+  const pctAtk =
+    a.pctAtk + (bonus.towerAtk ?? 0) + (bonus.useGuild ? bonus.guildAtk : 0) + (bonus.useElementTower ? bonus.elementAtk ?? 0 : 0);
+  const pctDef = a.pctDef + (bonus.towerDef ?? 0) + (bonus.useGuild ? bonus.guildDef : 0);
+  const pctSpd = (bonus.towerSpd ?? 0) + bonus.leadSpd + bonus.buffSpd;
 
   const hp = base.hp + Math.ceil((base.hp * pctHp) / 100) + a.flatHp;
   const atk = base.atk + Math.ceil((base.atk * pctAtk) / 100) + a.flatAtk;
   const def = base.def + Math.ceil((base.def * pctDef) / 100) + a.flatDef;
   const spd = base.spd + Math.ceil((base.spd * pctSpd) / 100) + a.spdSet + a.flatSpd;
   const cr = Math.min(100, base.cr + a.flatCr);
-  const cd = base.cd + a.flatCd + (bonus.useGuild ? bonus.guildCd : 0);
+  const cd = base.cd + a.flatCd + (bonus.towerCd ?? 0) + (bonus.useGuild ? bonus.guildCd : 0);
   const res = Math.min(100, base.res + a.flatRes);
   const acc = Math.min(100, base.acc + a.flatAcc);
   const ehp = Math.floor((hp * (1140 + 3.5 * def)) / 1000);
@@ -262,6 +267,7 @@ export function bonusFromBuildings(
   b.towerAtk = buildingPct(9, levelOf(9));
   b.towerDef = buildingPct(10, levelOf(10));
   b.towerHp = buildingPct(11, levelOf(11));
+  b.towerCd = buildingPct(8, levelOf(8));
   b.guildAtk = buildingPct(17, levelOf(17));
   b.guildCd = buildingPct(18, levelOf(18));
   b.guildHp = buildingPct(19, levelOf(19));

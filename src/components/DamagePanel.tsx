@@ -114,6 +114,10 @@ export function DamagePanel({
               <input type="checkbox" checked={opts.brand} onChange={(e) => onOptsChange({ brand: e.target.checked })} />
               烙印 +25%
             </label>
+            <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
+              <input type="checkbox" checked={opts.useGuild} onChange={(e) => onOptsChange({ useGuild: e.target.checked })} />
+              公會建築
+            </label>
           </div>
 
           <div className="dmg-formula">
@@ -129,7 +133,8 @@ export function DamagePanel({
             <div className="tiny dim" style={{ lineHeight: 1.6 }}>
               {skill.hits > 1 ? `每段傷害 × ${skill.hits} 段；` : ""}
               {skill.aoe ? "群體技能，以下為單一目標傷害；" : ""}
-              防禦減傷以 1000 / (1140 + 3.5 × 敵人防禦) 計算（無視防禦時為 1000 / 1140 ≈ 0.877）；未計屬性克制、神器、暴擊抵抗與部分特殊被動，數值為估算。
+              一般建築（競技場圖騰、屬性塔）以全滿等計算；公會建築預設不計入（與 SWOP 相同），可用下方「公會建築」勾選加入。
+              防禦減傷以 1000 / (1140 + 3.5 × 敵人防禦) 計算（無視防禦時為 1000 / 1140 ≈ 0.877）；滿技與暴擊為相加，未計屬性克制、神器、暴擊抵抗與部分特殊被動，數值為估算。
               {skill.e.includes(23) && " 炸彈技能：無視防禦、不會暴擊。"}
               {skill.e.includes(38) && " 此技能帶有無視防禦效果，已預設勾選。"}
               技能資料來源：SWARFARM。

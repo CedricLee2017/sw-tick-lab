@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { del, get, set } from "idb-keyval";
 import monstersJson from "./data/monsters.json";
 import { PARSE_VERSION, parseAccountJSON } from "./lib/parse";
-import { bonusFromBuildings, defaultBonus } from "./lib/stats";
+import { defaultBonus } from "./lib/stats";
 import type { Account, BonusConfig, FocusEntry, Monster, Rune, Stats } from "./lib/types";
 
 export const MONSTERS = monstersJson as unknown as Monster[];
@@ -91,6 +91,16 @@ export const useStore = create<Store>((setState, getState) => ({
       const saved = settings
         ? { ...DEFAULT_SETTINGS(), ...settings, focus: settings.focus ?? [] }
         : DEFAULT_SETTINGS();
+      // v2 起建築預設全滿等（含暴擊傷害圖騰、屬性攻擊塔）。舊設定沒有
+      // elementAtk 欄位，代表建築仍是 0%，直接升級為滿等（保留隊長技 / Buff）。
+      if (settings && (settings.bonus as Partial<BonusConfig> | undefined)?.elementAtk === undefined) {
+        saved.bonus = defaultBonus({
+          leadSpd: settings.bonus?.leadSpd ?? 0,
+          buffSpd: settings.bonus?.buffSpd ?? 0,
+          grind: settings.bonus?.grind ?? true,
+        });
+        void set(SETTINGS_KEY, saved);
+      }
       setState({
         ready: true,
         account: acc ?? null,
@@ -107,11 +117,13 @@ export const useStore = create<Store>((setState, getState) => ({
   importText: (text, fileName) => {
     const { account, error, warnings } = parseAccountJSON(text, fileName);
     if (!account) return { ok: false, error, warnings };
-    // 自動套用存檔中的建築等級；若匯出檔沒有建築等級，保留目前設定（0 時回到預設 15%）
+    // 建築一律以全滿等計算（速度圖騰 15%、競技場 20%、屬性塔 21%、公會 20/25%）。
+    // 若存檔有建築等級，可在「設定」頁按「套用存檔建築等級」覆寫。
     const prev = getState().settings;
-    const settings: Settings = account.buildings.length > 0
-      ? { ...prev, bonus: bonusFromBuildings(account.buildings, prev.bonus) }
-      : { ...prev, bonus: { ...prev.bonus, towerSpd: prev.bonus.towerSpd || 15 } };
+    const settings: Settings = {
+      ...prev,
+      bonus: defaultBonus({ leadSpd: prev.bonus.leadSpd, buffSpd: prev.bonus.buffSpd }),
+    };
     setState({
       account,
       runeMap: new Map(account.runes.map((r) => [r.id, r])),
@@ -119,12 +131,10 @@ export const useStore = create<Store>((setState, getState) => ({
     });
     void set(ACCOUNT_KEY, account);
     if (settings !== prev) void set(SETTINGS_KEY, settings);
-    const speedTower = account.buildings.find((b) => b.id === 7);
+    const detectedSpeed = account.buildings.find((b) => b.id === 7);
     getState().notify(
-      `已載入 ${account.units.length} 隻魔靈 / ${account.runes.length} 顆符文` +
-        (speedTower
-          ? ` · 速度圖騰 ${settings.bonus.towerSpd}%`
-          : ` · 建築等級未提供，速度圖騰沿用 ${settings.bonus.towerSpd}%`),
+      `已載入 ${account.units.length} 隻魔靈 / ${account.runes.length} 顆符文 · 建築以全滿等計算` +
+        (detectedSpeed ? `（存檔速度圖騰 Lv.${detectedSpeed.level}，可於設定頁套用）` : ""),
     );
     return { ok: true, warnings };
   },

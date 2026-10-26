@@ -14,6 +14,7 @@ type NumKey =
   | "towerAtk"
   | "towerHp"
   | "towerDef"
+  | "towerCd"
   | "guildAtk"
   | "guildHp"
   | "guildDef"
@@ -22,6 +23,7 @@ type NumKey =
 /** 建築 id → 可編輯的加成欄位 */
 const BUILDING_FIELDS: { id: number; field: NumKey }[] = [
   { id: 7, field: "towerSpd" },
+  { id: 8, field: "towerCd" },
   { id: 9, field: "towerAtk" },
   { id: 10, field: "towerDef" },
   { id: 11, field: "towerHp" },
@@ -79,9 +81,11 @@ export default function SettingsPage() {
       const level = detected.get(id) ?? 0;
       patch[field] = pctFor(id, level);
     }
+    // 屬性攻擊塔依魔靈屬性各自套用，這裡取五座塔的共同值（通常同等級）
+    patch.elementAtk = Math.max(0, ...ELEMENT_TOWERS.map((id) => pctFor(id, detected.get(id) ?? 0)));
     patch.useGuild = BUILDING_FIELDS.some((x) => x.id >= 17 && (detected.get(x.id) ?? 0) > 0);
     patchBonus(patch);
-    notify(`已套用建築等級（速度圖騰 ${patch.towerSpd ?? 0}%）`);
+    notify(`已套用存檔建築等級（速度圖騰 ${patch.towerSpd ?? 0}%）`);
   };
 
   const resetBonus = () => {
@@ -149,7 +153,7 @@ export default function SettingsPage() {
           <div className="card-head">
             <div>
               <div className="card-title">建築加成</div>
-              <div className="card-sub">依帳號存檔的建築等級換算，也可以手動調整</div>
+              <div className="card-sub">預設全滿等（一般 + 公會），可手動調整或套用存檔等級</div>
             </div>
             <div className="row" style={{ gap: 6 }}>
               <button className="btn btn-sm" onClick={applyDetected}><RefreshCw size={13} /> 從存檔偵測</button>
@@ -195,18 +199,20 @@ export default function SettingsPage() {
                   <td>
                     <div className="row" style={{ gap: 7 }}>
                       <Building2 size={13} className="dim" />
-                      <span style={{ fontWeight: 600 }}>暴擊傷害圖騰</span>
+                      <span style={{ fontWeight: 600 }}>屬性攻擊塔</span>
                     </div>
                   </td>
-                  <td className="num mono dim">{detected.has(8) ? `Lv.${detected.get(8)}` : "—"}</td>
-                  <td className="num mono dim">+{pctFor(8, detected.get(8) ?? 0)}%</td>
-                  <td className="tiny dim">不在本工具計算範圍</td>
+                  <td className="num mono dim">—</td>
+                  <td className="num mono gold">+{bonus.elementAtk}%</td>
+                  <td className="tiny dim">依魔靈屬性套用（預設滿等）</td>
                 </tr>
               </tbody>
             </table>
 
             <div className="divider" style={{ margin: "14px 0" }} />
-            <div className="tiny dim" style={{ marginBottom: 8 }}>屬性攻擊塔（僅顯示，依魔靈屬性各自套用，暫不納入配符計算）</div>
+            <div className="tiny dim" style={{ marginBottom: 8 }}>
+              屬性攻擊塔（火/水/風/光/暗）依魔靈屬性各自套用；預設皆滿等 +{bonus.elementAtk}%，納入配符與傷害計算。
+            </div>
             <div className="row wrap" style={{ gap: 6 }}>
               {ELEMENT_TOWERS.map((id) => {
                 const level = detected.get(id) ?? 0;

@@ -33,6 +33,7 @@ const {
   tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize, maxSpeedBound,
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
+  defaultBonus, finalizeStats, statsForRunes,
 } = engine;
 
 let passed = 0;
@@ -91,6 +92,47 @@ check("基礎速 114（Perna）→ 符文需 122 速", () => {
 check("加入 Buff 30% 後需求下降", () => {
   const need = speedNeededForTick(5, 100, { ...bonus43, buffSpd: 30 });
   assert.equal(need.runeSpeed, 113);
+});
+
+/* ── 2b. 建築預設全滿等 ───────────────────────── */
+console.log("\n[2b] 建築預設全滿等");
+check("一般建築 + 屬性塔 + 公會旗幟皆為滿等", () => {
+  const b = defaultBonus();
+  assert.equal(b.towerSpd, 15, "速度圖騰");
+  assert.equal(b.towerAtk, 20, "攻擊圖騰");
+  assert.equal(b.towerHp, 20, "體力圖騰");
+  assert.equal(b.towerDef, 20, "防禦圖騰");
+  assert.equal(b.towerCd, 25, "暴擊傷害圖騰");
+  assert.equal(b.elementAtk, 21, "屬性攻擊塔");
+  assert.equal(b.guildAtk, 20, "公會攻擊");
+  assert.equal(b.guildHp, 20, "公會體力");
+  assert.equal(b.guildDef, 20, "公會防禦");
+  assert.equal(b.guildCd, 25, "公會暴傷");
+  assert.equal(b.useGuild, false, "公會旗幟預設不計入（與 SWOP 相同）");
+  assert.equal(b.useElementTower, true);
+});
+check("公會建築可獨立開關：只影響公會旗幟", () => {
+  const base = { hp: 10000, atk: 1000, def: 1000, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
+  const bonus = defaultBonus({ leadSpd: 0, buffSpd: 0 });
+  const acc = emptyAccum();
+  const on = finalizeStats(base, acc, { ...bonus, useGuild: true });
+  const off = finalizeStats(base, acc, { ...bonus, useGuild: false });
+  // 攻擊：競技場 20% + 屬性塔 21% + 公會 20%
+  assert.equal(on.atk, 1000 + Math.ceil(1000 * 0.61));
+  assert.equal(off.atk, 1000 + Math.ceil(1000 * 0.41));
+  assert.equal(on.cd, 50 + 25 + 25);
+  assert.equal(off.cd, 50 + 25);
+  // 不計屬性塔時：競技場 20% + 公會 20%
+  const noElem = finalizeStats(base, acc, { ...bonus, useGuild: true, useElementTower: false });
+  assert.equal(noElem.atk, 1000 + Math.ceil(1000 * 0.4));
+});
+check("statsForRunes 與 finalizeStats 結果一致（公會開關）", () => {
+  const base = { hp: 10000, atk: 1000, def: 1000, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
+  const bonus = defaultBonus({ leadSpd: 0, buffSpd: 0 });
+  const acc = emptyAccum();
+  const direct = finalizeStats(base, acc, bonus);
+  const viaRunes = statsForRunes(base, [], bonus);
+  assert.deepEqual(viaRunes, direct);
 });
 
 /* ── 3. 示範帳號解析 ─────────────────────────── */
@@ -527,48 +569,72 @@ const mit800 = 1000 / (1140 + 3.5 * 800);
 
 check("倍率公式 + 防禦減傷 + 段數", () => {
   const r = computeSkillDamage(dmgStats, mkSkill(), dmgBase);
-  assert.equal(r.perHit, Math.round(2000 * 3.6 * mit800));
-  assert.equal(r.total, Math.round(2000 * 3.6 * mit800) * 2);
+  assert.equal(r.perHit, Math.floor(2000 * 3.6 * mit800));
+  assert.equal(r.total, Math.floor(2000 * 3.6 * mit800) * 2);
   assert.ok(Math.abs(r.mitigation - mit800) < 1e-9);
 });
 
 check("暴擊 / 平均 / 技能升級 / ATK Buff", () => {
   const crit = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, crit: "crit" });
-  assert.equal(crit.perHit, Math.round(2000 * 3.6 * 2.5 * mit800));
+  assert.equal(crit.perHit, Math.floor(2000 * 3.6 * 2.5 * mit800));
   const avg = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, crit: "average" });
-  assert.equal(avg.perHit, Math.round(2000 * 3.6 * 2.5 * mit800), "CR 100% 時平均應等於必暴");
+  assert.equal(avg.perHit, Math.floor(2000 * 3.6 * 2.5 * mit800), "CR 100% 時平均應等於必暴");
   const up = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, skillUps: true });
-  assert.equal(up.perHit, Math.round(2000 * 3.6 * 1.25 * mit800));
+  assert.equal(up.perHit, Math.floor(2000 * 3.6 * 1.25 * mit800));
   const buff = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, atkBuff: 50, leadAtk: 25 });
-  assert.equal(buff.perHit, Math.round(2000 * 1.75 * 3.6 * mit800));
+  assert.equal(buff.perHit, Math.floor(2000 * 1.75 * 3.6 * mit800));
+});
+
+check("滿技與暴擊為相加（與 SWOP 相同）", () => {
+  // SWOP：DMG = 基礎 × (暴擊係數 + 滿技%)；不是相乘
+  const r = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, crit: "crit", skillUps: true });
+  assert.equal(r.perHit, Math.floor(2000 * 3.6 * (2.5 + 0.25) * mit800));
 });
 
 check("無視防禦 / 破防 / 烙印", () => {
   const ig = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, ignoreDef: true });
   assert.equal(ig.mitigation, 1000 / 1140);
-  assert.equal(ig.perHit, Math.round(2000 * 3.6 * (1000 / 1140)));
+  assert.equal(ig.perHit, Math.floor(2000 * 3.6 * (1000 / 1140)));
   const br = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, defBreak: true });
   const mitBreak = 1000 / (1140 + 3.5 * 800 * 0.3);
-  assert.equal(br.perHit, Math.round(2000 * 3.6 * mitBreak));
+  assert.equal(br.perHit, Math.floor(2000 * 3.6 * mitBreak));
   const brand = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, brand: true });
-  assert.equal(brand.perHit, Math.round(2000 * 3.6 * 1.25 * mit800));
+  assert.equal(brand.perHit, Math.floor(2000 * 3.6 * 1.25 * mit800));
 });
+
+check("風丑 S3 Amputation Magic：3 段無視防禦（與 SWOP 相同公式）", () => {
+  const lushen = skillsForMonster(skillData, 13413);
+  const s3 = lushen.find((s) => s.slot === 3);
+  assert.equal(s3.n, "Amputation Magic");
+  assert.equal(s3.hits, 3);
+  assert.ok(s3.e.includes(38), "S3 應標記無視防禦");
+  // 對照 SWOP：ATK 2377（含競技場 20% + 屬性塔 21%）、ATK Buff 50%、
+  // 暴傷 186%（含競技場 25%）、滿技 30%、無視防禦 → SWOP DMG = 6720/段
+  const r = computeSkillDamage(
+    { ...dmgStats, atk: 2377, cd: 186 },
+    s3,
+    { ...dmgBase, crit: "crit", skillUps: true, ignoreDef: true, atkBuff: 50 },
+  );
+  assert.equal(r.perHit, 6720);
+  assert.equal(r.total, 6720 * 3);
+});
+
 
 check("速度 / 目標體力% 公式", () => {
   const spdSkill = mkSkill({ f: "{ATK}*({SPD} + 155)/135", hits: 2 });
   const s = computeSkillDamage(dmgStats, spdSkill, dmgBase);
-  assert.equal(s.perHit, Math.round((2000 * (200 + 155)) / 135 * mit800));
-  assert.equal(s.total, Math.round((2000 * (200 + 155)) / 135 * mit800) * 2);
+  assert.equal(s.perHit, Math.floor((2000 * (200 + 155)) / 135 * mit800));
+  assert.equal(s.total, Math.floor((2000 * (200 + 155)) / 135 * mit800) * 2);
   const hpSkill = mkSkill({ f: "{ATK}*(4.1 - 1.6*{Target Current HP %})", hits: 1 });
   const h = computeSkillDamage(dmgStats, hpSkill, { ...dmgBase, enemyHpPct: 50 });
-  assert.equal(h.perHit, Math.round(2000 * (4.1 - 1.6 * 0.5) * mit800));
+  assert.equal(h.perHit, Math.floor(2000 * (4.1 - 1.6 * 0.5) * mit800));
 });
 
 check("炸彈：不暴擊、無視防禦", () => {
   const bomb = computeSkillDamage(dmgStats, mkSkill({ f: "4.0*{ATK}", hits: 1, e: [23] }), { ...dmgBase, crit: "crit" });
   assert.equal(bomb.mitigation, 1000 / 1140);
-  assert.equal(bomb.perHit, Math.round(8000 * (1000 / 1140)));
-  assert.equal(bomb.total, Math.round(8000 * (1000 / 1140)));
+  assert.equal(bomb.perHit, Math.floor(8000 * (1000 / 1140)));
+  assert.equal(bomb.total, Math.floor(8000 * (1000 / 1140)));
   assert.equal(bomb.bomb, true);
 });
 

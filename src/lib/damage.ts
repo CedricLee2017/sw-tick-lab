@@ -47,6 +47,8 @@ export interface DamageOptions {
   ignoreDef: boolean;
   aliveEnemies: number;
   alliesAlive: number;
+  /** 是否計入公會建築（公會攻擊/暴傷旗幟） */
+  useGuild: boolean;
 }
 
 export interface DamageResult {
@@ -99,8 +101,6 @@ export function defaultSkill(skills: Skill[]): Skill | undefined {
   const pool = damaging.length > 0 ? damaging : skills;
   return [...pool].sort((a, b) => b.slot - a.slot)[0];
 }
-
-const round = (v: number) => Math.round(v);
 
 /** 把 {TOKEN} 換成數值，再用遞迴下降解析 + - * / 與括號 */
 function evalFormula(formula: string, vars: Record<string, number>): { value: number; unsupported: string[] } {
@@ -200,12 +200,13 @@ export function computeSkillDamage(stats: Stats, skill: Skill, opts: DamageOptio
   const bomb = skill.e.includes(23);
   const ignoreDef = opts.ignoreDef || bomb;
   const hits = Math.max(1, skill.hits || 1);
-  const skillUpMul = opts.skillUps ? 1 + Math.max(0, skill.up) / 100 : 1;
-  let critMul = 1;
+  // SWOP 的「滿技」是與暴擊係數相加，而非相乘：DMG = 基礎 × (品牌 × 暴擊 + 滿技%)
+  const skillUpFrac = opts.skillUps ? Math.max(0, skill.up) / 100 : 0;
+  let critFactor = 1;
   if (!bomb) {
-    if (opts.crit === "crit") critMul = 1 + Math.max(0, stats.cd) / 100;
+    if (opts.crit === "crit") critFactor = 1 + Math.max(0, stats.cd) / 100;
     else if (opts.crit === "average") {
-      critMul = 1 + (Math.max(0, Math.min(100, stats.cr)) / 100) * (Math.max(0, stats.cd) / 100);
+      critFactor = 1 + (Math.max(0, Math.min(100, stats.cr)) / 100) * (Math.max(0, stats.cd) / 100);
     }
   }
   const brandMul = opts.brand ? 1.25 : 1;
@@ -213,14 +214,16 @@ export function computeSkillDamage(stats: Stats, skill: Skill, opts: DamageOptio
   // 無視防禦時仍會套用 1140 的基礎係數：1000 / 1140 ≈ 0.8772（與 SWOP 一致）
   const mitigation = ignoreDef ? 1000 / 1140 : 1000 / (1140 + 3.5 * effectiveDef);
 
-  const rawPerHit = Math.max(0, parsed.value) * skillUpMul * critMul * brandMul;
-  const perHit = round(rawPerHit * mitigation);
+  const preMitigation = Math.max(0, parsed.value);
+  const rawPerHit = preMitigation * (brandMul * critFactor + skillUpFrac);
+  // SWOP 使用 Math.floor
+  const perHit = Math.floor(rawPerHit * mitigation);
   return {
     total: perHit * hits,
     perHit,
     hits,
     mitigation,
-    rawTotal: round(rawPerHit * hits),
+    rawTotal: Math.floor(rawPerHit * hits),
     unsupported: parsed.unsupported,
     bomb,
   };

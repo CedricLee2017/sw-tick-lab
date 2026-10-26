@@ -91,6 +91,10 @@ export interface BonusConfig {
   towerAtk: number;
   towerHp: number;
   towerDef: number;
+  /** 暴擊傷害圖騰 %（競技場） */
+  towerCd: number;
+  /** 屬性攻擊塔 %（依魔靈屬性，滿等皆 21） */
+  elementAtk: number;
   /** 公會旗幟 % */
   guildAtk: number;
   guildHp: number;
