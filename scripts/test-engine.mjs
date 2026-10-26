@@ -329,6 +329,47 @@ check("主屬性『固定防禦』能找到固定值主屬性符文，並計入 
   assert.ok(builds.some((b) => b.runes[5]?.id === 9306), "應用到固定防禦 +160 / 34 速的符文");
 });
 
+check("rune_id 超過 32 位元（SWEX 64-bit）時仍能還原符文", () => {
+  // 真實 SWEX 的 rune_id 是 64 位元等級的大數字（例如 1970289973248001），
+  // 若把 id 直接塞進 Int32Array 會溢位成負數，導致畫面上每顆符文都變「未裝備」。
+  const OFF = 1_970_289_973_148_000;
+  const mk = (id, slot, set, mainT, mainV, spd) => ({
+    rune_id: id + OFF, slot_no: slot, set_id: set, class: 6, rank: 5, upgrade_curr: 15,
+    pri_eff: [mainT, mainV], prefix_eff: [0, 0],
+    sec_eff: spd ? [[8, spd, 0, 0]] : [],
+  });
+  const raw = {
+    unit_list: [],
+    runes: [
+      mk(9301, 1, 4, 3, 160, 10),
+      mk(9302, 2, 15, 8, 42, 10),
+      mk(9303, 3, 1, 5, 160, 10),
+      mk(9304, 4, 6, 2, 63, 10),
+      mk(9305, 5, 7, 1, 2448, 10),
+      mk(9306, 6, 17, 5, 160, 34),
+    ],
+    building_list: [],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "big-id.json");
+  assert.equal(p.error, undefined, p.error);
+  const res = optimize({
+    base: { hp: 10000, atk: 700, def: 700, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 },
+    runes: p.account.runes,
+    required: [], min: {}, max: {}, pool: 18, allowEquipped: true, targetUnit: 0, rta: false,
+    maxNodes: 100_000,
+    bonus: {
+      towerSpd: 0, towerAtk: 0, towerHp: 0, towerDef: 0,
+      guildAtk: 0, guildHp: 0, guildDef: 0, guildCd: 0,
+      leadSpd: 0, buffSpd: 0, useGuild: false, useElementTower: false, grind: true,
+    },
+  });
+  assert.ok(res.count > 0, "大 rune_id 帳號應能找到組合");
+  const b = buildsOf(res, p.account.runes, false, 1)[0];
+  assert.equal(b.runes.filter(Boolean).length, 6, "6 顆符文應全部還原");
+  assert.ok(b.runes.every((r) => r && r.id > OFF), "還原後的符文 id 不對");
+  assert.equal(Object.values(b.sets).reduce((x, y) => x + y, 0), 6, "套裝件數應合計 6");
+});
+
 /* ── 4. 一鍵配符 ─────────────────────────────── */
 console.log("\n[4] 一鍵配符（迅速 ×4 + 意志 ×2，目標 Tick 5）");
 const velajuel = MONSTERS.find((m) => m.id === 17012);

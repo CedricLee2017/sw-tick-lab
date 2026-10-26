@@ -6,7 +6,8 @@ self.onmessage = (e: MessageEvent<{ id: number; req: OptRequest }>) => {
     const res: OptResult = optimize(req);
     // 用 transfer 把 typed array 直接移交給主執行緒，避免複製上百 MB
     (self as unknown as Worker).postMessage({ id, res }, [
-      res.runeIds.buffer,
+      res.runeIdx.buffer,
+      res.runeTable.buffer,
       res.statValues.buffer,
       res.scores.buffer,
       res.effs.buffer,

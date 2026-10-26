@@ -100,8 +100,14 @@ export interface Build {
 export interface OptResult {
   /** 符合條件的組合總數 */
   count: number;
-  /** 每組 6 顆符文 id（長度 count×6，依位置 1..6） */
-  runeIds: Int32Array;
+  /** 每組 6 顆符文的密集索引（長度 count×6，依位置 1..6；-1 表示沒有符文） */
+  runeIdx: Int32Array;
+  /**
+   * 密集索引 → 符文 id。
+   * SWEX 的 rune_id 是 64 位元等級的大數字（例如 1.97e15），超過 Int32 範圍，
+   * 直接存進 Int32Array 會溢位成負數、導致還原時找不到符文，所以只存索引。
+   */
+  runeTable: Float64Array;
   /** 每組面板數值（長度 count×8，順序同 STAT_KEYS） */
   statValues: Float32Array;
   /** 每組綜合評分（含焦點加分） */
@@ -138,7 +144,8 @@ const EMPTY_RESULT = (
   intangible = false,
 ): OptResult => ({
   count: 0,
-  runeIds: new Int32Array(0),
+  runeIdx: new Int32Array(0),
+  runeTable: new Float64Array(0),
   statValues: new Float32Array(0),
   scores: new Float32Array(0),
   effs: new Float32Array(0),
@@ -186,7 +193,8 @@ export function buildAt(
   const sets: Record<number, number> = {};
   const base = i * 6;
   for (let k = 0; k < 6; k++) {
-    const r = runeById.get(res.runeIds[base + k]) ?? null;
+    const idx = res.runeIdx[base + k];
+    const r = idx >= 0 ? (runeById.get(res.runeTable[idx]) ?? null) : null;
     runes.push(r);
     if (r) sets[r.set] = (sets[r.set] ?? 0) + 1;
   }
@@ -297,6 +305,8 @@ interface Cand {
   rune: Rune;
   d: StatAccum;
   eff: number;
+  /** 符文 id 在 runeTable 的密集索引（id 本身可能超過 Int32） */
+  idx: number;
 }
 
 export function optimize(req: OptRequest): OptResult {
@@ -354,6 +364,18 @@ export function optimize(req: OptRequest): OptResult {
   const rankValue = (r: Rune) => runeValue(r, wRank, focusRank ? undefined : focusWeight) + r.eff * 0.01;
 
   // 每個位置候選：上限 18 顆
+  // 符文 id 可能超過 32 位元（SWEX 是 64-bit），所以結果只存「密集索引」，還原時再查表
+  const runeTable: number[] = [];
+  const denseOf = new Map<number, number>();
+  const dense = (r: Rune) => {
+    let i = denseOf.get(r.id);
+    if (i === undefined) {
+      i = runeTable.length;
+      denseOf.set(r.id, i);
+      runeTable.push(r.id);
+    }
+    return i;
+  };
   const slots: { slot: number; list: Cand[] }[] = [];
   const maxCand = Math.min(18, Math.max(6, pool));
   const speedTarget = min.spd ?? 0;
@@ -397,7 +419,7 @@ export function optimize(req: OptRequest): OptResult {
       list: picked.map((rune) => {
         const d = emptyAccum();
         addRuneToAccum(d, rune, bonus.grind);
-        return { rune, d, eff: rune.eff };
+        return { rune, d, eff: rune.eff, idx: dense(rune) };
       }),
     });
   }
@@ -453,7 +475,8 @@ export function optimize(req: OptRequest): OptResult {
   const maxEntries = Object.entries(max).filter(([, v]) => typeof v === "number" && Number.isFinite(v)) as [StatKey, number][];
 
   const acc = emptyAccum();
-  const chosen: (Rune | null)[] = new Array(7).fill(null);
+  /** 目前選到的符文在 runeTable 的密集索引（0 號位置不用） */
+  const chosenIdx: number[] = new Array(7).fill(-1);
   let nodes = 0;
   let accEff = 0;
   let truncated = false;
@@ -461,7 +484,7 @@ export function optimize(req: OptRequest): OptResult {
 
   // ── 結果池：保留「所有」符合條件的組合，但用 typed array 分塊儲存 ──
   // 一個 Build 物件約 700 bytes，上百萬組會吃掉近 1 GB；
-  // 這裡只存「符文 id + 面板數值 + 分數」，需要顯示時才用 buildAt() 還原。
+  // 這裡只存「符文索引 + 面板數值 + 分數」，需要顯示時才用 buildAt() 還原。
   const CHUNK = 16384;
   type Chunk = {
     ids: Int32Array;
@@ -474,7 +497,7 @@ export function optimize(req: OptRequest): OptResult {
   const chunks: Chunk[] = [];
   let cur: Chunk | null = null;
   let count = 0;
-  const push = (runes: (Rune | null)[], stats: Stats, score: number, eff: number, fit: number) => {
+  const push = (idx: number[], stats: Stats, score: number, eff: number, fit: number) => {
     if (count >= MAX_RESULTS) {
       overflow = true;
       truncated = true;
@@ -493,7 +516,7 @@ export function optimize(req: OptRequest): OptResult {
     }
     const k = cur.n++;
     const ib = k * 6;
-    for (let s = 0; s < 6; s++) cur.ids[ib + s] = runes[s]?.id ?? 0;
+    for (let s = 0; s < 6; s++) cur.ids[ib + s] = idx[s + 1];
     const o = k * 8;
     cur.stats[o] = stats.hp;
     cur.stats[o + 1] = stats.atk;
@@ -559,7 +582,7 @@ export function optimize(req: OptRequest): OptResult {
       const eff = accEff / 6;
       const fit = focusFitOf(stats, focusList);
       push(
-        chosen.slice(1),
+        chosenIdx,
         stats,
         scoreOf(stats) + (focusList.length ? (fit / 100) * FOCUS_BONUS : 0),
         eff,
@@ -607,11 +630,11 @@ export function optimize(req: OptRequest): OptResult {
       const setId = cand.rune.set;
       acc.sets[setId] = (acc.sets[setId] ?? 0) + 1;
       accEff += cand.eff;
-      chosen[seq[depth].slot] = cand.rune;
+      chosenIdx[seq[depth].slot] = cand.idx;
 
       dfs(depth + 1);
 
-      chosen[seq[depth].slot] = null;
+      chosenIdx[seq[depth].slot] = -1;
       accEff -= cand.eff;
       acc.sets[setId] -= 1;
       if (acc.sets[setId] <= 0) delete acc.sets[setId];
@@ -634,14 +657,14 @@ export function optimize(req: OptRequest): OptResult {
   dfs(0);
 
   // 合併分塊，排序留到最後一次做（UI 每頁只還原 30 組）
-  const runeIds = new Int32Array(count * 6);
+  const runeIdx = new Int32Array(count * 6);
   const statValues = new Float32Array(count * 8);
   const scores = new Float32Array(count);
   const effs = new Float32Array(count);
   const focusFits = new Float32Array(count);
   let off = 0;
   for (const c of chunks) {
-    runeIds.set(c.ids.subarray(0, c.n * 6), off * 6);
+    runeIdx.set(c.ids.subarray(0, c.n * 6), off * 6);
     statValues.set(c.stats.subarray(0, c.n * 8), off * 8);
     scores.set(c.scores.subarray(0, c.n), off);
     effs.set(c.effs.subarray(0, c.n), off);
@@ -654,7 +677,8 @@ export function optimize(req: OptRequest): OptResult {
 
   return {
     count,
-    runeIds,
+    runeIdx,
+    runeTable: Float64Array.from(runeTable),
     statValues,
     scores,
     effs,
