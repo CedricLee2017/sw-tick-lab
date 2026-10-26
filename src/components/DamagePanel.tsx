@@ -129,7 +129,7 @@ export function DamagePanel({
             <div className="tiny dim" style={{ lineHeight: 1.6 }}>
               {skill.hits > 1 ? `每段傷害 × ${skill.hits} 段；` : ""}
               {skill.aoe ? "群體技能，以下為單一目標傷害；" : ""}
-              防禦減傷以 1000 / (1140 + 3.5 × 敵人防禦) 計算；未計屬性克制、神器、暴擊抵抗與部分特殊被動，數值為估算。
+              防禦減傷以 1000 / (1140 + 3.5 × 敵人防禦) 計算（無視防禦時為 1000 / 1140 ≈ 0.877）；未計屬性克制、神器、暴擊抵抗與部分特殊被動，數值為估算。
               {skill.e.includes(23) && " 炸彈技能：無視防禦、不會暴擊。"}
               {skill.e.includes(38) && " 此技能帶有無視防禦效果，已預設勾選。"}
               技能資料來源：SWARFARM。

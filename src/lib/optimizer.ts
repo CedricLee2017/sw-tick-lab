@@ -95,6 +95,8 @@ export interface OptRequest {
   mainFilters?: Partial<Record<number, number>>;
   /** 允許破套：副套裝（2 件）只作優先，不強制剛好 2 件 */
   relaxSub?: boolean;
+  /** 允許使用 1 顆無形符文補足缺少的 1 件套裝 */
+  intangible?: boolean;
   /** 焦點屬性：數值越高的符文越優先進入候選池（最多 5 組） */
   focus?: FocusEntry[];
 }
@@ -218,8 +220,11 @@ export function optimize(req: OptRequest): OptResult {
     maxNodes = 3_500_000,
     mainFilters = {},
     relaxSub = false,
+    intangible = false,
     focus = [],
   } = req;
+
+  const INTANGIBLE_ID = 25;
 
   const focusList = normalizeFocus(focus);
   const focusWeight = new Map<StatKey, number>();
@@ -251,7 +256,7 @@ export function optimize(req: OptRequest): OptResult {
     const mainT = mainFilters[slot] ?? 0;
     if (mainT) list = list.filter((r) => r.main.t === mainT);
     if (!allowEquipped) list = list.filter((r) => r.occupied === 0 || r.occupied === targetUnit);
-    if (strictSets) list = list.filter((r) => requiredIds.has(r.set));
+    if (strictSets) list = list.filter((r) => requiredIds.has(r.set) || (intangible && r.set === INTANGIBLE_ID));
     const scored = list
       .map((r) => ({ r, v: runeValue(r, w, focusWeight) + r.eff * 0.02, spd: runeSpeed(r) }))
       .sort((a, b) => b.v - a.v);
@@ -390,10 +395,20 @@ export function optimize(req: OptRequest): OptResult {
 
     if (depth === 6) {
       // 最後仍要驗證套裝件數（深度 5 的可行性檢查只能保證「還來得及」）
-      for (const rs of requiredSets) {
-        if ((acc.sets[rs.set] ?? 0) < rs.count) return;
-      }
+      const wild = intangible ? (acc.sets[INTANGIBLE_ID] ?? 0) : 0;
+      let short = 0;
+      for (const rs of requiredSets) short += Math.max(0, rs.count - (acc.sets[rs.set] ?? 0));
+      if (short > wild) return;
       const a: StatAccum = { ...acc, sets: { ...acc.sets } };
+      // 把無形符文補到缺 1 件的套裝上（依序），讓套裝加成正確
+      let w = wild;
+      for (const rs of requiredSets) {
+        const have = a.sets[rs.set] ?? 0;
+        if (have < rs.count && w > 0 && rs.count - have === 1) {
+          a.sets[rs.set] = have + 1;
+          w--;
+        }
+      }
       applySetBonuses(a, base);
       const stats = finalizeStats(base, a, bonus, rta);
       for (const [k, v] of minEntries) if (stats[k] < v) return;
@@ -405,7 +420,7 @@ export function optimize(req: OptRequest): OptResult {
         stats,
         score: scoreOf(stats, eff, objective) + (focusList.length ? (fit / 100) * FOCUS_BONUS : 0),
         eff,
-        sets: { ...acc.sets },
+        sets: { ...a.sets },
         focusFit: fit,
       });
       return;
@@ -417,7 +432,7 @@ export function optimize(req: OptRequest): OptResult {
       const have = acc.sets[rs.set] ?? 0;
       const need = rs.count - have;
       if (need > remain) return;
-      if (need > (sufSet[rs.set]?.[depth] ?? 0)) return;
+      if (!intangible && need > (sufSet[rs.set]?.[depth] ?? 0)) return;
     }
 
     // 下限（已達成）與上限（樂觀）
@@ -510,6 +525,7 @@ export function maxSpeedBound(req: {
   targetUnit?: number;
   mainFilters?: Partial<Record<number, number>>;
   relaxSub?: boolean;
+  intangible?: boolean;
 }): { speed: number; tick: number; perSlot: number[]; missingSlots: number[] } {
   const requiredSets = req.required.filter((r) => (req.relaxSub ? r.count >= 4 : r.count > 0));
   const requiredTotal = requiredSets.reduce((s, r) => s + r.count, 0);
@@ -518,11 +534,12 @@ export function maxSpeedBound(req: {
   const allowEquipped = req.allowEquipped ?? true;
   const targetUnit = req.targetUnit ?? 0;
   const mainFilters = req.mainFilters ?? {};
+  const intangible = req.intangible ?? false;
 
   const perSlot: number[] = [];
   const missingSlots: number[] = [];
-  /** 每個位置：任意符文的最高速、各指定套裝的最高速、迅速最高速 */
-  const slotData: { any: number; bySet: Map<number, number>; swift: number }[] = [];
+  /** 每個位置：任意符文的最高速、各指定套裝的最高速、迅速最高速、無形最高速 */
+  const slotData: { any: number; bySet: Map<number, number>; swift: number; intang: number }[] = [];
   for (let slot = 1; slot <= 6; slot++) {
     const mainT = mainFilters[slot] ?? 0;
     const list = req.runes.filter(
@@ -534,24 +551,39 @@ export function maxSpeedBound(req: {
     const bySet = new Map<number, number>();
     let any = 0;
     let swift = 0;
+    let intang = 0;
     for (const r of list) {
       const spd = runeSpeed(r);
       any = Math.max(any, spd);
       if (r.set === 3) swift = Math.max(swift, spd);
+      if (r.set === 25) intang = Math.max(intang, spd);
       if (ids.has(r.set)) bySet.set(r.set, Math.max(bySet.get(r.set) ?? 0, spd));
     }
     if (list.length === 0) missingSlots.push(slot);
     perSlot.push(any);
-    slotData.push({ any, bySet, swift });
+    slotData.push({ any, bySet, swift, intang });
   }
 
   let flat = 0;
   let setSpd = 0;
   if (strict) {
     // 六格都必須來自指定套裝（只取每個位置該套裝的最高速）
-    for (const s of slotData) flat += Math.max(0, ...[...ids].map((id) => s.bySet.get(id) ?? 0));
+    const requiredMax: number[] = [];
+    for (const s of slotData) {
+      const rm = Math.max(0, ...[...ids].map((id) => s.bySet.get(id) ?? 0));
+      requiredMax.push(rm);
+      flat += rm;
+    }
+    if (intangible) {
+      // 無形可補 1 件：取「最能提升速度」的那一格替換
+      let best = 0;
+      for (let i = 0; i < slotData.length; i++) best = Math.max(best, slotData[i].intang - requiredMax[i]);
+      flat += Math.max(0, best);
+    }
     slotData.forEach((s, i) => {
-      if (![...ids].some((id) => s.bySet.has(id)) && !missingSlots.includes(i + 1)) missingSlots.push(i + 1);
+      const hasReq = [...ids].some((id) => s.bySet.has(id));
+      const hasInt = intangible && s.intang > 0;
+      if (!hasReq && !hasInt && !missingSlots.includes(i + 1)) missingSlots.push(i + 1);
     });
     if (requiredSets.some((r) => r.set === 3 && r.count >= 4)) {
       setSpd = Math.ceil((req.base.spd * 25) / 100);

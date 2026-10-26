@@ -411,6 +411,10 @@ p { margin: 0; }
   display: flex; flex-direction: column; gap: 4px;
 }
 
+.set-group-row { display: flex; gap: 6px; align-items: center; }
+.set-group-row .select { flex: 1; min-width: 0; }
+.set-group-row .btn { flex: 0 0 auto; }
+
 .optimizer-grid { grid-template-columns: minmax(330px, 380px) minmax(0, 1fr); align-items: start; }
 .optimizer-side {
   position: sticky; top: 78px;

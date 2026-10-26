@@ -352,6 +352,65 @@ check("允許破套：只強制主套 4 件", () => {
     assert.ok(b.stats.spd >= 286);
   }
 });
+check("3×2 件套（能量 + 刀刃 + 意志）", () => {
+  const tri = optimize({
+    ...req,
+    required: [{ set: 1, count: 2 }, { set: 4, count: 2 }, { set: 15, count: 2 }],
+    min: {},
+    objective: "score",
+    limit: 5,
+  });
+  assert.ok(tri.builds.length > 0, "3×2 件套沒有任何結果");
+  for (const b of tri.builds) {
+    assert.ok((b.sets[1] ?? 0) >= 2, "能量不足 2 件");
+    assert.ok((b.sets[4] ?? 0) >= 2, "刀刃不足 2 件");
+    assert.ok((b.sets[15] ?? 0) >= 2, "意志不足 2 件");
+    assert.equal(Object.values(b.sets).reduce((s, c) => s + c, 0), 6);
+  }
+});
+
+check("無形符文補足缺少的套裝", () => {
+  const mk = (id, slot, set, mainT, mainV, spd) => ({
+    rune_id: id, slot_no: slot, set_id: set, class: 6, rank: 5, upgrade_curr: 15,
+    pri_eff: [mainT, mainV], prefix_eff: [0, 0],
+    sec_eff: spd ? [[8, spd, 0, 0]] : [],
+  });
+  const raw = {
+    unit_list: [],
+    runes: [
+      mk(9401, 1, 5, 3, 160, 10),
+      mk(9402, 2, 5, 8, 42, 10),
+      mk(9403, 3, 5, 5, 160, 10),
+      mk(9404, 4, 4, 2, 63, 10),
+      mk(9405, 5, 4, 1, 2448, 10),
+      mk(9406, 6, 25, 6, 63, 10),
+    ],
+    building_list: [],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "intangible.json");
+  assert.equal(p.error, undefined, p.error);
+  const bonus0 = {
+    towerSpd: 0, towerAtk: 0, towerHp: 0, towerDef: 0,
+    guildAtk: 0, guildHp: 0, guildDef: 0, guildCd: 0,
+    leadSpd: 0, buffSpd: 0, useGuild: false, useElementTower: false, grind: true,
+  };
+  const opts = {
+    base: { hp: 10000, atk: 700, def: 700, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 },
+    runes: p.account.runes,
+    required: [{ set: 5, count: 4 }, { set: 4, count: 2 }],
+    min: {}, max: {}, objective: "score", bonus: bonus0,
+    limit: 5, pool: 18, allowEquipped: true, targetUnit: 0, rta: false, maxNodes: 100_000,
+  };
+  const withInt = optimize({ ...opts, intangible: true });
+  assert.ok(withInt.builds.length > 0, "有無形時應能組成 4+2");
+  assert.equal(withInt.builds[0].sets[5], 4, "無形沒有補足憤怒套裝");
+  assert.equal(withInt.builds[0].sets[4], 2);
+  assert.equal(withInt.builds[0].stats.cd, 90, "憤怒 +40 暴傷未套用");
+  assert.equal(withInt.builds[0].stats.cr, 27, "刀刃 +12 暴率未套用");
+  const without = optimize({ ...opts, intangible: false });
+  assert.equal(without.builds.length, 0, "沒有無形時不應能組成 4+2");
+});
+
 check("主屬性篩選（#4 HP%、#6 攻擊%）", () => {
   const filtered = optimize({
     ...req,
@@ -486,8 +545,8 @@ check("暴擊 / 平均 / 技能升級 / ATK Buff", () => {
 
 check("無視防禦 / 破防 / 烙印", () => {
   const ig = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, ignoreDef: true });
-  assert.equal(ig.perHit, 7200);
-  assert.equal(ig.mitigation, 1);
+  assert.equal(ig.mitigation, 1000 / 1140);
+  assert.equal(ig.perHit, Math.round(2000 * 3.6 * (1000 / 1140)));
   const br = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, defBreak: true });
   const mitBreak = 1000 / (1140 + 3.5 * 800 * 0.3);
   assert.equal(br.perHit, Math.round(2000 * 3.6 * mitBreak));
@@ -507,8 +566,9 @@ check("速度 / 目標體力% 公式", () => {
 
 check("炸彈：不暴擊、無視防禦", () => {
   const bomb = computeSkillDamage(dmgStats, mkSkill({ f: "4.0*{ATK}", hits: 1, e: [23] }), { ...dmgBase, crit: "crit" });
-  assert.equal(bomb.perHit, 8000);
-  assert.equal(bomb.total, 8000);
+  assert.equal(bomb.mitigation, 1000 / 1140);
+  assert.equal(bomb.perHit, Math.round(8000 * (1000 / 1140)));
+  assert.equal(bomb.total, Math.round(8000 * (1000 / 1140)));
   assert.equal(bomb.bomb, true);
 });
 

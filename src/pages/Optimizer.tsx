@@ -19,7 +19,7 @@ import { baseStats, setSummary, tickOf } from "../lib/stats";
 import type { FocusEntry, Monster, Rune } from "../lib/types";
 
 const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
-const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2);
+const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25 && s.id !== 99);
 
 const focusLabel = (key: StatKey) => FOCUS_OPTIONS.find((o) => o.key === key)?.label ?? key;
 
@@ -80,8 +80,11 @@ export default function OptimizerPage() {
   const notify = useStore((s) => s.notify);
 
   const [monsterId, setMonsterId] = useState(0);
-  const [mainSet, setMainSet] = useState(0);
-  const [subSet, setSubSet] = useState(0);
+  const [setGroups, setSetGroups] = useState<{ set: number; pieces: number }[]>([
+    { set: 0, pieces: 4 },
+    { set: 0, pieces: 2 },
+  ]);
+  const [intangible, setIntangible] = useState(false);
   const [mode, setMode] = useState<"tick" | "speed">("tick");
   const [tick, setTick] = useState(5);
   const [speedTarget, setSpeedTarget] = useState(250);
@@ -123,6 +126,23 @@ export default function OptimizerPage() {
     alliesAlive: 4,
   });
   const patchDmg = (patch: Partial<DamageOptions>) => setDmgOpts((o) => ({ ...o, ...patch }));
+
+  const updateGroup = (i: number, patch: Partial<{ set: number; pieces: number }>) =>
+    setSetGroups((gs) =>
+      gs.map((g, j) => {
+        if (j !== i) return g;
+        const next = { ...g, ...patch };
+        // 切換件數時，原本的套裝可能不屬於新的件數類別，直接重置
+        if (patch.pieces !== undefined && patch.pieces !== g.pieces) next.set = 0;
+        // 只允許一個 4 件套
+        if (next.pieces === 4 && gs.some((x, k) => k !== i && x.set > 0 && x.pieces >= 4)) {
+          next.pieces = 2;
+        }
+        return next;
+      }),
+    );
+  const removeGroup = (i: number) => setSetGroups((gs) => gs.filter((_, j) => j !== i));
+  const addGroup = () => setSetGroups((gs) => (gs.length < 3 ? [...gs, { set: 0, pieces: 2 }] : gs));
 
   const workerRef = useRef<Worker | null>(null);
   const runId = useRef(0);
@@ -204,11 +224,6 @@ export default function OptimizerPage() {
     if (!summary.views.some((v) => v.monster.id === monsterId)) setMonsterId(0);
   }, [monsterId, summary]);
 
-  // 破套只在「主套 4 件 + 副套 2 件」同時存在時有意義
-  useEffect(() => {
-    if (relaxSub && !(mainSet > 0 && subSet > 0)) setRelaxSub(false);
-  }, [mainSet, subSet, relaxSub]);
-
   const base = useMemo(() => {
     if (boxMonster) return boxMonster.base;
     if (anyMonster) return baseStats(anyMonster, 6, 40);
@@ -218,12 +233,19 @@ export default function OptimizerPage() {
   const tickNeed = useMemo(() => speedNeededForTick(tick, base.spd, bonus, rta), [tick, base.spd, bonus, rta]);
   const targetSpeed = mode === "tick" ? tickNeed.target : speedTarget;
 
-  const required = useMemo(() => {
-    const r: { set: number; count: number }[] = [];
-    if (mainSet) r.push({ set: mainSet, count: 4 });
-    if (subSet) r.push({ set: subSet, count: 2 });
-    return r;
-  }, [mainSet, subSet]);
+  const required = useMemo(
+    () => setGroups.filter((g) => g.set > 0).map((g) => ({ set: g.set, count: g.pieces })),
+    [setGroups],
+  );
+  const totalPieces = required.reduce((s, r) => s + r.count, 0);
+  const hasFour = setGroups.some((g) => g.set > 0 && g.pieces >= 4);
+  const hasTwo = setGroups.some((g) => g.set > 0 && g.pieces < 4);
+  const setConfigValid = totalPieces <= 6;
+
+  // 破套只在「4 件套 + 2 件套」同時存在時有意義
+  useEffect(() => {
+    if (relaxSub && !(hasFour && hasTwo)) setRelaxSub(false);
+  }, [hasFour, hasTwo, relaxSub]);
 
   const bound = useMemo(
     () =>
@@ -237,14 +259,15 @@ export default function OptimizerPage() {
         targetUnit: boxMonster?.unit.id ?? 0,
         mainFilters: mains,
         relaxSub,
+        intangible,
       }),
-    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, relaxSub],
+    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, relaxSub, intangible],
   );
 
   /** 嚴格 4+2 不可能時，破套模式的速度上界（只用來判斷是否值得自動再試） */
   const relaxBound = useMemo(
     () =>
-      mainSet > 0 && subSet > 0 && !relaxSub
+      hasFour && hasTwo && !relaxSub
         ? maxSpeedBound({
             base,
             runes: account?.runes ?? [],
@@ -255,17 +278,19 @@ export default function OptimizerPage() {
             targetUnit: boxMonster?.unit.id ?? 0,
             mainFilters: mains,
             relaxSub: true,
+            intangible,
           })
         : null,
-    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, mainSet, subSet, relaxSub],
+    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, hasFour, hasTwo, relaxSub, intangible],
   );
 
   const run = (opts: { relaxOverride?: boolean; auto?: boolean } = {}) => {
     const relax = opts.relaxOverride ?? relaxSub;
     if (!account) return;
     if (!monsterId) return notify("請先選擇魔靈", "err");
+    if (!setConfigValid) return notify("套裝件數合計超過 6，請調整套裝", "err");
     if (!workerRef.current) return notify("配符運算模組未就緒，請重新整理頁面再試", "err");
-    const canRelax = mainSet > 0 && subSet > 0 && !relax;
+    const canRelax = hasFour && hasTwo && !relax;
     const maxSpeed = Math.max(bound.speed, canRelax && relaxBound ? relaxBound.speed : 0);
     if (!opts.auto && targetSpeed > 0 && maxSpeed < targetSpeed) {
       return notify(
@@ -303,6 +328,7 @@ export default function OptimizerPage() {
       maxNodes: 4_000_000,
       mainFilters: mains,
       relaxSub: relax,
+      intangible,
       focus: normalizeFocus(focus),
     };
     const id = ++runId.current;
@@ -321,8 +347,8 @@ export default function OptimizerPage() {
         setResult({ ...e.data.res, ms: Math.round(performance.now() - t0) });
         setOpenIdx(0);
         if (e.data.res.builds.length === 0) {
-          if (mainSet > 0 && subSet > 0 && !relax && !opts.auto) {
-            notify("嚴格 4+2 沒有結果，已自動改用破套模式再算一次");
+          if (hasFour && hasTwo && !relax && !opts.auto) {
+            notify("嚴格套裝沒有結果，已自動改用破套模式再算一次");
             setRelaxSub(true);
             run({ relaxOverride: true, auto: true });
             return;
@@ -470,21 +496,49 @@ export default function OptimizerPage() {
               )}
             </div>
 
-            <div className="grid g2">
-              <div className="field">
-                <label>主套裝（4 件）</label>
-                <select className="select" value={mainSet} onChange={(e) => setMainSet(Number(e.target.value))}>
-                  <option value={0}>不限</option>
-                  {FOUR_SETS.map((s) => <option key={s.id} value={s.id}>{s.name} {s.en}</option>)}
-                </select>
+            <div className="field">
+              <label>套裝組合（件數合計 ≤ 6）</label>
+              <div className="col" style={{ gap: 6 }}>
+                {setGroups.map((g, i) => (
+                  <div className="set-group-row" key={i}>
+                    <select className="select" style={{ width: 82, flex: "0 0 82px" }} value={g.pieces} onChange={(e) => updateGroup(i, { pieces: Number(e.target.value) })}>
+                      <option value={4}>4 件</option>
+                      <option value={2}>2 件</option>
+                    </select>
+                    <select className="select" value={g.set} onChange={(e) => updateGroup(i, { set: Number(e.target.value) })}>
+                      <option value={0}>不限</option>
+                      {(g.pieces >= 4 ? FOUR_SETS : TWO_SETS).map((s) => (
+                        <option key={s.id} value={s.id}>{s.name} {s.en}</option>
+                      ))}
+                    </select>
+                    {setGroups.length > 1 && (
+                      <button type="button" className="btn btn-sm btn-ghost btn-icon" title="移除" onClick={() => removeGroup(i)}>
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-              <div className="field">
-                <label>副套裝（2 件）</label>
-                <select className="select" value={subSet} onChange={(e) => setSubSet(Number(e.target.value))}>
-                  <option value={0}>不限</option>
-                  {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name} {s.en}</option>)}
-                </select>
-              </div>
+              {setGroups.length < 3 && totalPieces <= 4 && (
+                <button type="button" className="btn btn-sm btn-ghost" style={{ width: "100%" }} onClick={addGroup}>
+                  <Plus size={13} /> 新增 2 件套（3×2 件套）
+                </button>
+              )}
+              {!setConfigValid && (
+                <div className="tiny red">套裝件數合計 {totalPieces} 超過 6，請減少套裝。</div>
+              )}
+              {required.length > 0 && (
+                <label className="row tiny" style={{ gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={intangible} onChange={(e) => setIntangible(e.target.checked)} />
+                  允許 1 顆無形符文補足套裝
+                </label>
+              )}
+              {hasFour && hasTwo && (
+                <label className="row tiny" style={{ gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={relaxSub} onChange={(e) => setRelaxSub(e.target.checked)} />
+                  允許破套：2 件套只作優先，不強制剛好 2 件
+                </label>
+              )}
             </div>
 
             <div className="field">
@@ -526,13 +580,6 @@ export default function OptimizerPage() {
                 固定值主屬性（例：防禦力 +160）請選「固定…」；選「不限」會納入全部。
               </div>
             </div>
-
-            {mainSet > 0 && subSet > 0 && (
-              <label className="row tiny" style={{ gap: 8, cursor: "pointer" }}>
-                <input type="checkbox" checked={relaxSub} onChange={(e) => setRelaxSub(e.target.checked)} />
-                允許破套：副套裝只作優先，不強制剛好 2 件
-              </label>
-            )}
 
             <div className="divider" />
 
@@ -576,8 +623,8 @@ export default function OptimizerPage() {
                           開啟破套（可達 {relaxBound.speed} 速）
                         </button>
                       )}
-                      {(mainSet > 0 || subSet > 0) && (
-                        <button className="btn btn-sm btn-ghost" onClick={() => { setMainSet(0); setSubSet(0); }}>
+                      {required.length > 0 && (
+                        <button className="btn btn-sm btn-ghost" onClick={() => setSetGroups([{ set: 0, pieces: 4 }, { set: 0, pieces: 2 }])}>
                           清除套裝限制
                         </button>
                       )}
@@ -637,7 +684,7 @@ export default function OptimizerPage() {
             </details>
 
             <div className="optimizer-actions">
-              <button className="btn btn-primary" onClick={() => run()} disabled={running || !account} style={{ padding: "11px 14px" }}>
+              <button className="btn btn-primary" onClick={() => run()} disabled={running || !account || !setConfigValid} style={{ padding: "11px 14px" }}>
                 {running ? <><Loader2 size={15} className="spin" /> 運算中…</> : <><Wand2 size={15} /> 開始配符</>}
               </button>
             </div>

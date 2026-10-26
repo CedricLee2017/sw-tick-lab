@@ -210,7 +210,8 @@ export function computeSkillDamage(stats: Stats, skill: Skill, opts: DamageOptio
   }
   const brandMul = opts.brand ? 1.25 : 1;
   const effectiveDef = Math.max(0, opts.enemyDef) * (opts.defBreak ? 0.3 : 1);
-  const mitigation = ignoreDef ? 1 : 1000 / (1140 + 3.5 * effectiveDef);
+  // 無視防禦時仍會套用 1140 的基礎係數：1000 / 1140 ≈ 0.8772（與 SWOP 一致）
+  const mitigation = ignoreDef ? 1000 / 1140 : 1000 / (1140 + 3.5 * effectiveDef);
 
   const rawPerHit = Math.max(0, parsed.value) * skillUpMul * critMul * brandMul;
   const perHit = round(rawPerHit * mitigation);
