@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "data": "node scripts/build-monsters.mjs",
+    "skills": "node scripts/fetch-skills.mjs",
     "demo": "node scripts/build-demo.mjs",
     "test": "node scripts/test-engine.mjs",
     "deploy": "npm run build && npx wrangler pages deploy dist --project-name sw-tick-lab"

@@ -5,6 +5,11 @@ import {
 import { useStore, monsterLabel } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { MonsterPicker, MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
+import { DamagePanel } from "../components/DamagePanel";
+import {
+  computeSkillDamage, defaultSkill, loadSkillData, skillsForMonster,
+  type DamageOptions, type DamageResult, type Skill, type SkillData,
+} from "../lib/damage";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import {
   FOCUS_LIMIT, FOCUS_OPTIONS, OBJECTIVE_LABEL, normalizeFocus,
@@ -21,7 +26,7 @@ const focusLabel = (key: StatKey) => FOCUS_OPTIONS.find((o) => o.key === key)?.l
 /** 結果排序欄位（對應 SWOP 的排序方式） */
 type SortKey =
   | "recommended" | "spd" | "hp" | "def" | "atk" | "ehp"
-  | "cr" | "cd" | "res" | "acc" | "eff" | "focus";
+  | "cr" | "cd" | "res" | "acc" | "eff" | "focus" | "dmg";
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "recommended", label: "推薦排序" },
@@ -96,6 +101,29 @@ export default function OptimizerPage() {
   const [sortKey, setSortKey] = useState<SortKey>("recommended");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
+  const [skillData, setSkillData] = useState<SkillData | null>(null);
+  const [skillLoading, setSkillLoading] = useState(true);
+  const [skillError, setSkillError] = useState<string | null>(null);
+  const [dmgOn, setDmgOn] = useState(true);
+  const [dmgSkillId, setDmgSkillId] = useState(0);
+  const [dmgOpts, setDmgOpts] = useState<DamageOptions>({
+    crit: "crit",
+    skillUps: true,
+    enemyDef: 800,
+    enemyMaxHp: 30000,
+    enemyHpPct: 100,
+    enemySpd: 100,
+    selfHpPct: 100,
+    atkBuff: 50,
+    leadAtk: 0,
+    defBreak: false,
+    brand: false,
+    ignoreDef: false,
+    aliveEnemies: 1,
+    alliesAlive: 4,
+  });
+  const patchDmg = (patch: Partial<DamageOptions>) => setDmgOpts((o) => ({ ...o, ...patch }));
+
   const workerRef = useRef<Worker | null>(null);
   const runId = useRef(0);
   const timerRef = useRef<number | null>(null);
@@ -134,6 +162,13 @@ export default function OptimizerPage() {
       if (workerRef.current === worker) workerRef.current = null;
     };
   }, []);
+
+  // 換魔靈時，先前的配符結果不屬於新魔靈，直接清空避免誤讀
+  useEffect(() => {
+    setResult(null);
+    setOpenIdx(-1);
+    setPlanIdx(-1);
+  }, [monsterId]);
 
   // 從速度實驗室帶入
   useEffect(() => {
@@ -316,12 +351,76 @@ export default function OptimizerPage() {
   // 顯示目前裝備
   const currentStats = boxMonster?.stats;
 
+  // 技能資料只載入一次
+  useEffect(() => {
+    let alive = true;
+    loadSkillData()
+      .then((data) => {
+        if (!alive) return;
+        setSkillData(data);
+        setSkillLoading(false);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setSkillError(String(err?.message ?? err));
+        setSkillLoading(false);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  const monsterSkills = useMemo(() => skillsForMonster(skillData, monsterId), [skillData, monsterId]);
+  const dmgSkill = useMemo(
+    () => monsterSkills.find((s) => s.id === dmgSkillId) ?? defaultSkill(monsterSkills),
+    [monsterSkills, dmgSkillId],
+  );
+
+  // 換魔靈時自動選一招（優先最後一格）
+  useEffect(() => {
+    if (monsterSkills.length === 0) {
+      if (dmgSkillId !== 0) setDmgSkillId(0);
+      return;
+    }
+    if (!monsterSkills.some((s) => s.id === dmgSkillId)) {
+      setDmgSkillId(defaultSkill(monsterSkills)?.id ?? monsterSkills[0].id);
+    }
+  }, [monsterSkills, dmgSkillId]);
+
+  // 有無視防禦效果的技能預設勾選
+  useEffect(() => {
+    if (dmgSkill) patchDmg({ ignoreDef: dmgSkill.e.includes(38) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dmgSkill?.id]);
+
+  const damageByBuild = useMemo(() => {
+    const map = new Map<Build, DamageResult>();
+    if (!result || !dmgOn || !dmgSkill) return map;
+    for (const b of result.builds) map.set(b, computeSkillDamage(b.stats, dmgSkill, dmgOpts));
+    return map;
+  }, [result, dmgOn, dmgSkill, dmgOpts]);
+
+  const sortOptions = useMemo(() => {
+    if (!dmgOn || !dmgSkill) return SORT_OPTIONS;
+    return [
+      SORT_OPTIONS[0],
+      { key: "dmg" as SortKey, label: `傷害（${dmgSkill.n}）` },
+      ...SORT_OPTIONS.slice(1),
+    ];
+  }, [dmgOn, dmgSkill]);
+
+  useEffect(() => {
+    if (sortKey === "dmg" && (!dmgOn || !dmgSkill)) setSortKey("recommended");
+  }, [sortKey, dmgOn, dmgSkill]);
+
   /** 依使用者選定的數值重新排序（不影響配符運算結果） */
   const sortedBuilds = useMemo<Build[]>(() => {
     if (!result) return [];
     if (sortKey === "recommended") return result.builds;
-    const valueOf = (b: Build) =>
-      sortKey === "eff" ? b.eff : sortKey === "focus" ? (b.focusFit ?? 0) : b.stats[sortKey];
+    const valueOf = (b: Build) => {
+      if (sortKey === "eff") return b.eff;
+      if (sortKey === "focus") return b.focusFit ?? 0;
+      if (sortKey === "dmg") return damageByBuild.get(b)?.total ?? 0;
+      return b.stats[sortKey];
+    };
     return result.builds
       .map((b, i) => ({ b, i, v: valueOf(b) }))
       .sort((a, z) => {
@@ -329,7 +428,7 @@ export default function OptimizerPage() {
         return (sortDir === "desc" ? d : -d) || a.i - z.i;
       })
       .map((x) => x.b);
-  }, [result, sortKey, sortDir]);
+  }, [result, sortKey, sortDir, damageByBuild]);
 
   // 換排序時把展開的卡片與配符清單歸零，避免指到別組
   useEffect(() => {
@@ -557,6 +656,20 @@ export default function OptimizerPage() {
             </div>
           )}
 
+          {monsterId > 0 && (
+            <DamagePanel
+              skills={monsterSkills}
+              skill={dmgSkill}
+              onSkillChange={setDmgSkillId}
+              enabled={dmgOn}
+              onEnabledChange={setDmgOn}
+              opts={dmgOpts}
+              onOptsChange={patchDmg}
+              loading={skillLoading}
+              error={skillError}
+            />
+          )}
+
           {result && (
             <div className="card card-pad">
               <div className="row between wrap" style={{ gap: 10 }}>
@@ -591,7 +704,7 @@ export default function OptimizerPage() {
                     setSortDir("desc");
                   }}
                 >
-                  {SORT_OPTIONS.filter((o) => o.key !== "focus" || focus.length > 0).map((o) => (
+                  {sortOptions.filter((o) => o.key !== "focus" || focus.length > 0).map((o) => (
                     <option key={o.key} value={o.key}>{o.label}</option>
                   ))}
                 </select>
@@ -629,6 +742,8 @@ export default function OptimizerPage() {
               rta={rta}
               runeMap={runeMap}
               focus={focus}
+              damage={damageByBuild.get(b)}
+              damageSkill={dmgSkill}
               ownerOf={(rid) => {
                 const u = account?.units.find((x) => x.runes.includes(rid));
                 return u ? monsterLabel(u.master) : "";
@@ -695,6 +810,8 @@ function BuildCard({
   ownerOf,
   runeMap,
   focus,
+  damage,
+  damageSkill,
 }: {
   build: Build;
   index: number;
@@ -706,6 +823,8 @@ function BuildCard({
   ownerOf: (runeId: number) => string;
   runeMap: Map<number, Rune>;
   focus: FocusEntry[];
+  damage?: DamageResult;
+  damageSkill?: Skill;
 }) {
   const s = build.stats;
   const mainSets = Object.entries(build.sets).sort((a, b) => b[1] - a[1]);
@@ -727,6 +846,11 @@ function BuildCard({
               {focus.length > 0 && build.focusFit !== undefined && (
                 <span className="chip muted" style={{ padding: "1px 7px", fontSize: 10.5 }} title="焦點屬性契合度">
                   <Target size={10} /> 焦點 {Math.round(build.focusFit)}%
+                </span>
+              )}
+              {damage && damageSkill && (
+                <span className="chip gold" style={{ padding: "1px 7px", fontSize: 10.5 }} title={`S${damageSkill.slot} ${damageSkill.n} · ${damage.hits} 段 · 每段 ${fmt(damage.perHit)}`}>
+                  傷害 {fmt(damage.total)}
                 </span>
               )}
             </div>
@@ -756,6 +880,18 @@ function BuildCard({
               <div className="kv"><span className="k">EHP（有效體力）</span><span className="v mono">{fmt(s.ehp)}</span></div>
               <div className="kv"><span className="k">套裝</span><span className="v">{setSummary(build.sets)}</span></div>
               <div className="kv"><span className="k">綜合評分</span><span className="v mono">{scoreOf(s, build.eff, "score").toFixed(1)}</span></div>
+              {damage && damageSkill && (
+                <>
+                  <div className="kv">
+                    <span className="k">技能傷害 · S{damageSkill.slot} {damageSkill.n}</span>
+                    <span className="v mono gold">{fmt(damage.total)}</span>
+                  </div>
+                  <div className="kv">
+                    <span className="k">每段 × 段數</span>
+                    <span className="v mono">{fmt(damage.perHit)} × {damage.hits}</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

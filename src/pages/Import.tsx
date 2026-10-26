@@ -234,7 +234,7 @@ export default function ImportPage() {
       </section>
 
       <p className="tiny dim" style={{ marginTop: 18, textAlign: "center" }}>
-        魔靈圖示與基礎數值來源：SWARFARM 公開資料 · 本工具與 Com2uS 無關
+        魔靈圖示、基礎數值與技能資料來源：SWARFARM 公開資料 · 本工具與 Com2uS 無關
       </p>
 
       {pasteOpen && (

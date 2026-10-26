@@ -32,7 +32,7 @@ const engine = await import(`${pathToFileURL(BUNDLE).href}?t=${Date.now()}`);
 const {
   tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize, maxSpeedBound,
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
-  emptyAccum, addRuneToAccum, runeValue,
+  emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
 } = engine;
 
 let passed = 0;
@@ -441,6 +441,75 @@ check("286 速比 285 速先出手", () => {
   assert.equal(order[0].id, "fast");
   assert.equal(order[0].tick, 5);
   assert.equal(order.find((o) => o.id === "slow").tick, 6);
+});
+
+/* ── 6. 技能傷害估算 ─────────────────────────── */
+console.log("\n[6] 技能傷害估算");
+const skillData = JSON.parse(await fs.readFile(path.join(ROOT, "public/data/skills.json"), "utf8"));
+check("技能資料涵蓋全部魔靈，且能列出風 Ciri 的技能", () => {
+  const missing = MONSTERS.filter((m) => !skillData.monsters[String(m.id)]);
+  assert.equal(missing.length, 0, `缺少 ${missing.length} 隻魔靈的技能對應`);
+  const ciri = skillsForMonster(skillData, 29313);
+  assert.ok(ciri.length >= 3, `風 Ciri 只有 ${ciri.length} 個技能`);
+  assert.deepEqual(ciri.slice(0, 3).map((s) => s.slot), [1, 2, 3]);
+  assert.equal(ciri[0].n, "Slash");
+});
+const dmgStats = { hp: 30000, atk: 2000, def: 800, spd: 200, cr: 100, cd: 150, res: 0, acc: 0, ehp: 0, tick: 1 };
+const dmgBase = {
+  crit: "normal", skillUps: false, enemyDef: 800, enemyMaxHp: 30000, enemyHpPct: 100,
+  enemySpd: 100, selfHpPct: 100, atkBuff: 0, leadAtk: 0, defBreak: false, brand: false,
+  ignoreDef: false, aliveEnemies: 1, alliesAlive: 4,
+};
+const mkSkill = (over = {}) => ({
+  id: 1, n: "Test", slot: 1, hits: 2, aoe: false, passive: false, cool: 0, max: 5,
+  f: "3.6*{ATK}", raw: "", sc: ["ATK"], up: 25, e: [], d: "", ...over,
+});
+const mit800 = 1000 / (1140 + 3.5 * 800);
+
+check("倍率公式 + 防禦減傷 + 段數", () => {
+  const r = computeSkillDamage(dmgStats, mkSkill(), dmgBase);
+  assert.equal(r.perHit, Math.round(2000 * 3.6 * mit800));
+  assert.equal(r.total, Math.round(2000 * 3.6 * mit800) * 2);
+  assert.ok(Math.abs(r.mitigation - mit800) < 1e-9);
+});
+
+check("暴擊 / 平均 / 技能升級 / ATK Buff", () => {
+  const crit = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, crit: "crit" });
+  assert.equal(crit.perHit, Math.round(2000 * 3.6 * 2.5 * mit800));
+  const avg = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, crit: "average" });
+  assert.equal(avg.perHit, Math.round(2000 * 3.6 * 2.5 * mit800), "CR 100% 時平均應等於必暴");
+  const up = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, skillUps: true });
+  assert.equal(up.perHit, Math.round(2000 * 3.6 * 1.25 * mit800));
+  const buff = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, atkBuff: 50, leadAtk: 25 });
+  assert.equal(buff.perHit, Math.round(2000 * 1.75 * 3.6 * mit800));
+});
+
+check("無視防禦 / 破防 / 烙印", () => {
+  const ig = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, ignoreDef: true });
+  assert.equal(ig.perHit, 7200);
+  assert.equal(ig.mitigation, 1);
+  const br = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, defBreak: true });
+  const mitBreak = 1000 / (1140 + 3.5 * 800 * 0.3);
+  assert.equal(br.perHit, Math.round(2000 * 3.6 * mitBreak));
+  const brand = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, brand: true });
+  assert.equal(brand.perHit, Math.round(2000 * 3.6 * 1.25 * mit800));
+});
+
+check("速度 / 目標體力% 公式", () => {
+  const spdSkill = mkSkill({ f: "{ATK}*({SPD} + 155)/135", hits: 2 });
+  const s = computeSkillDamage(dmgStats, spdSkill, dmgBase);
+  assert.equal(s.perHit, Math.round((2000 * (200 + 155)) / 135 * mit800));
+  assert.equal(s.total, Math.round((2000 * (200 + 155)) / 135 * mit800) * 2);
+  const hpSkill = mkSkill({ f: "{ATK}*(4.1 - 1.6*{Target Current HP %})", hits: 1 });
+  const h = computeSkillDamage(dmgStats, hpSkill, { ...dmgBase, enemyHpPct: 50 });
+  assert.equal(h.perHit, Math.round(2000 * (4.1 - 1.6 * 0.5) * mit800));
+});
+
+check("炸彈：不暴擊、無視防禦", () => {
+  const bomb = computeSkillDamage(dmgStats, mkSkill({ f: "4.0*{ATK}", hits: 1, e: [23] }), { ...dmgBase, crit: "crit" });
+  assert.equal(bomb.perHit, 8000);
+  assert.equal(bomb.total, 8000);
+  assert.equal(bomb.bomb, true);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
