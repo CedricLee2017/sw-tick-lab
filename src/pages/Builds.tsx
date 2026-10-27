@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bookmark, RotateCcw, Trash2, Unlock, Wand2 } from "lucide-react";
+import { ArrowDownToLine, Bookmark, RotateCcw, Trash2, Unlock, Wand2 } from "lucide-react";
 import { MONSTER_MAP, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary } from "../lib/stats";
@@ -13,6 +13,7 @@ export default function BuildsPage() {
   const removeLoadout = useStore((s) => s.removeLoadout);
   const notify = useStore((s) => s.notify);
   const setRuneFlag = useStore((s) => s.setRuneFlag);
+  const equipRunes = useStore((s) => s.equipRunes);
   const lockedRunes = useStore((s) => s.settings.lockedRunes);
   const excludedRunes = useStore((s) => s.settings.excludedRunes);
   const includedRunes = useStore((s) => s.settings.includedRunes);
@@ -33,6 +34,21 @@ export default function BuildsPage() {
     );
     window.location.hash = "#/optimizer";
     notify("已把配裝帶入配符頁（符文設為 Include）");
+  };
+
+  /** 一鍵把收藏的符文上符到該魔靈（僅本工具本機模擬） */
+  const equip = (l: Loadout) => {
+    const target =
+      (l.unitId ? account?.units.find((u) => u.id === l.unitId && u.master === l.monsterId) : undefined) ??
+      account?.units.find((u) => u.master === l.monsterId);
+    if (!target) return notify("找不到這組配裝對應的魔靈", "err");
+    const n = equipRunes(target.id, l.runeIds);
+    notify(
+      n > 0
+        ? `已將 ${n} 顆符文上符到 ${monsterLabel(target.master)}（僅本機模擬，不會修改遊戲）`
+        : "上符失敗：沒有可用的符文",
+      n > 0 ? "ok" : "err",
+    );
   };
 
   /** 一鍵解除這組符文的 App 鎖定 */
@@ -101,6 +117,7 @@ export default function BuildsPage() {
                 <div className="row" style={{ gap: 6, marginTop: 10 }}>
                   <button className="btn btn-sm btn-primary" onClick={() => apply(l)}><Wand2 size={12} /> 帶入配符</button>
                   <button className="btn btn-sm" onClick={() => setOpen(l)}>查看</button>
+                  <button className="btn btn-sm btn-ghost btn-icon" title="一鍵上符（本機模擬）" onClick={() => equip(l)}><ArrowDownToLine size={13} /></button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="一鍵解鎖" onClick={() => clearLocks(l)}><Unlock size={13} /></button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="一鍵解符（解除 Exclude / Include）" onClick={() => clearRestrictions(l)}><RotateCcw size={13} /></button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="刪除" style={{ marginLeft: "auto" }} onClick={() => removeLoadout(l.id)}>
@@ -119,6 +136,7 @@ export default function BuildsPage() {
             <div className="tiny dim">儲存於 {new Date(open.createdAt).toLocaleString("zh-TW")}</div>
             <div className="row" style={{ gap: 6 }}>
               <button className="btn btn-sm btn-primary" onClick={() => apply(open)}><Wand2 size={12} /> 帶入配符</button>
+              <button className="btn btn-sm" onClick={() => equip(open)}><ArrowDownToLine size={12} /> 一鍵上符</button>
               <button className="btn btn-sm" onClick={() => clearLocks(open)}><Unlock size={12} /> 一鍵解鎖</button>
               <button className="btn btn-sm" onClick={() => clearRestrictions(open)}><RotateCcw size={12} /> 一鍵解符</button>
               <button className="btn btn-sm btn-ghost" onClick={() => { removeLoadout(open.id); setOpen(null); }}>
@@ -127,6 +145,10 @@ export default function BuildsPage() {
             </div>
           </div>
           <StatGrid stats={open.stats} />
+          <div className="tiny dim" style={{ marginTop: 8, lineHeight: 1.6 }}>
+            「一鍵上符」只會修改本工具的本機資料，把這 6 顆符文標記為裝備在 {MONSTER_MAP.get(open.monsterId)?.name ?? "這隻魔靈"} 身上；
+            不會修改遊戲存檔。其他原本穿著這些符文的魔靈會自動失去該符文。
+          </div>
           <div className="rune-wheel-head" style={{ marginTop: 14 }}>
             <span className="rune-wheel-title">符文組合</span>
             <span className="tiny dim">{open.runeIds.length}/6</span>

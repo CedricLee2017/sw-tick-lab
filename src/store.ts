@@ -89,6 +89,8 @@ interface Store {
   toggleRuneFlag: (kind: RuneFlag, id: number) => void;
   /** 一次設定多顆符文的鎖定 / 排除 / 固定 */
   setRuneFlag: (kind: RuneFlag, ids: number[], on: boolean) => void;
+  /** 將收藏配裝的符文「上符」到指定魔靈（只修改本工具的本機資料） */
+  equipRunes: (unitId: number, runeIds: number[]) => number;
   saveLoadout: (l: Omit<Loadout, "id" | "createdAt">) => void;
   removeLoadout: (id: string) => void;
   notify: (msg: string, kind?: "ok" | "err") => void;
@@ -230,6 +232,48 @@ export const useStore = create<Store>((setState, getState) => ({
     if (kind === "excluded" && on) settings.includedRunes = settings.includedRunes.filter((id) => !ids.includes(id));
     setState({ settings });
     void set(SETTINGS_KEY, settings);
+  },
+
+  equipRunes: (unitId, runeIds) => {
+    const account = getState().account;
+    if (!account) return 0;
+    const unit = account.units.find((u) => u.id === unitId);
+    if (!unit) return 0;
+
+    const runeById = new Map(account.runes.map((r) => [r.id, { ...r }]));
+    // 同位置只取一顆，避免舊資料重複
+    const bySlot = new Map<number, number>();
+    for (const id of runeIds) {
+      const r = runeById.get(id);
+      if (!r || !r.slot || bySlot.has(r.slot)) continue;
+      bySlot.set(r.slot, id);
+    }
+    const chosen = [...bySlot.values()];
+    if (chosen.length === 0) return 0;
+    const chosenSet = new Set(chosen);
+
+    // 先把目標魔靈身上不在新組合裡的符文釋放
+    for (const rid of unit.runes) {
+      if (chosenSet.has(rid)) continue;
+      const r = runeById.get(rid);
+      if (r) r.occupied = 0;
+    }
+    // 再從所有魔靈身上移除這批符文，並設定新的擁有者
+    const units = account.units.map((u) => ({
+      ...u,
+      runes: u.id === unitId
+        ? chosen.slice().sort((a, b) => (runeById.get(a)?.slot ?? 9) - (runeById.get(b)?.slot ?? 9))
+        : u.runes.filter((id) => !chosenSet.has(id)),
+    }));
+    for (const id of chosen) {
+      const r = runeById.get(id);
+      if (r) r.occupied = unitId;
+    }
+
+    const next: Account = { ...account, units, runes: [...runeById.values()] };
+    setState({ account: next, runeMap: new Map(next.runes.map((r) => [r.id, r])) });
+    void set(ACCOUNT_KEY, next);
+    return chosen.length;
   },
 
   saveLoadout: (l) => {
