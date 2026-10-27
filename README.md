@@ -15,6 +15,10 @@
   - 容忍多層包裝（`data` / `save` / `swop`）、以 id 為 key 的物件格式，以及字串形式的套裝 / 屬性名稱。
 - **帳號總覽**：魔靈數量、符文數量、Speed Tick 分布、一速排名、套裝統計。
 - **速度實驗室**：Tick ↔ 速度雙向換算、各 Tick 門檻表、建築與隊長技加成試算、隊伍出手順序模擬。
+- **RTA 世界競技場**：使用存檔的 `favorite_unit_list`（我的最愛）列出常用魔靈，依 RTA 獨立配裝的速度由高到低排序。
+  - RTA 符文 / 神器來自 `world_arena_rune_equip_list` / `world_arena_artifact_equip_list`，與一般配裝完全獨立；同一顆符文可同時出現在兩邊。
+  - 可切換「無速度隊長」/「有速度隊長」，速度隊長 % 可自行輸入；RTA Tick 以 1.5% / Tick 計算。
+  - 每隻魔靈可展開查看 RTA 六顆符文、兩件神器、HP / ATK / DEF / EHP 與速度。
 - **一鍵配符**：指定魔靈與 Tick（或面板速度），自動計算符文速度需求，列出所有符合條件的配裝（每頁 30 組）。
   - **快速預設配符**：一鍵套用常用配置（套裝、主屬性、數值條件、Focus 比重、排序），套用後按「開始配符」即可。內建：
     - **極限輸出風丑**：自動選風丑（Lushen）、憤怒 ×4 + 刀刃 ×2、#2 攻擊% / #4 暴傷 / #6 攻擊%、暴率下限 100%，Focus 攻擊 / 暴率 / 暴傷 各 10 分，並以傷害排序。
@@ -48,7 +52,8 @@ Tick = ceil(10000 / (速度 × 7))
 所需速度 = ceil(10000 / (Tick × 7))
 ```
 
-- RTA 模式下每 Tick 為 1.5%，係數改為 `10000 / (速度 × 10)`。
+- RTA 模式下每 Tick 為 1.5%，係數改為 `10000 / (速度 × 10)`；RTA 頁固定使用這個 Tick 基準。
+- RTA 頁只計入 RTA 符文 / 套裝 / 神器與速度隊長，不套用一般建築、競技場圖騰或 Buff。
 - 例：滿等速度圖騰 +15%、隊長技 +28%、迅速套裝 +25%，要達到 **Tick 5（286 速）**，工具會自動回推需要的符文速度。
 - 戰鬥速度計算：`base + ceil(base × 百分比加成 / 100) + 固定值`；百分比含速度圖騰 / 隊長技 / 速度 Buff，迅速套裝為 `ceil(base × 25 / 100)`。
 - EHP：`HP × (1140 + 3.5 × 防禦) / 1000`，使用含召喚師技能的實戰 HP / DEF 計算。
@@ -108,7 +113,7 @@ npm run dev        # http://localhost:5173
 npm run typecheck  # TypeScript 檢查
 npm run build      # 產出 dist/
 npm run preview    # 預覽 production build
-npm test           # Tick 公式、配符引擎、技能傷害、神器與第二階段測試（68 項）
+npm test           # Tick、配符、技能傷害、神器、第二階段與 RTA 測試（69 項）
 ```
 
 其他指令：
@@ -140,12 +145,13 @@ src/
     parse.ts            SWEX / SWOP 解析
     artifacts.ts        神器效果對照、主效果、追傷與傷害加成
     stage2.ts           第二階段神器最佳化（前 500 組符文 × 25 對神器）
+    rta.ts              RTA 獨立配裝與速度計算
     optimizer.ts        分支定界配符引擎、回合模擬
     optimizer.worker.ts Web Worker 入口
     accountStats.ts     帳號統計
   components/ui.tsx     共用 UI（魔靈選擇器、符文卡、神器卡、Tick 徽章）
   components/ArtifactStage.tsx 第二階段神器面板與結果
-  pages/                匯入、總覽、速度實驗室、配符、符文、神器、魔靈、設定
+  pages/                匯入、總覽、速度實驗室、RTA、配符、符文、神器、魔靈、設定
   store.ts              zustand + IndexedDB 本機儲存
 scripts/                資料產生與引擎測試
 ```

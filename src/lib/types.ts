@@ -95,6 +95,19 @@ export interface Unit {
   locked: boolean;
 }
 
+/** RTA（世界競技場）獨立配裝：同一顆符文可以同時出現在一般與 RTA 配裝中 */
+export interface RtaLoadout {
+  runes: number[];
+  artifacts: number[];
+}
+
+export interface RtaData {
+  loadouts: Record<number, RtaLoadout>;
+  /** favorite_unit_list type 1（我的最愛）的 unit_id */
+  favorites: number[];
+  runeSync: number;
+}
+
 export interface Account {
   fileName: string;
   importedAt: number;
@@ -106,6 +119,8 @@ export interface Account {
   artifacts: Artifact[];
   buildings: { id: number; level: number }[];
   version: string;
+  /** RTA 獨立配裝與最愛魔靈（舊存檔可能沒有） */
+  rta?: RtaData;
 }
 
 export interface BonusConfig {

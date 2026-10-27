@@ -36,6 +36,7 @@ const {
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit,
+  rtaStats, rtaView,
 } = engine;
 
 let passed = 0;
@@ -887,6 +888,49 @@ check("第二階段：主屬性 / Focus 篩選、10 件神器、25 對", () => {
   const none = runStage2({ ...opts, focus1: [{ effect: 219, min: 99, max: 200, weight: 10 }] });
   assert.equal(none.type1.length, 0);
   assert.ok(none.warnings.some((w) => w.includes("Focus")));
+});
+
+check("RTA：獨立符文 / 神器、最愛魔靈與速度隊長", () => {
+  const raw = {
+    unit_list: [{
+      unit_id: 501, unit_master_id: 13413, class: 6, unit_level: 40,
+      runes: [{ rune_id: 9001, occupied_id: 501, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] }],
+    }],
+    runes: [
+      { rune_id: 9001, occupied_id: 501, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] },
+      { rune_id: 9102, occupied_id: 0, slot_no: 2, set_id: 3, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [8, 42], prefix_eff: [0, 0], sec_eff: [[8, 20, 0, 5]] },
+    ],
+    artifacts: [{
+      rid: 7001, occupied_id: 0, type: 1, attribute: 3, unit_style: 0, natural_rank: 5, rank: 5, level: 15,
+      pri_effect: [100, 1500, 15, 0, 0], sec_effects: [],
+    }],
+    favorite_unit_list: [{ type: 1, unit_id_list: [[501]] }],
+    world_arena_rune_equip_list: [{ rune_id: 9102, occupied_id: 501 }],
+    world_arena_artifact_equip_list: [{ artifact_id: 7001, occupied_id: 501, artifact_type: 1, slot: 1 }],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "rta.json");
+  assert.equal(p.error, undefined, p.error);
+  const a = p.account;
+  assert.deepEqual(a.rta.favorites, [501]);
+  assert.deepEqual(a.rta.loadouts[501].runes, [9102]);
+  assert.deepEqual(a.rta.loadouts[501].artifacts, [7001]);
+  assert.ok(p.warnings.some((w) => w.includes("RTA")));
+
+  const m = MONSTERS.find((x) => x.id === 13413);
+  const unit = a.units[0];
+  const base = baseStats(m, 6, 40);
+  const normal = rtaStats(base, [], [], 0, true);
+  assert.equal(normal.spd, base.spd, "RTA 不套用一般速度圖騰");
+
+  const view = rtaView(a, unit, m, 0, true);
+  assert.equal(view.runes.length, 1);
+  assert.equal(view.artifacts.length, 1);
+  assert.equal(view.stats.spd, base.spd + 42 + 20 + 5, "RTA 符文主屬 + 副屬速度");
+  assert.equal(view.stats.hp, base.hp + 1500, "RTA 神器主屬性計入面板");
+
+  const leader = rtaStats(base, view.runes, view.artifacts, 24, true);
+  assert.equal(leader.spd, base.spd + Math.ceil((base.spd * 24) / 100) + 42 + 20 + 5);
+  assert.ok(leader.tick < view.stats.tick, "隊長加速後 RTA Tick 應下降");
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

@@ -1,7 +1,7 @@
 /** SWEX / SWOP JSON 解析（寬容格式） */
 import { runeEfficiency } from "./stats";
 import { RUNE_SETS, SET_BY_ID } from "./constants";
-import type { Account, Artifact, ArtifactSub, Rune, Unit } from "./types";
+import type { Account, Artifact, ArtifactSub, Rune, RtaData, RtaLoadout, Unit } from "./types";
 
 const num = (v: unknown, d = 0): number => {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -171,7 +171,7 @@ export interface ParseResult {
 }
 
 /** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值 */
-export const PARSE_VERSION = 4;
+export const PARSE_VERSION = 5;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -418,6 +418,51 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
   const wizard = body.wizard_info?.wizard_name ?? body.wizard_info?.wizard_id ?? "";
   const version = body.unit_list ? (body.runes?.[0]?.ancient !== undefined ? "SWEX / SWOP" : "SWEX") : "未知";
 
+  // RTA（世界競技場）：一般與 RTA 共用符文 / 神器庫，但裝備配置是兩套獨立清單。
+  //   world_arena_rune_equip_list      → rune_id / occupied_id
+  //   world_arena_artifact_equip_list  → artifact_id / occupied_id
+  // favorite_unit_list type 1        → 我的最愛魔靈
+  const favoriteGroups = list(body.favorite_unit_list);
+  const favType1 = favoriteGroups.find((g: any) => num(g?.type) === 1);
+  const favorites = [
+    ...new Set(
+      list(favType1?.unit_id_list)
+        .flatMap((x: any) => list(x).map((v: unknown) => num(v)))
+        .filter(Boolean),
+    ),
+  ];
+  const rtaLoadouts: Record<number, RtaLoadout> = {};
+  let rtaRunes = 0;
+  let rtaArtifacts = 0;
+  for (const m of list(body.world_arena_rune_equip_list)) {
+    const uid = num(m?.occupied_id);
+    const rid = num(m?.rune_id);
+    if (!uid || !rid) continue;
+    (rtaLoadouts[uid] ??= { runes: [], artifacts: [] }).runes.push(rid);
+    rtaRunes++;
+  }
+  for (const m of list(body.world_arena_artifact_equip_list)) {
+    const uid = num(m?.occupied_id);
+    const aid = num(m?.artifact_id);
+    if (!uid || !aid) continue;
+    (rtaLoadouts[uid] ??= { runes: [], artifacts: [] }).artifacts.push(aid);
+    rtaArtifacts++;
+  }
+  const rta: RtaData | undefined =
+    favorites.length > 0 || rtaRunes > 0 || rtaArtifacts > 0
+      ? {
+          loadouts: rtaLoadouts,
+          favorites: favorites.filter((id) => units.some((u) => u.id === id)),
+          runeSync: num(body.world_arena_rune_equip_sync),
+        }
+      : undefined;
+  if (rta) {
+    warnings.push(
+      `RTA：最愛 ${rta.favorites.length} 隻、RTA 符文 ${rtaRunes} 顆、RTA 神器 ${rtaArtifacts} 件。`,
+    );
+    if (rta.favorites.length > 0 && rtaRunes === 0) warnings.push("此存檔有最愛魔靈，但沒有 RTA 符文配置資料。");
+  }
+
   return {
     account: {
       fileName,
@@ -429,6 +474,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       artifacts,
       buildings,
       version,
+      rta,
     },
     warnings,
   };
@@ -474,5 +520,19 @@ export function exportAccount(account: Account): string {
       ancient: r.ancient ? 1 : 0,
     })),
     building_list: account.buildings.map((b) => ({ building_master_id: b.id, building_level: b.level })),
+    favorite_unit_list: account.rta
+      ? [{ type: 1, unit_id_list: [account.rta.favorites] }]
+      : [],
+    world_arena_rune_equip_list: account.rta
+      ? Object.entries(account.rta.loadouts).flatMap(([uid, l]) =>
+          l.runes.map((rune_id) => ({ rune_id, occupied_id: Number(uid) })),
+        )
+      : [],
+    world_arena_artifact_equip_list: account.rta
+      ? Object.entries(account.rta.loadouts).flatMap(([uid, l]) =>
+          l.artifacts.map((artifact_id) => ({ artifact_id, occupied_id: Number(uid) })),
+        )
+      : [],
+    world_arena_rune_equip_sync: account.rta?.runeSync ?? 0,
   });
 }

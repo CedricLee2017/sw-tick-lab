@@ -4,5 +4,6 @@ export * from "../src/lib/stats";
 export * from "../src/lib/damage";
 export * from "../src/lib/artifacts";
 export * from "../src/lib/stage2";
+export * from "../src/lib/rta";
 export { parseAccountJSON, exportAccount } from "../src/lib/parse";
 export { default as MONSTERS } from "../src/data/monsters.json";
