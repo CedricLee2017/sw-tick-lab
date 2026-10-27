@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowRight, Copy, Loader2, Save, Sparkles, Wand2, Gauge, ChevronDown, Plus, Target, X, Zap,
+  Lock, Unlock, Ban, Pin, RotateCcw,
 } from "lucide-react";
-import { useStore, monsterLabel } from "../store";
+import { useStore, monsterLabel, type Loadout, type RuneFlag } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { MonsterPicker, MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
 import { DamagePanel } from "../components/DamagePanel";
@@ -12,6 +13,7 @@ import {
 } from "../lib/damage";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import { ArtifactStage } from "../components/ArtifactStage";
+import { RuneRestrictions } from "../components/RuneRestrictions";
 import {
   FOCUS_LIMIT, FOCUS_OPTIONS, STAT_KEYS, buildAt, normalizeFocus, statsAt,
   type Build, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick,
@@ -184,10 +186,15 @@ export default function OptimizerPage() {
   const patchBonus = useStore((s) => s.patchBonus);
   const setFocus = useStore((s) => s.setFocus);
   const focus = settings.focus ?? [];
+  const lockedRunes = settings.lockedRunes ?? [];
+  const excludedRunes = settings.excludedRunes ?? [];
+  const includedRunes = settings.includedRunes ?? [];
   const summary = useSummary();
   const rta = settings.rta;
   const saveLoadout = useStore((s) => s.saveLoadout);
   const notify = useStore((s) => s.notify);
+  const setRuneFlag = useStore((s) => s.setRuneFlag);
+  const loadouts = useStore((s) => s.loadouts);
 
   const [monsterId, setMonsterId] = useState(0);
   const [setGroups, setSetGroups] = useState<{ set: number; pieces: number }[]>([
@@ -341,9 +348,16 @@ export default function OptimizerPage() {
     const raw = sessionStorage.getItem("swtick:draft");
     if (!raw) return;
     try {
-      const d = JSON.parse(raw) as { monsterId?: number; tick?: number };
+      const d = JSON.parse(raw) as { monsterId?: number; tick?: number; includeRunes?: number[]; mode?: "tick" | "speed"; speed?: number };
       if (d.monsterId) setMonsterId(d.monsterId);
       if (d.tick) { setTick(d.tick); setMode("tick"); }
+      if (d.includeRunes?.length) {
+        const st = useStore.getState();
+        st.setRuneFlag("included", st.settings.includedRunes, false);
+        st.setRuneFlag("included", d.includeRunes, true);
+        setMode(d.mode ?? "speed");
+        setSpeedTarget(d.speed ?? 0);
+      }
       sessionStorage.removeItem("swtick:draft");
     } catch { /* ignore */ }
   }, []);
@@ -406,8 +420,11 @@ export default function OptimizerPage() {
         mainFilters: mains,
         relaxSub,
         intangible,
+        excludeRunes: excludedRunes,
+        includeRunes: includedRunes,
+        lockedRunes,
       }),
-    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, relaxSub, intangible],
+    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, relaxSub, intangible, excludedRunes, includedRunes, lockedRunes],
   );
 
   /** 嚴格 4+2 不可能時，破套模式的速度上界（只用來判斷是否值得自動再試） */
@@ -425,9 +442,12 @@ export default function OptimizerPage() {
             mainFilters: mains,
             relaxSub: true,
             intangible,
+            excludeRunes: excludedRunes,
+            includeRunes: includedRunes,
+            lockedRunes,
           })
         : null,
-    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, hasFour, hasTwo, relaxSub, intangible],
+    [base, account, required, bonus, rta, allowEquipped, boxMonster, mains, hasFour, hasTwo, relaxSub, intangible, excludedRunes, includedRunes, lockedRunes],
   );
 
   const run = (opts: { relaxOverride?: boolean; auto?: boolean } = {}) => {
@@ -436,6 +456,18 @@ export default function OptimizerPage() {
     if (!monsterId) return notify("請先選擇魔靈", "err");
     if (!setConfigValid) return notify("套裝件數合計超過 6，請調整套裝", "err");
     if (!workerRef.current) return notify("配符運算模組未就緒，請重新整理頁面再試", "err");
+    const targetUnit = boxMonster?.unit.id ?? 0;
+    const slots = new Set<number>();
+    for (const id of includedRunes) {
+      const r = runeMap.get(id);
+      if (!r) return notify(`找不到固定使用的符文 #${id}`, "err");
+      if (slots.has(r.slot)) return notify(`位置 ${r.slot} 有兩顆固定使用的符文，請移除一顆`, "err");
+      slots.add(r.slot);
+      if (excludedRunes.includes(id)) return notify("同一顆符文不能同時排除與固定使用", "err");
+      if (lockedRunes.includes(id) && (!targetUnit || r.occupied !== targetUnit)) {
+        return notify("固定使用的符文中有已鎖定在別的魔靈身上的符文，請先解除鎖定", "err");
+      }
+    }
     const canRelax = hasFour && hasTwo && !relax;
     const maxSpeed = Math.max(bound.speed, canRelax && relaxBound ? relaxBound.speed : 0);
     if (!opts.auto && targetSpeed > 0 && maxSpeed < targetSpeed) {
@@ -475,6 +507,9 @@ export default function OptimizerPage() {
       relaxSub: relax,
       intangible,
       focus: normalizeFocus(focus),
+      excludeRunes: excludedRunes,
+      includeRunes: includedRunes,
+      lockedRunes,
     };
     const id = ++runId.current;
     const t0 = performance.now();
@@ -521,6 +556,26 @@ export default function OptimizerPage() {
 
   // 顯示目前裝備
   const currentStats = boxMonster?.stats;
+
+  /** 對一整組配裝套用鎖定 / 排除 / 固定使用 */
+  const setBuildFlag = (build: Build, kind: RuneFlag, on: boolean) => {
+    const ids = build.runes.filter((r): r is Rune => !!r).map((r) => r.id);
+    if (ids.length === 0) return;
+    if (kind === "included" && on) setRuneFlag("included", includedRunes, false);
+    setRuneFlag(kind, ids, on);
+    const label = kind === "locked" ? "鎖定" : kind === "excluded" ? "排除" : "固定使用";
+    notify(`已${on ? "加入" : "解除"} ${ids.length} 顆符文的${label}`);
+  };
+
+  /** 從 BUILDS 收藏帶入整組符文（固定使用） */
+  const applyLoadout = (l: Loadout) => {
+    setMonsterId(l.monsterId);
+    setRuneFlag("included", includedRunes, false);
+    setRuneFlag("included", l.runeIds, true);
+    setMode("speed");
+    setSpeedTarget(0);
+    notify(`已帶入收藏配裝「${l.name}」；符文已設為 Include`);
+  };
 
   // 技能資料只載入一次
   useEffect(() => {
@@ -787,6 +842,8 @@ export default function OptimizerPage() {
               )}
             </div>
 
+            <RuneRestrictions targetUnit={boxMonster?.unit.id ?? 0} />
+
             <div className="field">
               <div className="row between">
                 <label>主屬性（可選）</label>
@@ -959,6 +1016,26 @@ export default function OptimizerPage() {
             </div>
           )}
 
+          {loadouts.length > 0 && (
+            <div className="card card-pad builds-strip">
+              <div className="row between" style={{ gap: 8 }}>
+                <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                  <span className="focus-title">BUILDS</span>
+                  <span className="tiny dim">點擊套用收藏（符文設為 Include）</span>
+                </div>
+                <a className="tiny" href="#/builds">全部收藏 →</a>
+              </div>
+              <div className="row wrap" style={{ gap: 5, marginTop: 7 }}>
+                {loadouts.slice(0, 12).map((l) => (
+                  <button key={l.id} type="button" className="build-fav-chip" onClick={() => applyLoadout(l)} title={`${l.name} · ${l.stats.spd} 速`}>
+                    {monsterLabel(l.monsterId)} <span className="dim">T{l.stats.tick}</span>
+                  </button>
+                ))}
+                {loadouts.length > 12 && <span className="tiny dim" style={{ alignSelf: "center" }}>+{loadouts.length - 12}</span>}
+              </div>
+            </div>
+          )}
+
           {monsterId > 0 && (
             <DamagePanel
               skills={monsterSkills}
@@ -1076,6 +1153,11 @@ export default function OptimizerPage() {
                 damageStats={damageByBuild.get(b)?.stats}
                 damageSkill={dmgSkill}
                 guildOn={dmgOpts.useGuild}
+                lockedSet={new Set(lockedRunes)}
+                excludedSet={new Set(excludedRunes)}
+                includedSet={new Set(includedRunes)}
+                onToggleRuneFlag={(kind, id) => setRuneFlag(kind, [id], !(kind === "locked" ? lockedRunes : kind === "excluded" ? excludedRunes : includedRunes).includes(id))}
+                onBuildFlag={(kind, on) => setBuildFlag(b, kind, on)}
                 ownerOf={(rid) => {
                   const u = account?.units.find((x) => x.runes.includes(rid));
                   return u ? monsterLabel(u.master) : "";
@@ -1177,6 +1259,11 @@ function BuildCard({
   damageStats,
   damageSkill,
   guildOn,
+  lockedSet,
+  excludedSet,
+  includedSet,
+  onToggleRuneFlag,
+  onBuildFlag,
 }: {
   build: Build;
   index: number;
@@ -1192,6 +1279,11 @@ function BuildCard({
   damageStats?: Stats;
   damageSkill?: Skill;
   guildOn: boolean;
+  lockedSet: Set<number>;
+  excludedSet: Set<number>;
+  includedSet: Set<number>;
+  onToggleRuneFlag: (kind: RuneFlag, id: number) => void;
+  onBuildFlag: (kind: RuneFlag, on: boolean) => void;
 }) {
   const s = build.stats;
   const mainSets = Object.entries(build.sets).sort((a, b) => b[1] - a[1]);
@@ -1294,7 +1386,15 @@ function BuildCard({
                 return (
                   <div className="rune-wheel-cell" data-slot={slot} style={{ gridArea: `rs${slot}` }} key={slot}>
                     {r ? (
-                      <RuneCard rune={r} detail owner={ownerOf(r.id) || undefined} />
+                      <RuneCard
+                        rune={r}
+                        detail
+                        owner={ownerOf(r.id) || undefined}
+                        locked={lockedSet.has(r.id)}
+                        excluded={excludedSet.has(r.id)}
+                        onToggleLock={() => onToggleRuneFlag("locked", r.id)}
+                        onToggleExclude={() => onToggleRuneFlag("excluded", r.id)}
+                      />
                     ) : (
                       <div className="rune rune-empty">
                         <div className="rune-top">
@@ -1313,6 +1413,16 @@ function BuildCard({
           <div className="row" style={{ marginTop: 12, gap: 8 }}>
             <button className="btn btn-sm" onClick={onPlan}><ArrowRight size={13} /> 配符清單 / 換符計畫</button>
             <button className="btn btn-sm btn-ghost" onClick={onSave}><Save size={13} /> 儲存為配裝</button>
+          </div>
+
+          <div className="row wrap" style={{ marginTop: 8, gap: 6 }}>
+            <span className="tiny dim" style={{ alignSelf: "center" }}>整組設定：</span>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("locked", true)}><Lock size={12} /> 一鍵鎖符</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("locked", false)}><Unlock size={12} /> 解除鎖符</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("excluded", true)}><Ban size={12} /> 一鍵 Exclude</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("excluded", false)}><RotateCcw size={12} /> 解除 Exclude</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("included", true)}><Pin size={12} /> 固定使用此組合</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("included", false)}><X size={12} /> 解除 Include</button>
           </div>
         </div>
       )}

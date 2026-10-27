@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Search, X, ChevronDown } from "lucide-react";
+import { Search, X, ChevronDown, Lock, Unlock, Ban } from "lucide-react";
 import { ELEMENTS, SET_BY_ID, STAT_TYPES, type StatKey } from "../lib/constants";
 import { MONSTERS, monsterOf } from "../store";
 import type { Artifact, Monster, Rune, Stats } from "../lib/types";
@@ -103,6 +103,10 @@ export function RuneCard({
   selected,
   compact,
   detail,
+  locked = false,
+  excluded = false,
+  onToggleLock,
+  onToggleExclude,
 }: {
   rune: Rune;
   owner?: string;
@@ -111,6 +115,12 @@ export function RuneCard({
   compact?: boolean;
   /** 完整資訊卡：副屬性、固有屬性、符文 ID、原裝備者、效率 */
   detail?: boolean;
+  /** 應用程式內的鎖定（不可被其他角色配符使用） */
+  locked?: boolean;
+  /** 配符時排除 */
+  excluded?: boolean;
+  onToggleLock?: () => void;
+  onToggleExclude?: () => void;
 }) {
   const set = SET_BY_ID[rune.set];
   const gradeClass = rune.grade >= 5 ? "legendary" : rune.grade === 4 ? "hero" : rune.grade === 3 ? "rare" : "";
@@ -119,7 +129,7 @@ export function RuneCard({
   const eff = Math.round(rune.eff);
   return (
     <div
-      className={`rune ${gradeClass} ${detail ? "detail" : ""}`}
+      className={`rune ${gradeClass} ${detail ? "detail" : ""} ${excluded ? "excluded" : ""} ${locked ? "locked" : ""}`}
       onClick={onClick}
       style={{
         cursor: onClick ? "pointer" : undefined,
@@ -132,9 +142,33 @@ export function RuneCard({
           <span className="rune-dot" style={{ background: setColor(rune.set) }} />
           {set?.name ?? `套裝${rune.set}`}
           {rune.ancient && <span className="rune-tag">遠古</span>}
-          {rune.locked && <span className="rune-tag muted" title="已鎖定">鎖</span>}
+          {rune.locked && <span className="rune-tag muted" title="遊戲內已鎖定">鎖</span>}
+          {locked && <span className="rune-tag gold" title="應用程式鎖定：不可被其他魔靈配符使用">App 鎖</span>}
+          {excluded && <span className="rune-tag red" title="已排除：不會進入配符">排除</span>}
         </div>
-        <span className="rune-slot">#{rune.slot} · +{rune.level}</span>
+        <div className="rune-actions">
+          {onToggleLock && (
+            <button
+              type="button"
+              className={`rune-flag ${locked ? "on" : ""}`}
+              title={locked ? "解除應用程式鎖定" : "鎖定符文（不可被其他魔靈配符使用）"}
+              onClick={(e) => { e.stopPropagation(); onToggleLock(); }}
+            >
+              {locked ? <Unlock size={11} /> : <Lock size={11} />}
+            </button>
+          )}
+          {onToggleExclude && (
+            <button
+              type="button"
+              className={`rune-flag ${excluded ? "off" : ""}`}
+              title={excluded ? "取消排除" : "排除此符文（不進入配符）"}
+              onClick={(e) => { e.stopPropagation(); onToggleExclude(); }}
+            >
+              <Ban size={11} />
+            </button>
+          )}
+          <span className="rune-slot">#{rune.slot} · +{rune.level}</span>
+        </div>
       </div>
       <div className="rune-main">{statText(rune.main.t, rune.main.v)}</div>
       {rune.prefix?.t > 0 && (

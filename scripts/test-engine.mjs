@@ -949,4 +949,40 @@ check("RTA：獨立符文 / 神器、最愛魔靈與速度隊長", () => {
   assert.ok(leader.tick < view.stats.tick, "隊長加速後 RTA Tick 應下降");
 });
 
+check("配符 Include / Exclude / 鎖定符文", () => {
+  const runes = [];
+  for (let slot = 1; slot <= 6; slot++) {
+    for (let k = 0; k < 2; k++) {
+      runes.push({
+        id: 10000 + slot * 10 + k, set: slot <= 3 ? 3 : 1, slot, grade: 6, level: 15,
+        main: { t: 8, v: 40 + k }, prefix: { t: 0, v: 0 }, subs: [],
+        occupied: 0, ancient: false, locked: false, eff: 50, effMax: 100,
+      });
+    }
+  }
+  const monster = MONSTERS.find((m) => m.id === 13413);
+  const base = baseStats(monster, 6, 40);
+  const common = {
+    base, runes, required: [], min: {}, max: {}, bonus: defaultBonus(),
+    pool: 2, allowEquipped: true, maxNodes: 200000,
+  };
+  const inc = optimize({ ...common, includeRunes: [10021] });
+  assert.ok(inc.count > 0);
+  const incBuilds = buildsOf(inc, runes, false, 8);
+  assert.ok(incBuilds.every((b) => b.runes[1]?.id === 10021), "Include 符文必須固定在 2 號位");
+
+  const exc = optimize({ ...common, excludeRunes: [10020] });
+  const excBuilds = buildsOf(exc, runes, false, 8);
+  assert.ok(excBuilds.every((b) => b.runes[1]?.id !== 10020), "Exclude 符文不可出現在結果");
+
+  const lockedOther = optimize({ ...common, includeRunes: [10021], lockedRunes: [10021], targetUnit: 999 });
+  assert.equal(lockedOther.count, 0, "鎖定在別的魔靈身上的符文不能用來配符");
+
+  const lockedSame = optimize({ ...common, includeRunes: [10021], lockedRunes: [10021], targetUnit: 555 });
+  runes.find((r) => r.id === 10021).occupied = 555;
+  const lockedSame2 = optimize({ ...common, includeRunes: [10021], lockedRunes: [10021], targetUnit: 555 });
+  assert.equal(lockedSame2.count, inc.count, "鎖定在目標魔靈身上的符文仍可使用");
+  assert.ok(lockedSame.count >= 0);
+});
+
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

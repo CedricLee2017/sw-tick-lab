@@ -7,11 +7,18 @@ import type { Rune } from "../lib/types";
 
 export default function RunesPage() {
   const account = useStore((s) => s.account);
+  const lockedRunes = useStore((s) => s.settings.lockedRunes);
+  const excludedRunes = useStore((s) => s.settings.excludedRunes);
+  const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
+  const lockedSet = useMemo(() => new Set(lockedRunes), [lockedRunes]);
+  const excludedSet = useMemo(() => new Set(excludedRunes), [excludedRunes]);
   const [q, setQ] = useState("");
   const [setId, setSetId] = useState(0);
   const [slot, setSlot] = useState(0);
   const [grade, setGrade] = useState(0);
   const [onlyFree, setOnlyFree] = useState(false);
+  const [onlyLocked, setOnlyLocked] = useState(false);
+  const [onlyExcluded, setOnlyExcluded] = useState(false);
   const [minEff, setMinEff] = useState(0);
   const [sort, setSort] = useState<"eff" | "grade" | "spd" | "slot">("eff");
   const [take, setTake] = useState(150);
@@ -31,6 +38,8 @@ export default function RunesPage() {
       if (slot && r.slot !== slot) return false;
       if (grade && r.grade !== grade) return false;
       if (onlyFree && r.occupied > 0) return false;
+      if (onlyLocked && !lockedSet.has(r.id)) return false;
+      if (onlyExcluded && !excludedSet.has(r.id)) return false;
       if (minEff && r.eff < minEff) return false;
       if (q) {
         const text = `${SET_BY_ID[r.set]?.name ?? ""} ${SET_BY_ID[r.set]?.en ?? ""} ${STAT_TYPES[r.main.t]?.label ?? ""} ${owner.get(r.id) ?? ""}`.toLowerCase();
@@ -47,7 +56,7 @@ export default function RunesPage() {
       return sb - sa || b.eff - a.eff;
     });
     return arr;
-  }, [account, q, setId, slot, grade, onlyFree, minEff, sort, owner]);
+  }, [account, q, setId, slot, grade, onlyFree, onlyLocked, onlyExcluded, minEff, sort, owner, lockedSet, excludedSet]);
 
   if (!account) return <div className="empty"><Gem size={40} /><div>尚未匯入存檔</div></div>;
 
@@ -87,6 +96,12 @@ export default function RunesPage() {
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
             <input type="checkbox" checked={onlyFree} onChange={(e) => setOnlyFree(e.target.checked)} /> 只看未裝備
           </label>
+          <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={onlyLocked} onChange={(e) => setOnlyLocked(e.target.checked)} /> 只看鎖定
+          </label>
+          <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={onlyExcluded} onChange={(e) => setOnlyExcluded(e.target.checked)} /> 只看排除
+          </label>
           <div className="row tiny" style={{ gap: 8, flex: 1, maxWidth: 320 }}>
             <span>最低效率 {minEff}%</span>
             <input type="range" min={0} max={120} step={5} value={minEff} onChange={(e) => setMinEff(Number(e.target.value))} style={{ flex: 1 }} />
@@ -96,7 +111,16 @@ export default function RunesPage() {
 
         <div className="card-pad" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
           {shown.map((r) => (
-            <RuneCard key={r.id} rune={r} owner={owner.get(r.id)} onClick={() => setDetail(r)} />
+            <RuneCard
+              key={r.id}
+              rune={r}
+              owner={owner.get(r.id)}
+              locked={lockedSet.has(r.id)}
+              excluded={excludedSet.has(r.id)}
+              onToggleLock={() => toggleRuneFlag("locked", r.id)}
+              onToggleExclude={() => toggleRuneFlag("excluded", r.id)}
+              onClick={() => setDetail(r)}
+            />
           ))}
           {runes.length === 0 && <div className="empty" style={{ gridColumn: "1/-1" }}>沒有符合條件的符文</div>}
         </div>
@@ -112,7 +136,14 @@ export default function RunesPage() {
         <Modal title={`符文 #${detail.id}`} onClose={() => setDetail(null)} width={520}>
           <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>
             <div style={{ flex: 1 }}>
-              <RuneCard rune={detail} owner={owner.get(detail.id)} />
+              <RuneCard
+                rune={detail}
+                owner={owner.get(detail.id)}
+                locked={lockedSet.has(detail.id)}
+                excluded={excludedSet.has(detail.id)}
+                onToggleLock={() => toggleRuneFlag("locked", detail.id)}
+                onToggleExclude={() => toggleRuneFlag("excluded", detail.id)}
+              />
             </div>
             <div style={{ flex: 1.2 }}>
               <div className="kv"><span className="k">套裝</span><span className="v">{SET_BY_ID[detail.set]?.name}（{SET_BY_ID[detail.set]?.pieces} 件）</span></div>

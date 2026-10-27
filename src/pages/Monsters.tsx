@@ -9,6 +9,11 @@ import { setSummary } from "../lib/stats";
 export default function MonstersPage() {
   const summary = useSummary();
   const rta = useStore((s) => s.settings.rta);
+  const lockedRunes = useStore((s) => s.settings.lockedRunes);
+  const excludedRunes = useStore((s) => s.settings.excludedRunes);
+  const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
+  const lockedSet = useMemo(() => new Set(lockedRunes), [lockedRunes]);
+  const excludedSet = useMemo(() => new Set(excludedRunes), [excludedRunes]);
   const [q, setQ] = useState("");
   const [el, setEl] = useState(0);
   const [onlyBuilt, setOnlyBuilt] = useState(false);
@@ -116,7 +121,17 @@ export default function MonstersPage() {
             <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8 }}>
               {[1, 2, 3, 4, 5, 6].map((slot) => {
                 const r = current.runes.find((x) => x.slot === slot);
-                return r ? <RuneCard key={slot} rune={r} compact /> : (
+                return r ? (
+                  <RuneCard
+                    key={slot}
+                    rune={r}
+                    compact
+                    locked={lockedSet.has(r.id)}
+                    excluded={excludedSet.has(r.id)}
+                    onToggleLock={() => toggleRuneFlag("locked", r.id)}
+                    onToggleExclude={() => toggleRuneFlag("excluded", r.id)}
+                  />
+                ) : (
                   <div key={slot} className="rune" style={{ opacity: .35, alignItems: "center", justifyContent: "center", minHeight: 80 }}>
                     <span className="tiny dim">位置 {slot}</span>
                   </div>

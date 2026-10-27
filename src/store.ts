@@ -33,9 +33,31 @@ export interface Settings {
   pool: number;
   /** 配符焦點屬性（最多 5 組） */
   focus: FocusEntry[];
+  /** 應用程式內鎖定的符文：只能留在目前裝備的魔靈，不能被其他角色配符使用 */
+  lockedRunes: number[];
+  /** 配符時排除的符文 */
+  excludedRunes: number[];
+  /** 配符時固定要使用的符文 */
+  includedRunes: number[];
 }
 
-const DEFAULT_SETTINGS = (): Settings => ({ bonus: defaultBonus(), rta: false, pool: 15, focus: [] });
+export type RuneFlag = "locked" | "excluded" | "included";
+
+const RUNE_FLAG_KEY: Record<RuneFlag, "lockedRunes" | "excludedRunes" | "includedRunes"> = {
+  locked: "lockedRunes",
+  excluded: "excludedRunes",
+  included: "includedRunes",
+};
+
+const DEFAULT_SETTINGS = (): Settings => ({
+  bonus: defaultBonus(),
+  rta: false,
+  pool: 15,
+  focus: [],
+  lockedRunes: [],
+  excludedRunes: [],
+  includedRunes: [],
+});
 
 const ACCOUNT_KEY = "swtick:account";
 const SETTINGS_KEY = "swtick:settings";
@@ -61,6 +83,10 @@ interface Store {
   setRta: (v: boolean) => void;
   setPool: (v: number) => void;
   setFocus: (focus: FocusEntry[]) => void;
+  /** 切換單顆符文的鎖定 / 排除 / 固定 */
+  toggleRuneFlag: (kind: RuneFlag, id: number) => void;
+  /** 一次設定多顆符文的鎖定 / 排除 / 固定 */
+  setRuneFlag: (kind: RuneFlag, ids: number[], on: boolean) => void;
   saveLoadout: (l: Omit<Loadout, "id" | "createdAt">) => void;
   removeLoadout: (id: string) => void;
   notify: (msg: string, kind?: "ok" | "err") => void;
@@ -89,7 +115,14 @@ export const useStore = create<Store>((setState, getState) => ({
       const acc = stale ? null : stored;
       // 舊版 settings 沒有 focus 欄位，補上預設值
       const saved = settings
-        ? { ...DEFAULT_SETTINGS(), ...settings, focus: settings.focus ?? [] }
+        ? {
+            ...DEFAULT_SETTINGS(),
+            ...settings,
+            focus: settings.focus ?? [],
+            lockedRunes: settings.lockedRunes ?? [],
+            excludedRunes: settings.excludedRunes ?? [],
+            includedRunes: settings.includedRunes ?? [],
+          }
         : DEFAULT_SETTINGS();
       // 候選符文上限已改為 15 顆，舊設定若存了 18 要在載入時收斂
       saved.pool = Math.min(15, Math.max(6, Math.round(saved.pool ?? 15)));
@@ -125,6 +158,9 @@ export const useStore = create<Store>((setState, getState) => ({
     const settings: Settings = {
       ...prev,
       bonus: defaultBonus({ leadSpd: prev.bonus.leadSpd, buffSpd: prev.bonus.buffSpd }),
+      lockedRunes: [],
+      excludedRunes: [],
+      includedRunes: [],
     };
     setState({
       account,
@@ -142,7 +178,9 @@ export const useStore = create<Store>((setState, getState) => ({
   },
 
   clearAccount: async () => {
-    setState({ account: null, runeMap: new Map() });
+    const settings = { ...getState().settings, lockedRunes: [], excludedRunes: [], includedRunes: [] };
+    setState({ account: null, runeMap: new Map(), settings });
+    void set(SETTINGS_KEY, settings);
     await del(ACCOUNT_KEY);
   },
 
@@ -166,6 +204,28 @@ export const useStore = create<Store>((setState, getState) => ({
 
   setFocus: (focus) => {
     const settings = { ...getState().settings, focus };
+    setState({ settings });
+    void set(SETTINGS_KEY, settings);
+  },
+
+  toggleRuneFlag: (kind, id) => {
+    const current = getState().settings[RUNE_FLAG_KEY[kind]];
+    getState().setRuneFlag(kind, [id], !current.includes(id));
+  },
+
+  setRuneFlag: (kind, ids, on) => {
+    if (ids.length === 0) return;
+    const settings = { ...getState().settings };
+    const key = RUNE_FLAG_KEY[kind];
+    const next = new Set(settings[key]);
+    for (const id of ids) {
+      if (on) next.add(id);
+      else next.delete(id);
+    }
+    settings[key] = [...next];
+    // include 與 exclude 互斥；鎖定則可與兩者並存
+    if (kind === "included" && on) settings.excludedRunes = settings.excludedRunes.filter((id) => !ids.includes(id));
+    if (kind === "excluded" && on) settings.includedRunes = settings.includedRunes.filter((id) => !ids.includes(id));
     setState({ settings });
     void set(SETTINGS_KEY, settings);
   },

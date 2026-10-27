@@ -88,6 +88,12 @@ export interface OptRequest {
   focus?: FocusEntry[];
   /** 目標魔靈已裝備神器的固定面板加成（體力 / 攻擊 / 防禦） */
   artifactFlat?: { hp: number; atk: number; def: number };
+  /** 排除的符文 id */
+  excludeRunes?: number[];
+  /** 固定要使用的符文 id（每個位置最多一顆） */
+  includeRunes?: number[];
+  /** 已鎖定的符文 id（只能留在目前裝備的魔靈） */
+  lockedRunes?: number[];
 }
 
 export interface Build {
@@ -336,6 +342,9 @@ export function optimize(req: OptRequest): OptResult {
     relaxSub = false,
     intangible = false,
     focus = [],
+    excludeRunes = [],
+    includeRunes = [],
+    lockedRunes = [],
   } = req;
 
   const INTANGIBLE_ID = 25;
@@ -389,12 +398,35 @@ export function optimize(req: OptRequest): OptResult {
   const slots: { slot: number; list: Cand[] }[] = [];
   const maxCand = Math.min(15, Math.max(6, pool));
   const speedTarget = min.spd ?? 0;
+
+  // 使用者指定的排除 / 固定符文；鎖定符文只能留在目前裝備的魔靈
+  const excludeSet = new Set(excludeRunes);
+  const lockedSet = new Set(lockedRunes);
+  const includeBySlot = new Map<number, Rune>();
+  for (const id of new Set(includeRunes)) {
+    const rune = req.runes.find((r) => r.id === id);
+    if (!rune || !rune.slot) return EMPTY_RESULT(requiredSets, intangible);
+    if (excludeSet.has(id)) return EMPTY_RESULT(requiredSets, intangible);
+    if (lockedSet.has(id) && (!targetUnit || rune.occupied !== targetUnit)) {
+      return EMPTY_RESULT(requiredSets, intangible);
+    }
+    if (includeBySlot.has(rune.slot)) return EMPTY_RESULT(requiredSets, intangible);
+    includeBySlot.set(rune.slot, rune);
+  }
+  const usable = (r: Rune) =>
+    !excludeSet.has(r.id) &&
+    (!lockedSet.has(r.id) || (targetUnit > 0 && r.occupied === targetUnit));
+
   for (let slot = 1; slot <= 6; slot++) {
-    let list = req.runes.filter((r) => r.slot === slot);
+    const fixed = includeBySlot.get(slot);
+    let list = fixed ? [fixed] : req.runes.filter((r) => r.slot === slot);
     const mainT = mainFilters[slot] ?? 0;
-    if (mainT) list = list.filter((r) => r.main.t === mainT);
-    if (!allowEquipped) list = list.filter((r) => r.occupied === 0 || r.occupied === targetUnit);
-    if (strictSets) list = list.filter((r) => requiredIds.has(r.set) || (intangible && r.set === INTANGIBLE_ID));
+    if (!fixed) {
+      if (mainT) list = list.filter((r) => r.main.t === mainT);
+      list = list.filter(usable);
+      if (!allowEquipped) list = list.filter((r) => r.occupied === 0 || r.occupied === targetUnit);
+      if (strictSets) list = list.filter((r) => requiredIds.has(r.set) || (intangible && r.set === INTANGIBLE_ID));
+    }
     const scored = list
       .map((r) => ({ r, v: rankValue(r), spd: runeSpeed(r) }))
       .sort((a, b) => b.v - a.v);
@@ -759,6 +791,9 @@ export function maxSpeedBound(req: {
   mainFilters?: Partial<Record<number, number>>;
   relaxSub?: boolean;
   intangible?: boolean;
+  excludeRunes?: number[];
+  includeRunes?: number[];
+  lockedRunes?: number[];
 }): { speed: number; tick: number; perSlot: number[]; missingSlots: number[] } {
   const requiredSets = req.required.filter((r) => (req.relaxSub ? r.count >= 4 : r.count > 0));
   const requiredTotal = requiredSets.reduce((s, r) => s + r.count, 0);
@@ -768,6 +803,17 @@ export function maxSpeedBound(req: {
   const targetUnit = req.targetUnit ?? 0;
   const mainFilters = req.mainFilters ?? {};
   const intangible = req.intangible ?? false;
+  const excludeSet = new Set(req.excludeRunes ?? []);
+  const lockedSet = new Set(req.lockedRunes ?? []);
+  const includeBySlot = new Map<number, Rune>();
+  for (const id of new Set(req.includeRunes ?? [])) {
+    const rune = req.runes.find((r) => r.id === id);
+    if (!rune || includeBySlot.has(rune.slot) || excludeSet.has(id)) continue;
+    includeBySlot.set(rune.slot, rune);
+  }
+  const usable = (r: Rune) =>
+    !excludeSet.has(r.id) &&
+    (!lockedSet.has(r.id) || (targetUnit > 0 && r.occupied === targetUnit));
 
   const perSlot: number[] = [];
   const missingSlots: number[] = [];
@@ -775,12 +821,16 @@ export function maxSpeedBound(req: {
   const slotData: { any: number; bySet: Map<number, number>; swift: number; intang: number }[] = [];
   for (let slot = 1; slot <= 6; slot++) {
     const mainT = mainFilters[slot] ?? 0;
-    const list = req.runes.filter(
-      (r) =>
-        r.slot === slot &&
-        (!mainT || r.main.t === mainT) &&
-        (allowEquipped || r.occupied === 0 || r.occupied === targetUnit),
-    );
+    const fixed = includeBySlot.get(slot);
+    const list = fixed
+      ? [fixed]
+      : req.runes.filter(
+          (r) =>
+            r.slot === slot &&
+            (!mainT || r.main.t === mainT) &&
+            usable(r) &&
+            (allowEquipped || r.occupied === 0 || r.occupied === targetUnit),
+        );
     const bySet = new Map<number, number>();
     let any = 0;
     let swift = 0;
