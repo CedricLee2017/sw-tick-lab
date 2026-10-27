@@ -12,8 +12,8 @@ import {
   type DamageOptions, type DamageResult, type Skill, type SkillData,
 } from "../lib/damage";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
-import { ArtifactStage } from "../components/ArtifactStage";
 import { RuneRestrictions } from "../components/RuneRestrictions";
+import { saveArtifactHandoff } from "../lib/artifactHandoff";
 import {
   FOCUS_LIMIT, FOCUS_OPTIONS, STAT_KEYS, buildAt, normalizeFocus, statsAt,
   type Build, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick,
@@ -715,6 +715,29 @@ export default function OptimizerPage() {
     return out;
   }, [result, sortedOrder, runeMap, rta]);
 
+  /** 把目前排序前 500 組交給「配神器」頁 */
+  const sendToArtifacts = () => {
+    if (!result || !anyMonster || stage2Builds.length === 0) return;
+    const label =
+      sortKey === "dmg"
+        ? `傷害（${dmgSkill?.n ?? "技能"}）`
+        : SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? sortKey;
+    saveArtifactHandoff({
+      version: 1,
+      createdAt: Date.now(),
+      monsterId: anyMonster.id,
+      base,
+      builds: stage2Builds.map((b) => b.runes.map((r) => r?.id ?? null)),
+      bonus: dmgBonus,
+      rta,
+      skill: dmgSkill ?? null,
+      dmgOpts,
+      sortLabel: label,
+      total: result.count,
+    });
+    window.location.hash = "#/artifact-opt";
+  };
+
   /** 畫面上只算這一頁的傷害 */
   const damageByBuild = useMemo(() => {
     if (!dmgOn || !dmgSkill) return new Map<Build, { dmg: DamageResult; stats: Stats }>();
@@ -1122,21 +1145,17 @@ export default function OptimizerPage() {
                   </div>
                 </div>
               )}
+              {result.count > 0 && stage2Builds.length > 0 && (
+                <div className="row wrap" style={{ marginTop: 10, gap: 8 }}>
+                  <button className="btn btn-primary btn-sm" onClick={sendToArtifacts}>
+                    <Sparkles size={13} /> 前往配神器（目前排序前 {stage2Builds.length} 組）
+                  </button>
+                  <span className="tiny dim" style={{ alignSelf: "center" }}>
+                    神器第二階段已移到「配神器」頁；請先在這裡選好排序再前往。
+                  </span>
+                </div>
+              )}
             </div>
-          )}
-
-          {result && anyMonster && stage2Builds.length > 0 && (
-            <ArtifactStage
-              stageKey={`${monsterId}:${dmgSkill?.id ?? 0}:${sortKey}:${sortDir}:${result.count}:${result.nodes}`}
-              base={base}
-              builds={stage2Builds}
-              bonus={dmgBonus}
-              rta={rta}
-              monster={anyMonster}
-              artifacts={account?.artifacts ?? []}
-              skill={dmgSkill}
-              dmgOpts={dmgOpts}
-            />
           )}
 
           {result && pageBuilds.map((b, i) => {

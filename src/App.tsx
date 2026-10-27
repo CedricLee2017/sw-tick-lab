@@ -9,13 +9,14 @@ import MonstersPage from "./pages/Monsters";
 import SpeedPage from "./pages/SpeedLab";
 import RtaPage from "./pages/Rta";
 import BuildsPage from "./pages/Builds";
+import ArtifactOptimizerPage from "./pages/ArtifactOptimizer";
 import OptimizerPage from "./pages/Optimizer";
 import RunesPage from "./pages/Runes";
 import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 
-type RouteKey = "import" | "overview" | "monsters" | "speed" | "rta" | "optimizer" | "builds" | "runes" | "artifacts" | "settings";
+type RouteKey = "import" | "overview" | "monsters" | "speed" | "rta" | "optimizer" | "artifact-opt" | "builds" | "runes" | "artifacts" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -23,6 +24,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "speed", label: "速度實驗室", icon: <Gauge size={17} />, title: "速度實驗室", sub: "Tick 反推、速度門檻與出手順序" },
   { key: "rta", label: "RTA", icon: <Swords size={17} />, title: "RTA 世界競技場", sub: "最愛魔靈的 RTA 獨立配裝與速度排行" },
   { key: "optimizer", label: "配符", icon: <Wand2 size={17} />, title: "一鍵配符", sub: "以 Tick 為條件的符文最佳化" },
+  { key: "artifact-opt", label: "配神器", icon: <Sparkles size={17} />, title: "配神器", sub: "使用最近一次配符的前 500 組，進行神器第二階段" },
   { key: "builds", label: "配裝", icon: <Bookmark size={17} />, title: "配裝收藏 BUILDS", sub: "收藏的符文組合，隨時查看或帶回配符" },
   { key: "monsters", label: "魔靈", icon: <Users size={17} />, title: "魔靈圖鑑", sub: "你的魔靈盒與目前配裝" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
@@ -69,6 +71,7 @@ export default function App() {
       case "speed": return <SpeedPage />;
       case "rta": return <RtaPage />;
       case "optimizer": return <OptimizerPage />;
+      case "artifact-opt": return <ArtifactOptimizerPage />;
       case "builds": return <BuildsPage />;
       case "monsters": return <MonstersPage />;
       case "runes": return <RunesPage />;
@@ -97,14 +100,14 @@ export default function App() {
             </button>
           ))}
           <div className="nav-label">分析</div>
-          {ROUTES.slice(1, 9).map((r) => (
+          {ROUTES.slice(1, 10).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
               {!account && <span className="dim" style={{ marginLeft: "auto", fontSize: 10 }}>—</span>}
             </button>
           ))}
           <div className="nav-label">系統</div>
-          {ROUTES.slice(9).map((r) => (
+          {ROUTES.slice(10).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
             </button>
@@ -163,7 +166,7 @@ export default function App() {
       </div>
 
       <nav className="mobile-nav">
-        {ROUTES.filter((r) => ["import", "overview", "speed", "rta", "optimizer", "builds", "runes", "artifacts"].includes(r.key)).map((r) => (
+        {ROUTES.filter((r) => ["import", "overview", "speed", "rta", "optimizer", "artifact-opt", "builds", "runes", "artifacts"].includes(r.key)).map((r) => (
           <button key={r.key} className={route === r.key ? "active" : ""} onClick={() => go(r.key)}>
             {r.icon}
             <span>{r.label}</span>
