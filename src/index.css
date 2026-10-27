@@ -281,6 +281,20 @@ p { margin: 0; }
 .artifact.rare { border-color: rgba(88, 166, 255, .3); }
 .artifact .rune-main { color: #e9d5ff; }
 .artifact.detail .rune-main { font-size: 14px; }
+
+/* ── artifact stage 2 ─────────────────────────────── */
+.artifact-stage { border-color: rgba(232, 121, 249, .2); }
+.artifact-skill-list { gap: 4px; margin-top: 4px; }
+.artifact-skill-row {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line-soft); border-radius: 8px; padding: 6px 8px;
+  background: rgba(11, 17, 32, .45); font-size: 12px;
+}
+.artifact-skill-row.on { border-color: rgba(242, 198, 92, .3); background: rgba(242, 198, 92, .05); }
+.stage2-pair {
+  border: 1px solid var(--line-soft); border-radius: 12px; padding: 10px 12px;
+  background: rgba(11, 17, 32, .45);
+}
 .rune.detail { padding: 11px 12px; gap: 4px; }
 .rune.detail .rune-main { font-size: 13.5px; letter-spacing: -0.01em; }
 .rune-meta {

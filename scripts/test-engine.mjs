@@ -35,6 +35,7 @@ const {
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
+  artifactAdditionalDamage, artifactEligible, runStage2,
 } = engine;
 
 let passed = 0;
@@ -796,6 +797,76 @@ check("神器主效果計入面板與 EHP", () => {
   assert.equal(after.hp - before.hp, 1500);
   assert.equal(after.atk - before.atk, 100);
   assert.ok(after.ehp > before.ehp);
+});
+
+check("追傷：每個屬性分別無條件捨去後加總", () => {
+  const art = {
+    id: 9, type: 1, attr: 3, style: 0, occupied: 0, main: { t: 100, v: 1500 },
+    subs: [{ t: 218, v: 0.3 }, { t: 219, v: 4 }, { t: 220, v: 4 }, { t: 221, v: 40 }],
+    level: 15, rank: 5, stars: 5, locked: false,
+  };
+  assert.equal(artifactAdditionalDamage({ hp: 40000, atk: 3000, def: 2000, spd: 250 }, [art]), 420);
+  // 33333×0.3% = 99.999 → 99（不是先加總再捨去）
+  assert.equal(artifactAdditionalDamage({ hp: 33333, atk: 0, def: 0, spd: 0 }, [art]), 99);
+});
+
+check("追傷：不吃暴擊與防禦減傷，但會加在每段", () => {
+  const art = {
+    id: 9, type: 1, attr: 3, style: 0, occupied: 0, main: { t: 100, v: 1500 },
+    subs: [{ t: 218, v: 0.3 }, { t: 219, v: 4 }, { t: 220, v: 4 }, { t: 221, v: 40 }],
+    level: 15, rank: 5, stars: 5, locked: false,
+  };
+  const normal = computeSkillDamage(dmgStats, mkSkill(), dmgBase);
+  const withAd = computeSkillDamage(dmgStats, mkSkill(), dmgBase, [art]);
+  assert.equal(withAd.adPerHit, 282);
+  assert.equal(withAd.basePerHit, normal.perHit);
+  assert.equal(withAd.perHit, normal.perHit + 282);
+  assert.equal(withAd.adTotal, 282 * 2);
+  assert.equal(withAd.total, normal.perHit * 2 + 282 * 2);
+  // 暴擊模式也不會放大追傷
+  const crit = computeSkillDamage(dmgStats, mkSkill(), { ...dmgBase, crit: "crit" }, [art]);
+  assert.equal(crit.adPerHit, 282);
+});
+
+check("第二階段：依屬性 / 類型 / 主屬性挑神器，再算 25 對", () => {
+  const monster = MONSTERS.find((m) => m.id === 13413);
+  const base = baseStats(monster, 6, 40);
+  const runes = [1, 2, 3, 4, 5, 6]
+    .map((slot) => account.runes.find((r) => r.slot === slot))
+    .filter(Boolean);
+  const build = { runes, stats: statsForRunes(base, runes, defaultBonus(), false, true), score: 0, eff: 0, sets: {} };
+  const mkArt = (id, type, attr, style, main, subs) => ({
+    id, type, attr, style, occupied: 0, main: { t: main, v: main === 100 ? 1500 : 100 },
+    subs, level: 15, rank: 5, stars: 5, locked: false,
+  });
+  const arts = [];
+  for (let i = 0; i < 6; i++) {
+    arts.push(mkArt(1000 + i, 1, 3, 0, i < 5 ? 101 : 102, i % 2 ? [{ t: 219, v: 8 }] : [{ t: 402, v: 10 }]));
+  }
+  for (let i = 0; i < 6; i++) {
+    arts.push(mkArt(2000 + i, 2, 0, 1, [100, 101, 102][i % 3], i % 2 ? [{ t: 218, v: 0.5 }] : [{ t: 400, v: 12 }]));
+  }
+  // 不適用：水屬性神器、防禦型神器
+  arts.push(mkArt(3001, 1, 1, 0, 101, [{ t: 219, v: 20 }]));
+  arts.push(mkArt(3002, 2, 0, 2, 100, [{ t: 218, v: 1 }]));
+  const lushenSkills = skillsForMonster(skillData, 13413);
+  const s1 = lushenSkills.find((s) => s.slot === 1);
+  const s3 = lushenSkills.find((s) => s.slot === 3);
+  const out = runStage2({
+    base, builds: [build], bonus: defaultBonus(), rta: false, monster, artifacts: arts,
+    skills: [{ skill: s1, weight: 5 }, { skill: s3, weight: 10 }], mode: "add",
+    main1: 101, main2: 0, dmgOpts: { ...dmgBase, useArtifacts: true, enemyEl: 0 }, perType: 5,
+  });
+  assert.equal(out.type1.length, 5);
+  assert.equal(out.type2.length, 5);
+  assert.equal(out.candidates.length, 10);
+  assert.equal(out.pairs.length, 25);
+  assert.ok(out.type1.every((a) => a.main.t === 101), "主屬性 filter 應只留攻擊");
+  assert.ok(!out.candidates.some((a) => a.id === 3001 || a.id === 3002), "不適用神器不可入選");
+  assert.ok(out.pairs[0].score >= out.pairs[1].score);
+  assert.equal(out.pairs[0].artifacts.length, 2);
+  assert.ok(out.pairs[0].build);
+  assert.ok(out.pairs[0].ad > 0);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

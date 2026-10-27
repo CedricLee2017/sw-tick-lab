@@ -1,7 +1,7 @@
 /** 神器（Artifact）：主效果、副效果對照與傷害加成 */
 import { ELEMENTS } from "./constants";
 import type { Skill } from "./damage";
-import type { Artifact, ArtifactSub } from "./types";
+import type { Artifact, ArtifactSub, Monster } from "./types";
 
 /** 主效果 id → 屬性。神器的 +15 數值直接存在 pri_effect[1] */
 export const ARTIFACT_MAIN: Record<number, { key: "hp" | "atk" | "def"; label: string }> = {
@@ -136,24 +136,84 @@ export interface ArtifactDamageBonus {
   cd: number;
   /** 最終傷害乘算的百分比（屬性傷害） */
   dmg: number;
+  /** 追傷係數（小數，例如 0.04 = 4%） */
+  add: { hp: number; atk: number; def: number; spd: number };
   /** 實際套用的效果文字 */
   applied: string[];
 }
+
+/** 兩件神器的追傷係數總和 */
+export function artifactAddCoefficients(artifacts: Artifact[] | undefined): ArtifactDamageBonus["add"] {
+  const add = { hp: 0, atk: 0, def: 0, spd: 0 };
+  for (const art of artifacts ?? []) {
+    for (const sub of art.subs) {
+      const v = sub.v / 100;
+      if (sub.t === 218) add.hp += v;
+      else if (sub.t === 219) add.atk += v;
+      else if (sub.t === 220) add.def += v;
+      else if (sub.t === 221) add.spd += v;
+    }
+  }
+  return add;
+}
+
+/**
+ * 追傷（Additional Damage）：每段固定追加，依三圍（+速度）計算。
+ * 遊戲會對每個屬性分別無條件捨去後再加總。
+ */
+export function artifactAdditionalDamage(
+  stats: { hp: number; atk: number; def: number; spd: number },
+  artifacts: Artifact[] | undefined,
+): number {
+  const c = artifactAddCoefficients(artifacts);
+  return (
+    Math.floor(stats.hp * c.hp) +
+    Math.floor(stats.atk * c.atk) +
+    Math.floor(stats.def * c.def) +
+    Math.floor(stats.spd * c.spd)
+  );
+}
+
+/** 神器是否適用於這隻魔靈（屬性神器看屬性、類型神器看魔靈類型） */
+export function artifactEligible(art: Artifact, monster: Pick<Monster, "el" | "arch">): boolean {
+  if (art.type === 2) {
+    const style = ARTIFACT_ARCH_STYLE[monster.arch ?? ""] ?? 0;
+    return art.style === 98 || art.style === style;
+  }
+  return art.attr === 98 || art.attr === monster.el;
+}
+
+export const ARTIFACT_ARCH_STYLE: Record<string, number> = {
+  Attack: 1,
+  Defense: 2,
+  HP: 3,
+  Support: 4,
+  Material: 5,
+};
 
 /**
  * 神器對「這一招、這個敵人屬性」可直接計算的傷害加成。
  * 只計入規則明確的效果：
  *  - 技能 1–4 暴擊傷害（400–403）、技能 3/4 暴傷（410）、單體技能暴傷（224）
  *  - 對指定屬性傷害（300–304，需在傷害面板指定敵方屬性）
- * 其餘條件式效果（反擊、追加傷害、依敵方體力變動的暴傷…）僅在介面顯示。
+ *  - 追傷 218–221（另外由 artifactAdditionalDamage 計算實際數值）
+ * 其餘條件式效果（反擊、依敵方體力變動的暴傷…）僅在介面顯示。
  */
 export function artifactDamageBonus(artifacts: Artifact[] | undefined, skill: Skill, enemyEl = 0): ArtifactDamageBonus {
-  const out: ArtifactDamageBonus = { cd: 0, dmg: 0, applied: [] };
+  const out: ArtifactDamageBonus = { cd: 0, dmg: 0, add: { hp: 0, atk: 0, def: 0, spd: 0 }, applied: [] };
   const bomb = skill.e.includes(23);
   for (const art of artifacts ?? []) {
     for (const sub of art.subs) {
       const v = round2(sub.v);
       if (!Number.isFinite(v) || v === 0) continue;
+      if (sub.t >= 218 && sub.t <= 221) {
+        if (sub.t === 218) out.add.hp += v / 100;
+        else if (sub.t === 219) out.add.atk += v / 100;
+        else if (sub.t === 220) out.add.def += v / 100;
+        else out.add.spd += v / 100;
+        out.applied.push(artifactSubText(sub));
+        continue;
+      }
       const skillCd =
         !bomb &&
         ((sub.t >= 400 && sub.t <= 403 && skill.slot === sub.t - 399) ||

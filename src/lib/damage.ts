@@ -1,6 +1,6 @@
 /** 技能傷害估算（以 SWARFARM 技能倍率公式 + 配裝面板代入） */
 import type { Artifact, Stats } from "./types";
-import { artifactDamageBonus } from "./artifacts";
+import { artifactAdditionalDamage, artifactDamageBonus } from "./artifacts";
 
 export interface Skill {
   id: number;
@@ -57,19 +57,28 @@ export interface DamageOptions {
 }
 
 export interface DamageResult {
+  /** 每段傷害（技能傷害 + 追傷） */
   total: number;
   perHit: number;
+  /** 每段技能傷害（不含追傷） */
+  basePerHit: number;
+  /** 每段追傷（固定值，不受暴擊 / 防禦 / 屬性增傷影響） */
+  adPerHit: number;
   hits: number;
+  /** 技能傷害總和（不含追傷） */
+  baseTotal: number;
+  /** 追傷總和 */
+  adTotal: number;
   /** 防禦減傷係數 0~1 */
   mitigation: number;
-  /** 未計防禦減傷的總傷害（含暴擊/技能升級/烙印） */
+  /** 未計防禦減傷的技能傷害（含暴擊/技能升級/烙印） */
   rawTotal: number;
   /** 未支援的公式變數 */
   unsupported: string[];
   /** 是否為炸彈（不暴擊、無視防禦） */
   bomb: boolean;
-  /** 神器套用的暴傷 / 屬性傷害加成 */
-  artifact?: { cd: number; dmg: number; applied: string[] };
+  /** 神器套用的暴傷 / 屬性傷害 / 追傷加成 */
+  artifact?: { cd: number; dmg: number; add: { hp: number; atk: number; def: number; spd: number }; applied: string[] };
 }
 
 let skillPromise: Promise<SkillData> | null = null;
@@ -183,7 +192,7 @@ export function computeSkillDamage(
 ): DamageResult {
   const artifact = opts.useArtifacts !== false
     ? artifactDamageBonus(artifacts, skill, opts.enemyEl)
-    : { cd: 0, dmg: 0, applied: [] };
+    : { cd: 0, dmg: 0, add: { hp: 0, atk: 0, def: 0, spd: 0 }, applied: [] };
   const atk = stats.atk * (1 + (opts.atkBuff + opts.leadAtk) / 100);
   const hp = stats.hp;
   const selfHpPct = Math.max(0, Math.min(100, opts.selfHpPct));
@@ -233,11 +242,19 @@ export function computeSkillDamage(
   const preMitigation = Math.max(0, parsed.value);
   const rawPerHit = preMitigation * (brandMul * critFactor + skillUpFrac) * (1 + artifact.dmg / 100);
   // SWOP 使用 Math.floor
-  const perHit = Math.floor(rawPerHit * mitigation);
+  const basePerHit = Math.floor(rawPerHit * mitigation);
+  // 追傷：每段固定追加，不吃暴擊 / 防禦減傷 / 屬性增傷；品牌等一般增傷會作用於追傷。
+  const adRaw = opts.useArtifacts !== false ? artifactAdditionalDamage(stats, artifacts) : 0;
+  const adPerHit = brandMul > 1 ? Math.floor(adRaw * brandMul) : adRaw;
+  const perHit = basePerHit + adPerHit;
   return {
     total: perHit * hits,
     perHit,
+    basePerHit,
+    adPerHit,
     hits,
+    baseTotal: basePerHit * hits,
+    adTotal: adPerHit * hits,
     mitigation,
     rawTotal: Math.floor(rawPerHit * hits),
     unsupported: parsed.unsupported,
