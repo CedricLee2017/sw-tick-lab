@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowRight, Copy, Loader2, Save, Sparkles, Wand2, Gauge, ChevronDown, Plus, Target, X,
+  AlertTriangle, ArrowRight, Copy, Loader2, Save, Sparkles, Wand2, Gauge, ChevronDown, Plus, Target, X, Zap,
 } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
 import { useSummary } from "../lib/accountStats";
@@ -44,6 +44,42 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "acc", label: "效果命中" },
   { key: "eff", label: "符文效率" },
   { key: "focus", label: "焦點契合" },
+];
+
+/** 快速預設配符：一鍵套用常見配置（套裝、主屬性、下限、排序） */
+interface QuickPreset {
+  id: string;
+  name: string;
+  /** 按鈕上的簡短說明 */
+  desc: string;
+  /** 魔靈 master id */
+  monsterId: number;
+  monsterName: string;
+  groups: { set: number; pieces: number }[];
+  mains: Partial<Record<number, number>>;
+  limits: Partial<Record<StatKey, number>>;
+  mode: "tick" | "speed";
+  /** 面板速度下限（0 = 不限） */
+  speed: number;
+  sortKey: SortKey;
+}
+
+const QUICK_PRESETS: QuickPreset[] = [
+  {
+    id: "lushen-max-dmg",
+    name: "極限輸出風丑",
+    desc: "憤怒 ×4 + 刀刃 ×2 · 攻擊% / 爆傷 / 攻擊% · 暴率 100% · 速度不限",
+    monsterId: 13413,
+    monsterName: "風丑",
+    groups: [{ set: 5, pieces: 4 }, { set: 4, pieces: 2 }],
+    // 2 號攻擊%、4 號暴擊傷害、6 號攻擊%
+    mains: { 2: 4, 4: 10, 6: 4 },
+    // 面板暴擊率至少 100%（結算時上限 100）
+    limits: { cr: 100 },
+    mode: "speed",
+    speed: 0,
+    sortKey: "dmg",
+  },
 ];
 
 /** 2/4/6 號位可選主屬性（type id 對應 SWEX；固定值與 % 分開選） */
@@ -148,6 +184,30 @@ export default function OptimizerPage() {
     );
   const removeGroup = (i: number) => setSetGroups((gs) => gs.filter((_, j) => j !== i));
   const addGroup = () => setSetGroups((gs) => (gs.length < 3 ? [...gs, { set: 0, pieces: 2 }] : gs));
+
+  /** 套用快速預設（只填好條件，實際運算仍由「開始配符」觸發） */
+  const applyPreset = (p: QuickPreset) => {
+    if (!account) return notify("請先匯入存檔，才能套用快速預設", "err");
+    if (!summary?.views.some((v) => v.monster.id === p.monsterId)) {
+      return notify(`帳號內沒有${p.monsterName}，無法套用「${p.name}」`, "err");
+    }
+    setMonsterId(p.monsterId);
+    setSetGroups(p.groups.map((g) => ({ ...g })));
+    setMains({ ...p.mains });
+    setLimits({ ...p.limits });
+    setMode(p.mode);
+    setSpeedTarget(p.speed);
+    // 預設都是「剛好」的套裝與滿暴率，先把放寬選項關掉
+    setRelaxSub(false);
+    setIntangible(false);
+    // 極限輸出需要盡量多的候選符文（上限 15）才湊得出滿暴率
+    setPool(15);
+    // 用傷害排序，直接看哪一組輸出最高
+    setDmgOn(true);
+    setSortKey(p.sortKey);
+    setSortDir("desc");
+    notify(`已套用「${p.name}」，按「開始配符」開始運算`);
+  };
 
   const workerRef = useRef<Worker | null>(null);
   const runId = useRef(0);
@@ -545,6 +605,31 @@ export default function OptimizerPage() {
           </div>
           <div className="card-pad col" style={{ gap: 13 }}>
             <div className="field">
+              <div className="row between">
+                <label className="row" style={{ gap: 6 }}><Zap size={12} className="gold" /> 快速預設配符</label>
+                <span className="tiny dim">一鍵套用</span>
+              </div>
+              <div className="col" style={{ gap: 6 }}>
+                {QUICK_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="preset-btn"
+                    onClick={() => applyPreset(p)}
+                    disabled={!account}
+                    title={`套用「${p.name}」：${p.desc}`}
+                  >
+                    <span className="preset-btn-main">
+                      <span className="preset-btn-name">{p.name}</span>
+                      <span className="preset-btn-meta">{p.desc}</span>
+                    </span>
+                    <ArrowRight size={13} />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="field">
               <label>魔靈</label>
               <MonsterPicker
                 value={monsterId}
@@ -815,7 +900,9 @@ export default function OptimizerPage() {
                       <Target size={10} /> {focusLabel(f.key)} ×{f.weight}
                     </span>
                   ))}
-                  <span className="chip gold">≥ {targetSpeed} 速</span>
+                  <span className={`chip ${targetSpeed > 0 ? "gold" : "muted"}`}>
+                    {targetSpeed > 0 ? `≥ ${targetSpeed} 速` : "速度不限"}
+                  </span>
                 </div>
               </div>
               <div className="sort-bar">
