@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bookmark, Trash2, Wand2 } from "lucide-react";
+import { Bookmark, RotateCcw, Trash2, Unlock, Wand2 } from "lucide-react";
 import { MONSTER_MAP, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary } from "../lib/stats";
@@ -12,6 +12,10 @@ export default function BuildsPage() {
   const loadouts = useStore((s) => s.loadouts);
   const removeLoadout = useStore((s) => s.removeLoadout);
   const notify = useStore((s) => s.notify);
+  const setRuneFlag = useStore((s) => s.setRuneFlag);
+  const lockedRunes = useStore((s) => s.settings.lockedRunes);
+  const excludedRunes = useStore((s) => s.settings.excludedRunes);
+  const includedRunes = useStore((s) => s.settings.includedRunes);
   const [open, setOpen] = useState<Loadout | null>(null);
 
   const sorted = useMemo(() => [...loadouts].sort((a, b) => b.createdAt - a.createdAt), [loadouts]);
@@ -29,6 +33,21 @@ export default function BuildsPage() {
     );
     window.location.hash = "#/optimizer";
     notify("已把配裝帶入配符頁（符文設為 Include）");
+  };
+
+  /** 一鍵解除這組符文的 App 鎖定 */
+  const clearLocks = (l: Loadout) => {
+    const n = l.runeIds.filter((id) => lockedRunes.includes(id)).length;
+    setRuneFlag("locked", l.runeIds, false);
+    notify(n > 0 ? `已解除 ${n} 顆符文的鎖定` : "這組符文目前沒有鎖定");
+  };
+
+  /** 一鍵解除這組符文的 Exclude / Include 限制 */
+  const clearRestrictions = (l: Loadout) => {
+    const n = l.runeIds.filter((id) => excludedRunes.includes(id) || includedRunes.includes(id)).length;
+    setRuneFlag("excluded", l.runeIds, false);
+    setRuneFlag("included", l.runeIds, false);
+    notify(n > 0 ? `已解除 ${n} 顆符文的 Exclude / Include 限制` : "這組符文目前沒有 Exclude / Include 限制");
   };
 
   if (!account) return <div className="empty"><Bookmark size={40} /><div>尚未匯入存檔</div></div>;
@@ -82,6 +101,8 @@ export default function BuildsPage() {
                 <div className="row" style={{ gap: 6, marginTop: 10 }}>
                   <button className="btn btn-sm btn-primary" onClick={() => apply(l)}><Wand2 size={12} /> 帶入配符</button>
                   <button className="btn btn-sm" onClick={() => setOpen(l)}>查看</button>
+                  <button className="btn btn-sm btn-ghost btn-icon" title="一鍵解鎖" onClick={() => clearLocks(l)}><Unlock size={13} /></button>
+                  <button className="btn btn-sm btn-ghost btn-icon" title="一鍵解符（解除 Exclude / Include）" onClick={() => clearRestrictions(l)}><RotateCcw size={13} /></button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="刪除" style={{ marginLeft: "auto" }} onClick={() => removeLoadout(l.id)}>
                     <Trash2 size={13} />
                   </button>
@@ -98,6 +119,8 @@ export default function BuildsPage() {
             <div className="tiny dim">儲存於 {new Date(open.createdAt).toLocaleString("zh-TW")}</div>
             <div className="row" style={{ gap: 6 }}>
               <button className="btn btn-sm btn-primary" onClick={() => apply(open)}><Wand2 size={12} /> 帶入配符</button>
+              <button className="btn btn-sm" onClick={() => clearLocks(open)}><Unlock size={12} /> 一鍵解鎖</button>
+              <button className="btn btn-sm" onClick={() => clearRestrictions(open)}><RotateCcw size={12} /> 一鍵解符</button>
               <button className="btn btn-sm btn-ghost" onClick={() => { removeLoadout(open.id); setOpen(null); }}>
                 <Trash2 size={12} /> 刪除
               </button>

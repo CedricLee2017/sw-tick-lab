@@ -112,7 +112,7 @@ export function ArtifactStage({
         );
         setOpenPair(0);
       } catch (err) {
-        setError(`第二階段運算失敗：${String((err as Error)?.message ?? err)}`);
+        setError(`配神器運算失敗：${String((err as Error)?.message ?? err)}`);
       } finally {
         setRunning(false);
       }
@@ -128,10 +128,12 @@ export function ArtifactStage({
       <div className="row between wrap" style={{ gap: 10 }}>
         <div>
           <div className="card-title row" style={{ gap: 7 }}>
-            <Sparkles size={14} className="gold" /> 第二階段：神器最佳化
+            <Sparkles size={14} className="gold" /> 神器最佳化
           </div>
           <div className="card-sub">
-            取目前排序前 {fmt(builds.length)} 組符文；每類神器取前 5 件（屬性 5 + 類型 5，含其他魔靈裝備中的神器），共 25 對
+            {builds.length === 1
+              ? "使用目前魔靈裝備的符文（固定），不重新配符；每類神器取前 5 件（屬性 5 + 類型 5，含其他魔靈裝備中的神器），共 25 對"
+              : `取目前排序前 ${fmt(builds.length)} 組符文；每類神器取前 5 件（屬性 5 + 類型 5，含其他魔靈裝備中的神器），共 25 對`}
           </div>
           <div className="row wrap" style={{ gap: 6, marginTop: 6 }}>
             <span className="chip muted" title="依魔靈屬性自動決定，另包含無形屬性神器">
@@ -214,7 +216,7 @@ export function ArtifactStage({
       <div className="row wrap" style={{ marginTop: 12, gap: 8 }}>
         <button className="btn btn-primary" onClick={run} disabled={running || builds.length === 0 || !skill}>
           {running ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
-          {running ? "運算中…" : "開始第二階段"}
+          {running ? "運算中…" : "開始配神器"}
         </button>
         <span className="tiny dim" style={{ alignSelf: "center" }}>
           神器主屬性固定值、技能暴傷、屬性傷害與追傷都會計入
@@ -229,7 +231,7 @@ export function ArtifactStage({
               最佳神器組合 <span className="dim tiny" style={{ fontWeight: 400 }}>前 10 對 / 共 {out.pairs.length} 對</span>
             </div>
             <span className="tiny dim">
-              屬性 {out.type1.length} 件 · 類型 {out.type2.length} 件 · 運算 {out.builds} 組符文 · {out.ms} ms
+              屬性 {out.type1.length} 件 · 類型 {out.type2.length} 件 · {out.builds === 1 ? "使用目前符文" : `運算 ${out.builds} 組符文`} · {out.ms} ms
             </span>
           </div>
           {out.warnings.map((w) => <div key={w} className="alert warn" style={{ marginTop: 8, padding: "7px 9px", fontSize: 11.5 }}>{w}</div>)}

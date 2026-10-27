@@ -12,6 +12,7 @@ export function DamagePanel({
   onOptsChange,
   loading,
   error,
+  showEnable = true,
 }: {
   skills: Skill[];
   skill: Skill | undefined;
@@ -22,6 +23,8 @@ export function DamagePanel({
   onOptsChange: (patch: Partial<DamageOptions>) => void;
   loading: boolean;
   error: string | null;
+  /** 隱藏右上角「啟用」（例如配神器頁固定啟用） */
+  showEnable?: boolean;
 }) {
   return (
     <div className="card card-pad dmg-panel">
@@ -32,10 +35,12 @@ export function DamagePanel({
           </div>
           <div className="card-sub">把每組配裝的面板代入技能倍率，結果可用「傷害」排序</div>
         </div>
-        <label className="row tiny" style={{ gap: 7, cursor: "pointer" }}>
-          <input type="checkbox" checked={enabled} onChange={(e) => onEnabledChange(e.target.checked)} />
-          啟用
-        </label>
+        {showEnable && (
+          <label className="row tiny" style={{ gap: 7, cursor: "pointer" }}>
+            <input type="checkbox" checked={enabled} onChange={(e) => onEnabledChange(e.target.checked)} />
+            啟用
+          </label>
+        )}
       </div>
 
       {loading && (
@@ -141,7 +146,7 @@ export function DamagePanel({
               {skill.hits > 1 ? `每段傷害 × ${skill.hits} 段；` : ""}
               {skill.aoe ? "群體技能，以下為單一目標傷害；" : ""}
               一般召喚師技能（Battle，含競技場圖騰 / 屬性塔）一律計入傷害與 EHP，但不會加進面板數值；公會技能（Guild）預設不計入，可用上方「公會技能」勾選加入。
-              防禦減傷以 1000 / (1140 + 3.5 × 敵人防禦) 計算（無視防禦時為 1000 / 1140 ≈ 0.877）；滿技與暴擊為相加。第一階段只算符文與套裝，神器（含追傷）在下方「第二階段」計算，未計屬性克制、暴擊抵抗與部分特殊被動，數值為估算。
+              防禦減傷以 1000 / (1140 + 3.5 × 敵人防禦) 計算（無視防禦時為 1000 / 1140 ≈ 0.877）；滿技與暴擊為相加。配符第一階段只算符文與套裝，神器（含追傷）在「配神器」計算，未計屬性克制、暴擊抵抗與部分特殊被動，數值為估算。
               {skill.e.includes(23) && " 炸彈技能：無視防禦、不會暴擊。"}
               {skill.e.includes(38) && " 此技能帶有無視防禦效果，已預設勾選。"}
               技能資料來源：SWARFARM。
