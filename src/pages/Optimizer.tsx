@@ -58,6 +58,8 @@ interface QuickPreset {
   groups: { set: number; pieces: number }[];
   mains: Partial<Record<number, number>>;
   limits: Partial<Record<StatKey, number>>;
+  /** Focus 焦點屬性與比重（1–10） */
+  focus: FocusEntry[];
   mode: "tick" | "speed";
   /** tick 模式的目標 Tick（speed 模式不需要） */
   tick?: number;
@@ -74,7 +76,7 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "lushen-max-dmg",
     name: "極限輸出風丑",
-    desc: "憤怒 ×4 + 刀刃 ×2 · 攻擊% / 爆傷 / 攻擊% · 暴率 100% · 速度不限",
+    desc: "憤怒 ×4 + 刀刃 ×2 · 攻擊% / 爆傷 / 攻擊% · Focus 攻擊 / 暴率 / 暴傷 各 10 分 · 暴率 100%",
     monsterId: 13413,
     monsterName: "風丑",
     groups: [{ set: 5, pieces: 4 }, { set: 4, pieces: 2 }],
@@ -82,6 +84,12 @@ const QUICK_PRESETS: QuickPreset[] = [
     mains: { 2: 4, 4: 10, 6: 4 },
     // 面板暴擊率至少 100%（結算時上限 100）
     limits: { cr: 100 },
+    // 輸出三屬性同權重，候選符文優先挑攻擊 / 暴率 / 暴傷
+    focus: [
+      { key: "atk", weight: 10 },
+      { key: "cr", weight: 10 },
+      { key: "cd", weight: 10 },
+    ],
     mode: "speed",
     speed: 0,
     sortKey: "dmg",
@@ -90,11 +98,13 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "swift-first",
     name: "迅速1速",
-    desc: "迅速 ×4 + 意志 ×2 · 2 號速度 · 不設速度下限 · 速度排序",
+    desc: "迅速 ×4 + 意志 ×2 · 2 號速度 · Focus 速度 10 分 · 不設速度下限",
     groups: [{ set: 3, pieces: 4 }, { set: 15, pieces: 2 }],
     // 2 號速度
     mains: { 2: 8 },
     limits: {},
+    // 只以速度挑候選符文，每個位置就是最快的幾顆
+    focus: [{ key: "spd", weight: 10 }],
     mode: "speed",
     speed: 0,
     // 候選 11 顆就足以涵蓋最高速（每位置最快符文都在其中），且不會觸發結果上限
@@ -104,11 +114,18 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "violent-will-res-t5",
     name: "暴走意志百抗T5",
-    desc: "暴走 ×4 + 意志 ×2 · 2 號速度 / 4 號體力% · Tick 5 + 抵抗 100% · EHP 排序",
+    desc: "暴走 ×4 + 意志 ×2 · 2 號速度 / 4 號體力% · Focus 體力 / 防禦 / 抵抗 / 速度 各 10 分 · T5 + 抵抗 100%",
     groups: [{ set: 13, pieces: 4 }, { set: 15, pieces: 2 }],
     // 2 號速度、4 號體力%（6 號留給抵抗或體力%，由 EHP 排序挑最好的一組）
     mains: { 2: 8, 4: 2 },
     limits: { res: 100 },
+    // 坦度 + 百抗 + 速度，四項同權重
+    focus: [
+      { key: "hp", weight: 10 },
+      { key: "def", weight: 10 },
+      { key: "res", weight: 10 },
+      { key: "spd", weight: 10 },
+    ],
     mode: "tick",
     tick: 5,
     speed: 0,
@@ -117,10 +134,14 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "ehp-max",
     name: "EHP最大化",
-    desc: "能量 ×3 · 體力% / 防禦% / 體力% · 不設下限 · EHP 排序",
+    desc: "能量 ×3 · 體力% / 防禦% / 體力% · Focus 體力 / 防禦 各 10 分 · EHP 排序",
     groups: [{ set: 1, pieces: 2 }, { set: 1, pieces: 2 }, { set: 1, pieces: 2 }],
     mains: { 2: 2, 4: 6, 6: 2 },
     limits: {},
+    focus: [
+      { key: "hp", weight: 10 },
+      { key: "def", weight: 10 },
+    ],
     mode: "speed",
     speed: 0,
     pool: 11,
@@ -246,6 +267,7 @@ export default function OptimizerPage() {
     setSetGroups(p.groups.map((g) => ({ ...g })));
     setMains({ ...p.mains });
     setLimits({ ...p.limits });
+    setFocus(p.focus.map((f) => ({ ...f })));
     setMode(p.mode);
     if (p.tick) setTick(p.tick);
     setSpeedTarget(p.speed);
