@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, Play, Sparkles } from "lucide-react";
+import { ChevronDown, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
 import { ArtifactCard, RuneCard, TickBadge, fmt, setColor } from "./ui";
 import { ELEMENTS } from "../lib/constants";
-import { defaultSkill, type DamageOptions, type Skill } from "../lib/damage";
+import { ARTIFACT_EFFECT_MAX, artifactEffectLabel } from "../lib/artifacts";
+import type { DamageOptions, Skill } from "../lib/damage";
 import type { Build } from "../lib/optimizer";
-import { runStage2, type Stage2Mode, type Stage2Output } from "../lib/stage2";
+import { runStage2, type Stage2Focus, type Stage2Mode, type Stage2Output } from "../lib/stage2";
 import { setSummary, type BaseStats } from "../lib/stats";
 import type { Artifact, BonusConfig, Monster } from "../lib/types";
 
@@ -16,7 +17,10 @@ const MAIN_OPTIONS = [
   { value: 102, label: "防禦（固定）" },
 ];
 
-const MAX_SKILLS = 5;
+const EFFECT_IDS = Object.keys(ARTIFACT_EFFECT_MAX).map(Number).sort((a, b) => a - b);
+const MAX_FOCUS = 5;
+
+const defaultFocus = (): Stage2Focus => ({ effect: 219, min: 0, max: ARTIFACT_EFFECT_MAX[219], weight: 10 });
 
 export function ArtifactStage({
   stageKey,
@@ -26,10 +30,10 @@ export function ArtifactStage({
   rta,
   monster,
   artifacts,
-  skills,
+  skill,
   dmgOpts,
 }: {
-  /** 換魔靈、換排序或重新配符時要清空第二階段結果 */
+  /** 換魔靈、換排序、換技能或重新配符時要清空第二階段結果 */
   stageKey: string;
   base: BaseStats;
   builds: Build[];
@@ -37,7 +41,7 @@ export function ArtifactStage({
   rta: boolean;
   monster: Monster;
   artifacts: Artifact[];
-  skills: Skill[];
+  skill?: Skill;
   dmgOpts: DamageOptions;
 }) {
   const account = useStore((s) => s.account);
@@ -45,7 +49,8 @@ export function ArtifactStage({
   const [main1, setMain1] = useState(0);
   const [main2, setMain2] = useState(0);
   const [enemyEl, setEnemyEl] = useState(0);
-  const [selected, setSelected] = useState<{ id: number; weight: number }[]>([]);
+  const [focus1, setFocus1] = useState<Stage2Focus[]>([]);
+  const [focus2, setFocus2] = useState<Stage2Focus[]>([]);
   const [out, setOut] = useState<Stage2Output | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +71,7 @@ export function ArtifactStage({
     return m;
   }, [account]);
 
-  // 換魔靈時，預設選最後一招；換排序 / 重算配符時清空結果
+  // 換魔靈 / 排序 / 技能或重算配符時清空結果
   useEffect(() => {
     setOut(null);
     setOpenPair(-1);
@@ -74,37 +79,9 @@ export function ArtifactStage({
     setError(null);
   }, [stageKey]);
 
-  useEffect(() => {
-    setSelected((prev) => {
-      const valid = prev.filter((x) => skills.some((s) => s.id === x.id));
-      if (valid.length > 0) return valid;
-      const d = defaultSkill(skills) ?? skills[0];
-      return d ? [{ id: d.id, weight: 10 }] : [];
-    });
-  }, [skills]);
-
-  const toggleSkill = (id: number) => {
-    setSelected((prev) => {
-      if (prev.some((x) => x.id === id)) return prev.filter((x) => x.id !== id);
-      if (prev.length >= MAX_SKILLS) return prev;
-      return [...prev, { id, weight: 10 }];
-    });
-  };
-
-  const setWeight = (id: number, weight: number) => {
-    setSelected((prev) => prev.map((x) => (x.id === id ? { ...x, weight } : x)));
-  };
-
   const run = () => {
-    if (selected.length === 0) {
-      setError("請至少選擇 1 招技能。");
-      return;
-    }
-    const skillInputs = selected
-      .map((x) => ({ skill: skills.find((s) => s.id === x.id), weight: x.weight }))
-      .filter((x): x is { skill: Skill; weight: number } => !!x.skill && x.weight > 0);
-    if (skillInputs.length === 0) {
-      setError("技能比重必須大於 0。");
+    if (!skill) {
+      setError("請先在上方傷害面板選擇一招技能。");
       return;
     }
     setRunning(true);
@@ -123,10 +100,12 @@ export function ArtifactStage({
             rta,
             monster,
             artifacts,
-            skills: skillInputs,
+            skill,
             mode,
             main1,
             main2,
+            focus1,
+            focus2,
             dmgOpts: { ...dmgOpts, enemyEl, useArtifacts: true },
             perType: 5,
           }),
@@ -141,6 +120,7 @@ export function ArtifactStage({
   };
 
   const shown = out?.pairs.slice(0, 10) ?? [];
+  const scoreLabel = mode === "skill" ? "招式傷害" : "追傷";
 
   return (
     <div className="card card-pad artifact-stage">
@@ -171,8 +151,8 @@ export function ArtifactStage({
           </div>
           <span className="hint">
             {mode === "skill"
-              ? "依 5 招技能的加權「招式傷害」排序（追傷另計顯示）"
-              : "依 5 招技能的加權「追傷」排序（招式傷害另計顯示）"}
+              ? "依單一招式的傷害排序；追傷另計顯示"
+              : "依單一招式的追傷排序；招式傷害另計顯示"}
           </span>
         </div>
         <div className="field">
@@ -184,6 +164,19 @@ export function ArtifactStage({
             ))}
           </select>
         </div>
+      </div>
+
+      <div className="field" style={{ marginTop: 10 }}>
+        <label>計算技能（沿用上方傷害面板）</label>
+        {skill ? (
+          <div className="row wrap" style={{ gap: 8 }}>
+            <span className="chip gold">S{skill.slot} · {skill.n}</span>
+            <span className="tiny dim">{skill.hits} 段{skill.aoe ? " · 群體" : ""}</span>
+            <span className="tiny dim">· 追傷會 × {skill.hits} 段</span>
+          </div>
+        ) : (
+          <div className="alert warn" style={{ padding: "7px 9px", fontSize: 11.5 }}>請先在上方傷害面板選擇一招技能。</div>
+        )}
       </div>
 
       <div className="grid g2" style={{ marginTop: 10 }}>
@@ -201,43 +194,21 @@ export function ArtifactStage({
         </div>
       </div>
 
-      <div className="field" style={{ marginTop: 10 }}>
-        <div className="row between">
-          <label>技能（最多 {MAX_SKILLS} 招，權重 1–10）</label>
-          <span className="tiny dim">已選 {selected.length}/{MAX_SKILLS}</span>
-        </div>
-        <div className="col artifact-skill-list">
-          {skills.map((s) => {
-            const cur = selected.find((x) => x.id === s.id);
-            const full = selected.length >= MAX_SKILLS && !cur;
-            return (
-              <div key={s.id} className={`artifact-skill-row ${cur ? "on" : ""}`}>
-                <label className="row" style={{ gap: 7, flex: 1, cursor: full ? "not-allowed" : "pointer", opacity: full ? .45 : 1 }}>
-                  <input type="checkbox" checked={!!cur} disabled={full} onChange={() => toggleSkill(s.id)} />
-                  <span style={{ minWidth: 0 }}>
-                    <b>S{s.slot}</b> · {s.n}
-                    <span className="dim tiny">（{s.hits} 段{s.aoe ? " · 群體" : ""}）</span>
-                  </span>
-                </label>
-                {cur && (
-                  <select className="select" style={{ width: 78 }} value={cur.weight} onChange={(e) => setWeight(s.id, Number(e.target.value))}>
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>權重 {n}</option>)}
-                  </select>
-                )}
-              </div>
-            );
-          })}
-          {skills.length === 0 && <div className="empty tiny">這隻魔靈沒有可計算的技能</div>}
-        </div>
+      <div className="grid g2" style={{ marginTop: 10 }}>
+        <FocusEditor title="屬性神器 Focus" value={focus1} onChange={setFocus1} />
+        <FocusEditor title="類型神器 Focus" value={focus2} onChange={setFocus2} />
+      </div>
+      <div className="hint" style={{ marginTop: 6 }}>
+        Focus 是硬性 Min / Max 篩選：每條選定效果都要符合才會進入候選。有設定 Focus 時，先依契合度（數值 ÷ 該效果上限 × 權重）排序，同分再比傷害 / 追傷。
       </div>
 
       <div className="row wrap" style={{ marginTop: 12, gap: 8 }}>
-        <button className="btn btn-primary" onClick={run} disabled={running || builds.length === 0 || selected.length === 0}>
+        <button className="btn btn-primary" onClick={run} disabled={running || builds.length === 0 || !skill}>
           {running ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
           {running ? "運算中…" : "開始第二階段"}
         </button>
         <span className="tiny dim" style={{ alignSelf: "center" }}>
-          每個模式分開排序；神器主屬性固定值、技能暴傷、屬性傷害與追傷都會計入
+          神器主屬性固定值、技能暴傷、屬性傷害與追傷都會計入
         </span>
       </div>
       {error && <div className="alert err" style={{ marginTop: 10 }}>{error}</div>}
@@ -263,12 +234,15 @@ export function ArtifactStage({
                   <div className="row between wrap" style={{ gap: 8, cursor: "pointer" }} onClick={() => setOpenPair(open ? -1 : i)}>
                     <div className="row" style={{ gap: 8, minWidth: 0 }}>
                       <span className={`build-rank ${i === 0 ? "top" : ""}`}>{i + 1}</span>
-                      <span className="chip gold">
-                        {mode === "skill" ? "加權招式傷害" : "加權追傷"} {fmt(Math.round(p.score))}
-                      </span>
-                      <span className="chip muted">加權總傷害 {fmt(Math.round(p.total))}</span>
+                      <span className="chip gold">{scoreLabel} {fmt(Math.round(p.score))}</span>
+                      <span className="chip muted">合計 {fmt(Math.round(p.total))}</span>
                       <TickBadge spd={p.stats.spd} rta={rta} />
                       <span className="tiny dim">{setSummary(BuildSets(p))}</span>
+                      {(p.focus[0] > 0 || p.focus[1] > 0) && (
+                        <span className="chip muted" title="Focus 契合度（數值 ÷ 效果上限 × 權重）">
+                          Focus {Math.round(p.focus[0])}% / {Math.round(p.focus[1])}%
+                        </span>
+                      )}
                     </div>
                     <ChevronDown size={16} className="dim" style={{ transform: open ? "rotate(180deg)" : undefined, transition: ".15s" }} />
                   </div>
@@ -292,7 +266,6 @@ export function ArtifactStage({
                         <thead>
                           <tr>
                             <th>技能</th>
-                            <th className="num">權重</th>
                             <th className="num">段數</th>
                             <th className="num">招式傷害</th>
                             <th className="num">追傷</th>
@@ -300,16 +273,13 @@ export function ArtifactStage({
                           </tr>
                         </thead>
                         <tbody>
-                          {p.lines.map((l) => (
-                            <tr key={l.skill.id}>
-                              <td>S{l.skill.slot} · {l.skill.n}</td>
-                              <td className="num">{l.weight}</td>
-                              <td className="num">{l.skill.hits}</td>
-                              <td className="num">{fmt(l.base)}</td>
-                              <td className="num green">{fmt(l.ad)}</td>
-                              <td className="num"><b>{fmt(l.total)}</b></td>
-                            </tr>
-                          ))}
+                          <tr>
+                            <td>S{skill?.slot} · {skill?.n}</td>
+                            <td className="num">{p.hits}</td>
+                            <td className="num">{fmt(p.base)}</td>
+                            <td className="num green">{fmt(p.ad)}</td>
+                            <td className="num"><b>{fmt(p.total)}</b></td>
+                          </tr>
                         </tbody>
                       </table>
                       <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
@@ -317,7 +287,7 @@ export function ArtifactStage({
                           {runesOpen ? "收起符文" : "查看這組符文"}
                         </button>
                         <span className="tiny dim" style={{ alignSelf: "center" }}>
-                          加權招式 {fmt(Math.round(p.base))} · 加權追傷 {fmt(Math.round(p.ad))} · 加權合計 {fmt(Math.round(p.total))}
+                          招式傷害 {fmt(Math.round(p.base))} · 追傷 {fmt(Math.round(p.ad))} · 合計 {fmt(Math.round(p.total))}
                         </span>
                       </div>
                       {runesOpen && (
@@ -338,6 +308,70 @@ export function ArtifactStage({
               );
             })}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FocusEditor({
+  title,
+  value,
+  onChange,
+}: {
+  title: string;
+  value: Stage2Focus[];
+  onChange: (v: Stage2Focus[]) => void;
+}) {
+  const update = (i: number, patch: Partial<Stage2Focus>) => {
+    onChange(value.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  };
+  const add = () => {
+    if (value.length >= MAX_FOCUS) return;
+    onChange([...value, defaultFocus()]);
+  };
+  return (
+    <div className="focus-panel">
+      <div className="row between" style={{ gap: 8 }}>
+        <span className="focus-title">{title}</span>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={add} disabled={value.length >= MAX_FOCUS}>
+          <Plus size={12} /> 新增效果
+        </button>
+      </div>
+      {value.length === 0 ? (
+        <div className="tiny dim" style={{ padding: "4px 0" }}>未設定 Focus：此類神器只依主屬性與傷害 / 追傷排序。</div>
+      ) : (
+        <div className="col" style={{ gap: 5, marginTop: 5 }}>
+          {value.map((f, i) => {
+            const max = ARTIFACT_EFFECT_MAX[f.effect] ?? 100;
+            const step = f.effect === 218 ? 0.1 : 1;
+            return (
+              <div className="artifact-focus-row" key={i}>
+                <select
+                  className="select"
+                  value={f.effect}
+                  onChange={(e) => {
+                    const effect = Number(e.target.value);
+                    update(i, { effect, max: ARTIFACT_EFFECT_MAX[effect] ?? 100 });
+                  }}
+                >
+                  {EFFECT_IDS.map((id) => <option key={id} value={id}>{artifactEffectLabel(id)}</option>)}
+                </select>
+                <div className="artifact-focus-range">
+                  <span className="tiny dim">Min</span>
+                  <input className="input mono" type="number" min={0} max={max} step={step} value={f.min} onChange={(e) => update(i, { min: Number(e.target.value) || 0 })} />
+                  <span className="tiny dim">Max</span>
+                  <input className="input mono" type="number" min={0} max={max} step={step} value={f.max} onChange={(e) => update(i, { max: Number(e.target.value) || 0 })} />
+                </div>
+                <select className="select" style={{ width: 78 }} value={f.weight} onChange={(e) => update(i, { weight: Number(e.target.value) })}>
+                  {Array.from({ length: 10 }, (_, n) => n + 1).map((n) => <option key={n} value={n}>權重 {n}</option>)}
+                </select>
+                <button type="button" className="btn btn-sm btn-ghost btn-icon" title="移除" onClick={() => onChange(value.filter((_, j) => j !== i))}>
+                  <X size={13} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

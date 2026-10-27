@@ -27,7 +27,7 @@ export const ARTIFACT_RANKS: Record<number, string> = {
 };
 
 /** 神器副效果 id → 中文說明。對照來源：SWEX mapping.js（artifact.effectTypes.sub） */
-export const ARTIFACT_EFFECTS: Record<number, { text: (v: number) => string; kind: "dmg" | "def" | "util" | "stat" }> = {
+export const ARTIFACT_EFFECTS: Record<number, { text: (v: number | string) => string; kind: "dmg" | "def" | "util" | "stat" }> = {
   200: { kind: "stat", text: (v) => `攻擊力依損失體力比例增加，最多 +${v}%` },
   201: { kind: "stat", text: (v) => `防禦力依損失體力比例增加，最多 +${v}%` },
   202: { kind: "stat", text: (v) => `速度依損失體力比例增加，最多 +${v}%` },
@@ -87,6 +87,36 @@ export const ARTIFACT_ELEMENT_TARGET: Record<number, number> = {
   303: 4,
   304: 5,
 };
+
+/** 各副效果的單條上限（用於 Focus 契合度 0–100% 換算） */
+export const ARTIFACT_EFFECT_MAX: Record<number, number> = {
+  200: 60, 201: 60, 202: 60, 203: 30,
+  204: 20, 205: 20, 206: 30, 207: 30,
+  208: 15, 209: 15, 210: 15, 211: 15, 212: 20,
+  213: 15, 214: 15, 215: 15, 216: 15, 217: 15,
+  218: 1.5, 219: 20, 220: 20, 221: 200,
+  222: 30, 223: 60, 224: 20, 225: 15, 226: 20,
+  300: 20, 301: 20, 302: 20, 303: 20, 304: 20,
+  305: 30, 306: 30, 307: 30, 308: 30, 309: 30,
+  400: 30, 401: 30, 402: 30, 403: 30,
+  404: 30, 405: 30, 406: 30,
+  407: 30, 408: 30, 409: 30,
+  410: 30, 411: 30,
+};
+
+/** 效果名稱（用於下拉選單，數值以 N 表示） */
+export function artifactEffectLabel(t: number): string {
+  return ARTIFACT_EFFECTS[t]?.text("N") ?? `效果 #${t}`;
+}
+
+/** 同一件神器上某條效果的最高數值（沒有則 0） */
+export function artifactSubValue(art: Artifact, effect: number): number {
+  let v = 0;
+  for (const s of art.subs) if (s.t === effect) v = Math.max(v, s.v);
+  return v;
+}
+
+
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
 

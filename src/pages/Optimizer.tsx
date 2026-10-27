@@ -1050,14 +1050,14 @@ export default function OptimizerPage() {
 
           {result && anyMonster && stage2Builds.length > 0 && (
             <ArtifactStage
-              stageKey={`${monsterId}:${sortKey}:${sortDir}:${result.count}:${result.nodes}`}
+              stageKey={`${monsterId}:${dmgSkill?.id ?? 0}:${sortKey}:${sortDir}:${result.count}:${result.nodes}`}
               base={base}
               builds={stage2Builds}
               bonus={dmgBonus}
               rta={rta}
               monster={anyMonster}
               artifacts={account?.artifacts ?? []}
-              skills={monsterSkills}
+              skill={dmgSkill}
               dmgOpts={dmgOpts}
             />
           )}
