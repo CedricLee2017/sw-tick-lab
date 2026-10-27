@@ -3,6 +3,7 @@ import { SPD_TYPE, SUB_STAT_MAX, STAT_TYPES, SET_BY_ID, type StatKey } from "./c
 import {
   addRuneToAccum,
   applySetBonuses,
+  ehpWithSkills,
   emptyAccum,
   finalizeStats,
   tickOf,
@@ -110,6 +111,10 @@ export interface OptResult {
   runeTable: Float64Array;
   /** 每組面板數值（長度 count×8，順序同 STAT_KEYS） */
   statValues: Float32Array;
+  /** 每組 EHP（含一般召喚師技能，不含公會技能） */
+  ehps: Float32Array;
+  /** 每組 EHP（含一般 + 公會召喚師技能） */
+  ehpsGuild: Float32Array;
   /** 每組綜合評分（含焦點加分） */
   scores: Float32Array;
   /** 每組符文效率平均 */
@@ -147,6 +152,8 @@ const EMPTY_RESULT = (
   runeIdx: new Int32Array(0),
   runeTable: new Float64Array(0),
   statValues: new Float32Array(0),
+  ehps: new Float32Array(0),
+  ehpsGuild: new Float32Array(0),
   scores: new Float32Array(0),
   effs: new Float32Array(0),
   focusFits: new Float32Array(0),
@@ -161,8 +168,8 @@ const EMPTY_RESULT = (
   ms: 0,
 });
 
-/** 從結果取出第 i 組的面板數值 */
-export function statsAt(res: OptResult, i: number, rta = false): Stats {
+/** 從結果取出第 i 組的面板數值（EHP 依 `guildSkills` 決定是否計入公會技能） */
+export function statsAt(res: OptResult, i: number, rta = false, guildSkills = false): Stats {
   const o = i * 8;
   const hp = res.statValues[o];
   const atk = res.statValues[o + 1];
@@ -177,7 +184,7 @@ export function statsAt(res: OptResult, i: number, rta = false): Stats {
     cd: res.statValues[o + 5],
     res: res.statValues[o + 6],
     acc: res.statValues[o + 7],
-    ehp: Math.floor((hp * (1140 + 3.5 * def)) / 1000),
+    ehp: (guildSkills ? res.ehpsGuild[i] : res.ehps[i]) || 0,
     tick: tickOf(spd, rta),
   };
 }
@@ -188,6 +195,7 @@ export function buildAt(
   i: number,
   runeById: Map<number, Rune>,
   rta = false,
+  guildSkills = false,
 ): Build {
   const runes: (Rune | null)[] = [];
   const sets: Record<number, number> = {};
@@ -211,7 +219,7 @@ export function buildAt(
   }
   return {
     runes,
-    stats: statsAt(res, i, rta),
+    stats: statsAt(res, i, rta, guildSkills),
     score: res.scores[i],
     eff: res.effs[i],
     sets,
@@ -220,11 +228,11 @@ export function buildAt(
 }
 
 /** 一次還原多組（測試與匯出用；UI 只還原目前頁面） */
-export function buildsOf(res: OptResult, runes: Rune[], rta = false, max = res.count): Build[] {
+export function buildsOf(res: OptResult, runes: Rune[], rta = false, max = res.count, guildSkills = false): Build[] {
   const runeById = new Map(runes.map((r) => [r.id, r]));
   const n = Math.min(res.count, max);
   const out: Build[] = new Array(n);
-  for (let k = 0; k < n; k++) out[k] = buildAt(res, res.order[k], runeById, rta);
+  for (let k = 0; k < n; k++) out[k] = buildAt(res, res.order[k], runeById, rta, guildSkills);
   return out;
 }
 
@@ -489,6 +497,8 @@ export function optimize(req: OptRequest): OptResult {
   type Chunk = {
     ids: Int32Array;
     stats: Float32Array;
+    ehps: Float32Array;
+    ehpsGuild: Float32Array;
     scores: Float32Array;
     effs: Float32Array;
     fits: Float32Array;
@@ -497,7 +507,7 @@ export function optimize(req: OptRequest): OptResult {
   const chunks: Chunk[] = [];
   let cur: Chunk | null = null;
   let count = 0;
-  const push = (idx: number[], stats: Stats, score: number, eff: number, fit: number) => {
+  const push = (idx: number[], stats: Stats, ehp: number, ehpGuild: number, score: number, eff: number, fit: number) => {
     if (count >= MAX_RESULTS) {
       // 結果池滿了就停止搜尋，但這不代表「搜尋被中斷」：空間可能已經全部算完
       overflow = true;
@@ -507,6 +517,8 @@ export function optimize(req: OptRequest): OptResult {
       cur = {
         ids: new Int32Array(CHUNK * 6),
         stats: new Float32Array(CHUNK * 8),
+        ehps: new Float32Array(CHUNK),
+        ehpsGuild: new Float32Array(CHUNK),
         scores: new Float32Array(CHUNK),
         effs: new Float32Array(CHUNK),
         fits: new Float32Array(CHUNK),
@@ -526,6 +538,8 @@ export function optimize(req: OptRequest): OptResult {
     cur.stats[o + 5] = stats.cd;
     cur.stats[o + 6] = stats.res;
     cur.stats[o + 7] = stats.acc;
+    cur.ehps[k] = ehp;
+    cur.ehpsGuild[k] = ehpGuild;
     cur.scores[k] = score;
     cur.effs[k] = eff;
     cur.fits[k] = fit;
@@ -553,7 +567,7 @@ export function optimize(req: OptRequest): OptResult {
       spdSet: acc.spdSet + extraSetSpd,
       sets: acc.sets,
     };
-    return finalizeStats(base, opt, bonus, rta);
+    return finalizeStats(base, opt, bonus, rta, true);
   };
 
   const dfs = (depth: number) => {
@@ -576,14 +590,20 @@ export function optimize(req: OptRequest): OptResult {
         }
       }
       applySetBonuses(a, base);
+      // 面板（不含召喚師技能）用來顯示；篩選條件則比對實戰數值（含一般技能）
       const stats = finalizeStats(base, a, bonus, rta);
-      for (const [k, v] of minEntries) if (stats[k] < v) return;
-      for (const [k, v] of maxEntries) if (stats[k] > v) return;
+      const battleStats = finalizeStats(base, a, bonus, rta, true);
+      for (const [k, v] of minEntries) if (battleStats[k] < v) return;
+      for (const [k, v] of maxEntries) if (battleStats[k] > v) return;
+      const ehp = ehpWithSkills(base, a, bonus, bonus.useGuild);
+      const ehpGuild = bonus.useGuild ? ehp : ehpWithSkills(base, a, bonus, true);
       const eff = accEff / 6;
       const fit = focusFitOf(stats, focusList);
       push(
         chosenIdx,
         stats,
+        ehp,
+        ehpGuild,
         scoreOf(stats) + (focusList.length ? (fit / 100) * FOCUS_BONUS : 0),
         eff,
         fit,
@@ -604,7 +624,7 @@ export function optimize(req: OptRequest): OptResult {
     const optStats = optimistic(depth);
     for (const [k, v] of minEntries) if (optStats[k] < v) return;
     if (maxEntries.length) {
-      const lowStats = finalizeStats(base, acc, bonus, rta);
+      const lowStats = finalizeStats(base, acc, bonus, rta, true);
       for (const [k, v] of maxEntries) if (lowStats[k] > v) return;
     }
     // 保留所有可行組合，不做分數上界剪枝。
@@ -659,6 +679,8 @@ export function optimize(req: OptRequest): OptResult {
   // 合併分塊，排序留到最後一次做（UI 每頁只還原 30 組）
   const runeIdx = new Int32Array(count * 6);
   const statValues = new Float32Array(count * 8);
+  const ehps = new Float32Array(count);
+  const ehpsGuild = new Float32Array(count);
   const scores = new Float32Array(count);
   const effs = new Float32Array(count);
   const focusFits = new Float32Array(count);
@@ -666,6 +688,8 @@ export function optimize(req: OptRequest): OptResult {
   for (const c of chunks) {
     runeIdx.set(c.ids.subarray(0, c.n * 6), off * 6);
     statValues.set(c.stats.subarray(0, c.n * 8), off * 8);
+    ehps.set(c.ehps.subarray(0, c.n), off);
+    ehpsGuild.set(c.ehpsGuild.subarray(0, c.n), off);
     scores.set(c.scores.subarray(0, c.n), off);
     effs.set(c.effs.subarray(0, c.n), off);
     focusFits.set(c.fits.subarray(0, c.n), off);
@@ -680,6 +704,8 @@ export function optimize(req: OptRequest): OptResult {
     runeIdx,
     runeTable: Float64Array.from(runeTable),
     statValues,
+    ehps,
+    ehpsGuild,
     scores,
     effs,
     focusFits,

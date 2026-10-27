@@ -296,8 +296,8 @@ export default function SettingsPage() {
             <div className="divider" />
             <label className="row between" style={{ gap: 10, cursor: "pointer" }}>
               <span>
-                <span style={{ fontWeight: 600 }}>計入公會旗幟</span>
-                <span className="tiny dim" style={{ display: "block" }}>公會攻擊 / 體力 / 防禦 / 暴傷旗幟</span>
+                <span style={{ fontWeight: 600 }}>計入公會技能</span>
+                <span className="tiny dim" style={{ display: "block" }}>配符頁「計入公會召喚師技能」勾選的預設值（傷害 / EHP，預設關閉）</span>
               </span>
               <input type="checkbox" checked={bonus.useGuild} onChange={(e) => patchBonus({ useGuild: e.target.checked })} />
             </label>

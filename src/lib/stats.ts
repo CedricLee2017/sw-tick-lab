@@ -202,16 +202,33 @@ export function speedForTick(tick: number, rta = false): number {
   return Math.ceil(100 / (tick * rate) - 1e-9);
 }
 
+/**
+ * 結算面板數值。
+ *
+ * `withSkills = false`（預設）＝遊戲內魔靈面板：只有符文 / 套裝加成，
+ * 不含召喚師技能（battle / guild）與競技場、屬性塔等實戰加成。
+ *
+ * `withSkills = true` ＝實戰數值：再加上一般召喚師技能、競技場圖騰、屬性塔，
+ * 以及（`useGuild` 開啟時）公會技能。傷害與 EHP 一律用這個版本。
+ *
+ * 速度是例外：速度圖騰 / 隊長技 / 速度 Buff 是 Tick 的計算基礎，
+ * 兩種版本都會計入，否則 Tick 會全部失準。
+ */
 export function finalizeStats(
   base: BaseStats,
   a: StatAccum,
   bonus: BonusConfig,
   rta = false,
+  withSkills = false,
 ): Stats {
-  const pctHp = a.pctHp + (bonus.towerHp ?? 0) + (bonus.useGuild ? bonus.guildHp : 0);
+  const guild = withSkills && bonus.useGuild;
+  const pctHp = a.pctHp + (withSkills ? (bonus.towerHp ?? 0) + (guild ? bonus.guildHp : 0) : 0);
   const pctAtk =
-    a.pctAtk + (bonus.towerAtk ?? 0) + (bonus.useGuild ? bonus.guildAtk : 0) + (bonus.useElementTower ? bonus.elementAtk ?? 0 : 0);
-  const pctDef = a.pctDef + (bonus.towerDef ?? 0) + (bonus.useGuild ? bonus.guildDef : 0);
+    a.pctAtk +
+    (withSkills
+      ? (bonus.towerAtk ?? 0) + (guild ? bonus.guildAtk : 0) + (bonus.useElementTower ? bonus.elementAtk ?? 0 : 0)
+      : 0);
+  const pctDef = a.pctDef + (withSkills ? (bonus.towerDef ?? 0) + (guild ? bonus.guildDef : 0) : 0);
   const pctSpd = (bonus.towerSpd ?? 0) + bonus.leadSpd + bonus.buffSpd;
 
   const hp = base.hp + Math.ceil((base.hp * pctHp) / 100) + a.flatHp;
@@ -219,7 +236,7 @@ export function finalizeStats(
   const def = base.def + Math.ceil((base.def * pctDef) / 100) + a.flatDef;
   const spd = base.spd + Math.ceil((base.spd * pctSpd) / 100) + a.spdSet + a.flatSpd;
   const cr = Math.min(100, base.cr + a.flatCr);
-  const cd = base.cd + a.flatCd + (bonus.towerCd ?? 0) + (bonus.useGuild ? bonus.guildCd : 0);
+  const cd = base.cd + a.flatCd + (withSkills ? (bonus.towerCd ?? 0) + (guild ? bonus.guildCd : 0) : 0);
   const res = Math.min(100, base.res + a.flatRes);
   const acc = Math.min(100, base.acc + a.flatAcc);
   const ehp = Math.floor((hp * (1140 + 3.5 * def)) / 1000);
@@ -232,11 +249,25 @@ export function statsForRunes(
   runes: Rune[],
   bonus: BonusConfig,
   rta = false,
+  withSkills = false,
 ): Stats {
   const a = emptyAccum();
   for (const r of runes) addRuneToAccum(a, r, bonus.grind);
   applySetBonuses(a, base);
-  return finalizeStats(base, a, bonus, rta);
+  return finalizeStats(base, a, bonus, rta, withSkills);
+}
+
+/**
+ * 只算 EHP（含一般召喚師技能；`withGuild` 時再加上公會技能）。
+ * 配符結果池要為每一組同時保留「含一般技能」與「含公會技能」兩種 EHP，
+ * 用這個函式比完整呼叫 finalizeStats 便宜，數值與 finalizeStats(withSkills=true) 相同。
+ */
+export function ehpWithSkills(base: BaseStats, a: StatAccum, bonus: BonusConfig, withGuild = false): number {
+  const pctHp = a.pctHp + (bonus.towerHp ?? 0) + (withGuild ? bonus.guildHp : 0);
+  const pctDef = a.pctDef + (bonus.towerDef ?? 0) + (withGuild ? bonus.guildDef : 0);
+  const hp = base.hp + Math.ceil((base.hp * pctHp) / 100) + a.flatHp;
+  const def = base.def + Math.ceil((base.def * pctDef) / 100) + a.flatDef;
+  return Math.floor((hp * (1140 + 3.5 * def)) / 1000);
 }
 
 export function setSummary(sets: Record<number, number>): string {

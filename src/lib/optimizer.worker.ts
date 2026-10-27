@@ -9,6 +9,8 @@ self.onmessage = (e: MessageEvent<{ id: number; req: OptRequest }>) => {
       res.runeIdx.buffer,
       res.runeTable.buffer,
       res.statValues.buffer,
+      res.ehps.buffer,
+      res.ehpsGuild.buffer,
       res.scores.buffer,
       res.effs.buffer,
       res.focusFits.buffer,

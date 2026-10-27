@@ -233,8 +233,8 @@ export default function OptimizerPage() {
     ignoreDef: false,
     aliveEnemies: 1,
     alliesAlive: 4,
-    // 與 SWOP 傷害選項預設一致：公會建築預設不計入
-    useGuild: false,
+    // 召喚師公會技能預設不計入；設定頁的「計入公會技能」可改預設
+    useGuild: settings.bonus.useGuild,
   });
   const patchDmg = (patch: Partial<DamageOptions>) => setDmgOpts((o) => ({ ...o, ...patch }));
 
@@ -460,7 +460,8 @@ export default function OptimizerPage() {
       required,
       min,
       max: {},
-      bonus: { ...bonus, grind: true },
+      // 結果池同時保留「含一般技能」與「含公會技能」兩種 EHP，這裡固定不含公會技能
+      bonus: { ...bonus, useGuild: false, grind: true },
       pool,
       allowEquipped,
       targetUnit: boxMonster?.unit.id ?? 0,
@@ -557,7 +558,7 @@ export default function OptimizerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dmgSkill?.id]);
 
-  /** 傷害計算獨立於全局面板：可單獨決定是否計入公會建築 */
+  /** 傷害計算獨立於全局面板：公會技能可單獨決定是否計入；一般召喚師技能一律計入 */
   const dmgBonus = useMemo(() => ({ ...bonus, useGuild: dmgOpts.useGuild, grind: true }), [bonus, dmgOpts.useGuild]);
 
   const calcDamage = (builds: Build[]) => {
@@ -565,33 +566,35 @@ export default function OptimizerPage() {
     if (!dmgSkill) return map;
     for (const b of builds) {
       const runes = b.runes.filter((r): r is Rune => !!r);
-      const stats = statsForRunes(base, runes, dmgBonus, rta);
+      // withSkills = true：傷害用實戰數值（含一般召喚師技能，公會技能依勾選）
+      const stats = statsForRunes(base, runes, dmgBonus, rta, true);
       map.set(b, { dmg: computeSkillDamage(stats, dmgSkill, dmgOpts), stats });
     }
     return map;
   };
 
-  /** 依傷害排序時才需要全部結果的傷害（用壓縮結果的面板值，不必重建 Build） */
+  /** 依傷害排序時才需要全部結果的傷害（用壓縮結果的面板值 + 技能加成近似，不必重建 Build） */
   const damageAll = useMemo(() => {
     if (!result || !dmgOn || !dmgSkill || sortKey !== "dmg") return null;
     const n = result.count;
     const arr = new Float32Array(n);
-    // 傷害面板的公會建築開關和配符設定不同時，才需要逐組重算面板
-    const guildMismatch = dmgOpts.useGuild !== bonus.useGuild;
+    const guild = dmgOpts.useGuild;
+    // 面板不含技能，這裡把一般技能（+公會技能）的固定加成補回去，誤差 ≤ 1
+    const pctHp = (bonus.towerHp ?? 0) + (guild ? bonus.guildHp : 0);
+    const pctAtk = (bonus.towerAtk ?? 0) + (bonus.useElementTower ? bonus.elementAtk ?? 0 : 0) + (guild ? bonus.guildAtk : 0);
+    const pctDef = (bonus.towerDef ?? 0) + (guild ? bonus.guildDef : 0);
+    const cdAdd = (bonus.towerCd ?? 0) + (guild ? bonus.guildCd : 0);
     for (let i = 0; i < n; i++) {
-      const stats = guildMismatch
-        ? statsForRunes(
-            base,
-            buildAt(result, i, runeMap, rta).runes.filter((r): r is Rune => !!r),
-            dmgBonus,
-            rta,
-          )
-        : statsAt(result, i, rta);
+      const s = statsAt(result, i, rta, guild);
+      const hp = s.hp + Math.ceil((base.hp * pctHp) / 100);
+      const atk = s.atk + Math.ceil((base.atk * pctAtk) / 100);
+      const def = s.def + Math.ceil((base.def * pctDef) / 100);
+      const stats: Stats = { ...s, hp, atk, def, cd: s.cd + cdAdd, ehp: Math.floor((hp * (1140 + 3.5 * def)) / 1000) };
       arr[i] = computeSkillDamage(stats, dmgSkill, dmgOpts).total;
     }
     return arr;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, dmgOn, dmgSkill, sortKey, dmgBonus, dmgOpts, base, rta, bonus.useGuild, runeMap]);
+  }, [result, dmgOn, dmgSkill, sortKey, bonus, dmgOpts, base, rta]);
 
   const sortOptions = useMemo(() => {
     if (!dmgOn || !dmgSkill) return SORT_OPTIONS;
@@ -603,8 +606,9 @@ export default function OptimizerPage() {
   }, [dmgOn, dmgSkill]);
 
   useEffect(() => {
-    if (sortKey === "dmg" && (!dmgOn || !dmgSkill)) setSortKey("recommended");
-  }, [sortKey, dmgOn, dmgSkill]);
+    // 技能資料還在載入時不要清掉「傷害」排序（快速預設會先設好排序再等技能載入）
+    if (sortKey === "dmg" && (!dmgOn || (!skillLoading && !dmgSkill))) setSortKey("recommended");
+  }, [sortKey, dmgOn, dmgSkill, skillLoading]);
 
   /**
    * 依使用者選定的數值重新排序：只排「索引」，
@@ -622,14 +626,12 @@ export default function OptimizerPage() {
       if (sortKey === "eff") keys[i] = result.effs[i];
       else if (sortKey === "focus") keys[i] = result.focusFits[i];
       else if (sortKey === "dmg") keys[i] = damageAll ? damageAll[i] : 0;
-      else if (sortKey === "ehp") {
-        const o = i * 8;
-        keys[i] = Math.floor((result.statValues[o] * (1140 + 3.5 * result.statValues[o + 2])) / 1000);
-      } else keys[i] = result.statValues[i * 8 + si];
+      else if (sortKey === "ehp") keys[i] = (dmgOpts.useGuild ? result.ehpsGuild : result.ehps)[i];
+      else keys[i] = result.statValues[i * 8 + si];
     }
     idx.sort((a, b) => (sortDir === "desc" ? keys[b] - keys[a] : keys[a] - keys[b]) || a - b);
     return idx;
-  }, [result, sortKey, sortDir, damageAll]);
+  }, [result, sortKey, sortDir, damageAll, dmgOpts.useGuild]);
 
   const total = result?.count ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -641,8 +643,8 @@ export default function OptimizerPage() {
   }, [sortedOrder, page]);
 
   const pageBuilds = useMemo(
-    () => (result ? pageIndices.map((i) => buildAt(result, i, runeMap, rta)) : []),
-    [result, pageIndices, runeMap, rta],
+    () => (result ? pageIndices.map((i) => buildAt(result, i, runeMap, rta, dmgOpts.useGuild)) : []),
+    [result, pageIndices, runeMap, rta, dmgOpts.useGuild],
   );
 
   /** 畫面上只算這一頁的傷害 */
@@ -654,8 +656,8 @@ export default function OptimizerPage() {
 
   /** 「配符清單」彈窗只需要目前這一組 */
   const planBuild = useMemo(
-    () => (result && planIdx >= 0 ? buildAt(result, sortedOrder[planIdx], runeMap, rta) : undefined),
-    [result, planIdx, sortedOrder, runeMap, rta],
+    () => (result && planIdx >= 0 ? buildAt(result, sortedOrder[planIdx], runeMap, rta, dmgOpts.useGuild) : undefined),
+    [result, planIdx, sortedOrder, runeMap, rta, dmgOpts.useGuild],
   );
 
   // 換排序時把展開的卡片與配符清單歸零，避免指到別組
@@ -881,7 +883,7 @@ export default function OptimizerPage() {
             <NumberField label="速度 Buff %（一般 30）" value={bonus.buffSpd} onChange={(v) => patchBonus({ buffSpd: v })} min={0} max={50} step={5} />
 
             <div className="divider" />
-            <div className="tiny dim">其他面板下限（0 = 不限）</div>
+            <div className="tiny dim">其他實戰下限（含一般召喚師技能，0 = 不限）</div>
             <div className="grid g2">
               <NumberField label="體力 HP" value={limits.hp ?? 0} onChange={(v) => setLimits((l) => ({ ...l, hp: v }))} step={500} />
               <NumberField label="防禦 DEF" value={limits.def ?? 0} onChange={(v) => setLimits((l) => ({ ...l, def: v }))} step={50} />
@@ -889,6 +891,14 @@ export default function OptimizerPage() {
               <NumberField label="效果命中 ACC %" value={limits.acc ?? 0} onChange={(v) => setLimits((l) => ({ ...l, acc: v }))} max={100} />
               <NumberField label="效果抵抗 RES %" value={limits.res ?? 0} onChange={(v) => setLimits((l) => ({ ...l, res: v }))} max={100} />
               <NumberField label="暴擊率 CR %" value={limits.cr ?? 0} onChange={(v) => setLimits((l) => ({ ...l, cr: v }))} max={100} />
+            </div>
+
+            <label className="row tiny" style={{ gap: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={dmgOpts.useGuild} onChange={(e) => patchDmg({ useGuild: e.target.checked })} />
+              計入公會召喚師技能（傷害 / EHP）
+            </label>
+            <div className="tiny dim" style={{ lineHeight: 1.55 }}>
+              一般召喚師技能（Battle）一律計入傷害與 EHP，但不會顯示在面板；公會技能（Guild）預設不計入。
             </div>
 
             <FocusEditor value={focus} onChange={setFocus} pool={pool} onPoolChange={setPool} />
@@ -1192,7 +1202,7 @@ function BuildCard({
               <span>RES <b className="mono" style={{ color: "var(--text)" }}>{s.res}%</b></span>
               <span>CR <b className="mono" style={{ color: "var(--text)" }}>{s.cr}%</b></span>
               <span>CD <b className="mono" style={{ color: "var(--text)" }}>{s.cd}%</b></span>
-              <span>EHP <b className="mono" style={{ color: "var(--text)" }}>{fmt(s.ehp)}</b></span>
+              <span title="EHP 含一般召喚師技能；公會技能依勾選">EHP <b className="mono" style={{ color: "var(--text)" }}>{fmt(s.ehp)}</b></span>
             </div>
           </div>
           <div className="row" style={{ gap: 6 }}>
@@ -1207,7 +1217,12 @@ function BuildCard({
           <div className="grid g2" style={{ gap: 12, marginBottom: 12 }}>
             <StatGrid stats={s} compact />
             <div className="col" style={{ gap: 6 }}>
-              <div className="kv"><span className="k">EHP（有效體力）</span><span className="v mono">{fmt(s.ehp)}</span></div>
+              <div className="kv">
+                <span className="k" title="含一般召喚師技能；公會技能依勾選">
+                  EHP（含{guildOn ? "一般 + 公會" : "一般"}召喚師技能）
+                </span>
+                <span className="v mono">{fmt(s.ehp)}</span>
+              </div>
               <div className="kv"><span className="k">套裝</span><span className="v">{setSummary(build.sets)}</span></div>
               <div className="kv"><span className="k">綜合評分</span><span className="v mono">{scoreOf(s).toFixed(1)}</span></div>
               {damage && damageSkill && (
@@ -1222,7 +1237,7 @@ function BuildCard({
                   </div>
                   {damageStats && (
                     <div className="kv">
-                      <span className="k">傷害用面板{guildOn ? "（含公會建築）" : "（未含公會建築）"}</span>
+                      <span className="k">傷害用面板（含一般{guildOn ? " + 公會" : ""}召喚師技能）</span>
                       <span className="v mono">ATK {fmt(damageStats.atk)} · CD {damageStats.cd}%</span>
                     </div>
                   )}

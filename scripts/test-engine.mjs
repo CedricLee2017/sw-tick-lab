@@ -33,7 +33,7 @@ const {
   tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize, maxSpeedBound,
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
-  defaultBonus, finalizeStats, statsForRunes, buildsOf,
+  defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
 } = engine;
 
 let passed = 0;
@@ -108,30 +108,55 @@ check("一般建築 + 屬性塔 + 公會旗幟皆為滿等", () => {
   assert.equal(b.guildHp, 20, "公會體力");
   assert.equal(b.guildDef, 20, "公會防禦");
   assert.equal(b.guildCd, 25, "公會暴傷");
-  assert.equal(b.useGuild, false, "公會旗幟預設不計入（與 SWOP 相同）");
+  assert.equal(b.useGuild, false, "公會技能預設不計入");
   assert.equal(b.useElementTower, true);
 });
-check("公會建築可獨立開關：只影響公會旗幟", () => {
+check("召喚師技能不計入面板，但計入實戰數值", () => {
   const base = { hp: 10000, atk: 1000, def: 1000, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
   const bonus = defaultBonus({ leadSpd: 0, buffSpd: 0 });
   const acc = emptyAccum();
-  const on = finalizeStats(base, acc, { ...bonus, useGuild: true });
-  const off = finalizeStats(base, acc, { ...bonus, useGuild: false });
+  const panel = finalizeStats(base, acc, bonus);
+  const battle = finalizeStats(base, acc, bonus, false, true);
+  // 面板＝遊戲內魔靈面板：只有符文 / 套裝，不含技能與圖騰
+  assert.equal(panel.atk, 1000, "面板不應含攻擊圖騰 / 屬性塔");
+  assert.equal(panel.hp, 10000);
+  assert.equal(panel.def, 1000);
+  assert.equal(panel.cd, 50, "面板不應含暴傷 +25");
+  // 速度是 Tick 基礎，兩種版本都要有速度圖騰
+  assert.equal(panel.spd, 100 + Math.ceil(100 * 0.15));
+  assert.equal(battle.spd, panel.spd);
+  // 實戰：競技場 20% + 屬性塔 21%
+  assert.equal(battle.atk, 1000 + Math.ceil(1000 * 0.41));
+  assert.equal(battle.cd, 50 + 25);
+  // EHP 也要含一般技能
+  const plainEhp = Math.floor((10000 * (1140 + 3.5 * 1000)) / 1000);
+  assert.ok(battle.ehp > plainEhp, "實戰 EHP 應高於純面板");
+  assert.equal(ehpWithSkills(base, acc, bonus), battle.ehp);
+});
+check("公會技能可獨立開關：只影響實戰版本", () => {
+  const base = { hp: 10000, atk: 1000, def: 1000, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
+  const bonus = defaultBonus({ leadSpd: 0, buffSpd: 0 });
+  const acc = emptyAccum();
+  const on = finalizeStats(base, acc, { ...bonus, useGuild: true }, false, true);
+  const off = finalizeStats(base, acc, { ...bonus, useGuild: false }, false, true);
   // 攻擊：競技場 20% + 屬性塔 21% + 公會 20%
   assert.equal(on.atk, 1000 + Math.ceil(1000 * 0.61));
   assert.equal(off.atk, 1000 + Math.ceil(1000 * 0.41));
   assert.equal(on.cd, 50 + 25 + 25);
   assert.equal(off.cd, 50 + 25);
+  // 不管公會開關，面板永遠不含技能
+  assert.equal(finalizeStats(base, acc, { ...bonus, useGuild: true }).atk, 1000);
   // 不計屬性塔時：競技場 20% + 公會 20%
-  const noElem = finalizeStats(base, acc, { ...bonus, useGuild: true, useElementTower: false });
+  const noElem = finalizeStats(base, acc, { ...bonus, useGuild: true, useElementTower: false }, false, true);
   assert.equal(noElem.atk, 1000 + Math.ceil(1000 * 0.4));
+  assert.ok(ehpWithSkills(base, acc, bonus, true) > ehpWithSkills(base, acc, bonus, false));
 });
 check("statsForRunes 與 finalizeStats 結果一致（公會開關）", () => {
   const base = { hp: 10000, atk: 1000, def: 1000, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
   const bonus = defaultBonus({ leadSpd: 0, buffSpd: 0 });
   const acc = emptyAccum();
-  const direct = finalizeStats(base, acc, bonus);
-  const viaRunes = statsForRunes(base, [], bonus);
+  const direct = finalizeStats(base, acc, bonus, false, true);
+  const viaRunes = statsForRunes(base, [], bonus, false, true);
   assert.deepEqual(viaRunes, direct);
 });
 
