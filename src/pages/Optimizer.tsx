@@ -195,9 +195,9 @@ export default function OptimizerPage() {
     { set: 0, pieces: 2 },
   ]);
   const [intangible, setIntangible] = useState(false);
-  const [mode, setMode] = useState<"tick" | "speed">("tick");
+  const [mode, setMode] = useState<"tick" | "speed">("speed");
   const [tick, setTick] = useState(5);
-  const [speedTarget, setSpeedTarget] = useState(250);
+  const [speedTarget, setSpeedTarget] = useState(0);
   const [limits, setLimits] = useState<Partial<Record<StatKey, number>>>({});
   const [allowEquipped, setAllowEquipped] = useState(true);
   const [pool, setPool] = useState(settings.pool);
@@ -227,7 +227,7 @@ export default function OptimizerPage() {
     enemyHpPct: 100,
     enemySpd: 100,
     selfHpPct: 100,
-    atkBuff: 50,
+    atkBuff: 0,
     leadAtk: 0,
     defBreak: false,
     brand: false,

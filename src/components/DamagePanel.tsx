@@ -90,14 +90,21 @@ export function DamagePanel({
             <NumberField label="敵人最大體力" value={opts.enemyMaxHp} min={1} max={500000} step={1000} onChange={(v) => onOptsChange({ enemyMaxHp: v })} />
             <NumberField label="敵人目前體力 %" value={opts.enemyHpPct} min={0} max={100} onChange={(v) => onOptsChange({ enemyHpPct: Math.min(100, Math.max(0, v)) })} />
           </div>
-          <div className="grid g4">
+          <div className="grid g3">
             <NumberField label="敵人速度" value={opts.enemySpd} min={1} max={500} onChange={(v) => onOptsChange({ enemySpd: v })} />
             <NumberField label="自身目前 HP %" value={opts.selfHpPct} min={0} max={100} onChange={(v) => onOptsChange({ selfHpPct: Math.min(100, Math.max(0, v)) })} />
-            <NumberField label="ATK Buff %" value={opts.atkBuff} min={0} max={100} step={5} onChange={(v) => onOptsChange({ atkBuff: v })} hint="一般 50%" />
             <NumberField label="隊長 ATK %" value={opts.leadAtk} min={0} max={50} onChange={(v) => onOptsChange({ leadAtk: v })} />
           </div>
 
           <div className="row wrap dmg-checks" style={{ gap: 12 }}>
+            <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={opts.atkBuff > 0}
+                onChange={(e) => onOptsChange({ atkBuff: e.target.checked ? 50 : 0 })}
+              />
+              攻擊強化（ATK Buff +50%）
+            </label>
             <label className="row tiny" style={{ gap: 6, cursor: skill.up > 0 ? "pointer" : "default", opacity: skill.up > 0 ? 1 : .5 }}>
               <input type="checkbox" disabled={skill.up <= 0} checked={opts.skillUps && skill.up > 0} onChange={(e) => onOptsChange({ skillUps: e.target.checked })} />
               滿技傷害 +{skill.up}%
