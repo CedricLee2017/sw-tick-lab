@@ -51,14 +51,38 @@ export interface Rune {
   effMax: number;
 }
 
+/** 神器副效果（200–226 / 300–309 / 400–411） */
+export interface ArtifactSub {
+  /** 效果 id */
+  t: number;
+  /** 效果數值（% 或 % of stat） */
+  v: number;
+  /** 強化次數（+3/+6/+9/+12 加到這條的次數） */
+  up?: number;
+  /** 轉換次數 */
+  roll?: number;
+  /** 遊戲原始第 5 欄（目前用途未知，保留原值） */
+  extra?: number;
+}
+
 export interface Artifact {
   id: number;
-  type: number; // 1 = 屬性, 2 = 類型
+  /** 1 = 屬性神器（attribute）、2 = 類型神器（archetype） */
+  type: number;
+  /** type 1：屬性 1–5、98 特殊；type 2：0 */
   attr: number;
+  /** type 2 的魔靈類型（unit_style）1 攻擊 / 2 防禦 / 3 體力 / 4 支援 / 98 特殊 */
+  style: number;
   occupied: number;
+  /** 主效果：100 體力 / 101 攻擊 / 102 防禦 */
   main: { t: number; v: number };
-  subs: { t: number; v: number }[];
+  subs: ArtifactSub[];
   level: number;
+  /** 品質 1 普通–5 傳說 */
+  rank: number;
+  /** 原始星級（4 / 5） */
+  stars: number;
+  locked: boolean;
 }
 
 export interface Unit {

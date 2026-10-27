@@ -135,7 +135,7 @@ export const useStore = create<Store>((setState, getState) => ({
     if (settings !== prev) void set(SETTINGS_KEY, settings);
     const detectedSpeed = account.buildings.find((b) => b.id === 7);
     getState().notify(
-      `已載入 ${account.units.length} 隻魔靈 / ${account.runes.length} 顆符文 · 建築以全滿等計算` +
+      `已載入 ${account.units.length} 隻魔靈 / ${account.runes.length} 顆符文 / ${account.artifacts.length} 件神器 · 建築以全滿等計算` +
         (detectedSpeed ? `（存檔速度圖騰 Lv.${detectedSpeed.level}，可於設定頁套用）` : ""),
     );
     return { ok: true, warnings };

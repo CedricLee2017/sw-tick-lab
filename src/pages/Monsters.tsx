@@ -3,7 +3,7 @@ import { Search, Users, Wand2 } from "lucide-react";
 import { useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
-import { Modal, MonsterIcon, RuneCard, StatGrid, TickBadge, fmt, setColor } from "../components/ui";
+import { Modal, MonsterIcon, RuneCard, ArtifactCard, StatGrid, TickBadge, fmt, setColor } from "../components/ui";
 import { setSummary } from "../lib/stats";
 
 export default function MonstersPage() {
@@ -122,6 +122,18 @@ export default function MonstersPage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>
+            <div className="card-title">神器</div>
+            <span className="tiny dim">裝備 {current.artifacts.length} / 2</span>
+          </div>
+          {current.artifacts.length === 0 ? (
+            <div className="empty tiny">這隻魔靈目前沒有裝備神器</div>
+          ) : (
+            <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8 }}>
+              {current.artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} owner={current.monster.name} />)}
             </div>
           )}
 

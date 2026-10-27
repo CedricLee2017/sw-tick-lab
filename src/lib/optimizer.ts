@@ -86,6 +86,8 @@ export interface OptRequest {
   intangible?: boolean;
   /** 焦點屬性：數值越高的符文越優先進入候選池（最多 5 組） */
   focus?: FocusEntry[];
+  /** 目標魔靈已裝備神器的固定面板加成（體力 / 攻擊 / 防禦） */
+  artifactFlat?: { hp: number; atk: number; def: number };
 }
 
 export interface Build {
@@ -483,6 +485,13 @@ export function optimize(req: OptRequest): OptResult {
   const maxEntries = Object.entries(max).filter(([, v]) => typeof v === "number" && Number.isFinite(v)) as [StatKey, number][];
 
   const acc = emptyAccum();
+  // 神器主效果是固定值，對每一組配裝都相同；直接放進初始累計值，
+  // 之後 DFS 的加減與剪枝都會自然包含它。
+  if (req.artifactFlat) {
+    acc.flatHp += req.artifactFlat.hp;
+    acc.flatAtk += req.artifactFlat.atk;
+    acc.flatDef += req.artifactFlat.def;
+  }
   /** 目前選到的符文在 runeTable 的密集索引（0 號位置不用） */
   const chosenIdx: number[] = new Array(7).fill(-1);
   let nodes = 0;

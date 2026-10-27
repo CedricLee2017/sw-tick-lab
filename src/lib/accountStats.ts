@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import { MONSTER_MAP, useStore } from "../store";
 import { baseStats, statsForRunes } from "./stats";
-import type { Account, BonusConfig, Monster, Rune, Stats, Unit } from "./types";
+import type { Account, Artifact, BonusConfig, Monster, Rune, Stats, Unit } from "./types";
 
 export interface UnitView {
   unit: Unit;
   monster: Monster;
   base: ReturnType<typeof baseStats>;
   runes: Rune[];
+  artifacts: Artifact[];
   stats: Stats;
 }
 
@@ -17,7 +18,9 @@ export function computeUnitView(account: Account, unit: Unit, bonus: BonusConfig
   const base = baseStats(monster, unit.stars, unit.level);
   const runeMap = new Map(account.runes.map((r) => [r.id, r]));
   const runes = unit.runes.map((id) => runeMap.get(id)).filter(Boolean) as Rune[];
-  return { unit, monster, base, runes, stats: statsForRunes(base, runes, bonus, rta) };
+  const artifactMap = new Map(account.artifacts.map((a) => [a.id, a]));
+  const artifacts = unit.artifacts.map((id) => artifactMap.get(id)).filter(Boolean) as Artifact[];
+  return { unit, monster, base, runes, artifacts, stats: statsForRunes(base, runes, bonus, rta, false, artifacts) };
 }
 
 export interface AccountSummary {

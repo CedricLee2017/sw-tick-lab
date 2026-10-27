@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search, X, ChevronDown } from "lucide-react";
 import { ELEMENTS, SET_BY_ID, STAT_TYPES, type StatKey } from "../lib/constants";
 import { MONSTERS, monsterOf } from "../store";
-import type { Monster, Rune, Stats } from "../lib/types";
+import type { Artifact, Monster, Rune, Stats } from "../lib/types";
+import { artifactKindText, artifactMainText, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
 import { tickInfo } from "../lib/optimizer";
 
 export const fmt = (n: number) => (Number.isFinite(n) ? n.toLocaleString("en-US") : "—");
@@ -172,6 +173,69 @@ export function RuneCard({
           <div className="rune-meta-row"><span>原裝備</span><b title={owner || "未裝備"}>{owner || "未裝備"}</b></div>
           <div className="rune-meta-row"><span>效率</span><b className="gold">{eff}%</b></div>
           <div className="bar" style={{ height: 4 }}><i style={{ width: `${Math.min(100, Math.max(0, eff))}%` }} /></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ARTIFACT_EL_COLOR: Record<number, string> = {
+  1: "#7fb3ff",
+  2: "#ff6b6b",
+  3: "#43d98a",
+  4: "#f2c65c",
+  5: "#b07cff",
+  98: "#e879f9",
+};
+
+/** 神器卡：屬性 / 類型、+15、主效果、副效果、擁有者 */
+export function ArtifactCard({
+  artifact,
+  owner,
+  onClick,
+  detail,
+}: {
+  artifact: Artifact;
+  owner?: string;
+  onClick?: () => void;
+  detail?: boolean;
+}) {
+  const rank = artifact.rank;
+  const rankClass = rank >= 5 ? "legendary" : rank === 4 ? "hero" : rank === 3 ? "rare" : "";
+  const color = artifact.type === 2 ? "#e879f9" : (ARTIFACT_EL_COLOR[artifact.attr] ?? "#8b9cc0");
+  return (
+    <div
+      className={`rune artifact ${rankClass} ${detail ? "detail" : ""}`}
+      onClick={onClick}
+      style={{ cursor: onClick ? "pointer" : undefined }}
+    >
+      <div className="rune-top">
+        <div className="rune-set">
+          <span className="rune-dot" style={{ background: color }} />
+          {artifactTypeText(artifact.type)}
+          <span className="rune-tag">{artifactKindText(artifact)}</span>
+          {artifact.locked && <span className="rune-tag muted" title="已鎖定">鎖</span>}
+        </div>
+        <span className="rune-slot">+{artifact.level}</span>
+      </div>
+      <div className="rune-main">{artifactMainText(artifact)}</div>
+      {artifact.subs.map((s, i) => (
+        <div className="rune-sub" key={i}>
+          <span>{artifactSubText(s)}</span>
+          {s.up && s.up > 0 ? <span className="g" title="此副效果被強化（+3/+6/+9/+12）的次數">強化 {s.up} 次</span> : null}
+        </div>
+      ))}
+      <div className="rune-sub" style={{ marginTop: 2 }}>
+        <span className="dim tiny">{ARTIFACT_RANKS[rank] ?? `${rank}★`} · {artifact.stars}★ 原生</span>
+        {!detail && <span className="dim tiny">{owner || "未裝備"}</span>}
+      </div>
+      {detail && (
+        <div className="rune-meta">
+          <div className="rune-meta-row"><span>神器 ID</span><b className="mono">{artifact.id}</b></div>
+          <div className="rune-meta-row"><span>類型</span><b>{artifactTypeText(artifact.type)} · {artifactKindText(artifact)}</b></div>
+          <div className="rune-meta-row"><span>品質</span><b>{ARTIFACT_RANKS[rank] ?? "—"}</b></div>
+          <div className="rune-meta-row"><span>裝備</span><b title={owner || "未裝備"}>{owner || "未裝備"}</b></div>
+          <div className="rune-meta-row"><span>效果</span><b title={artifactSubsText(artifact)}>{artifact.subs.length} 條</b></div>
         </div>
       )}
     </div>

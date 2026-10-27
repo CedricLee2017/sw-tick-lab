@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles,
 } from "lucide-react";
 import { useStore } from "./store";
 import ImportPage from "./pages/Import";
@@ -9,10 +9,11 @@ import MonstersPage from "./pages/Monsters";
 import SpeedPage from "./pages/SpeedLab";
 import OptimizerPage from "./pages/Optimizer";
 import RunesPage from "./pages/Runes";
+import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 
-type RouteKey = "import" | "overview" | "monsters" | "speed" | "optimizer" | "runes" | "settings";
+type RouteKey = "import" | "overview" | "monsters" | "speed" | "optimizer" | "runes" | "artifacts" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -21,6 +22,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "optimizer", label: "配符", icon: <Wand2 size={17} />, title: "一鍵配符", sub: "以 Tick 為條件的符文最佳化" },
   { key: "monsters", label: "魔靈", icon: <Users size={17} />, title: "魔靈圖鑑", sub: "你的魔靈盒與目前配裝" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
+  { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },
   { key: "settings", label: "設定", icon: <SettingsIcon size={17} />, title: "設定", sub: "建築、隊長技與進階選項" },
 ];
 
@@ -64,6 +66,7 @@ export default function App() {
       case "optimizer": return <OptimizerPage />;
       case "monsters": return <MonstersPage />;
       case "runes": return <RunesPage />;
+      case "artifacts": return <ArtifactsPage />;
       case "settings": return <SettingsPage />;
       default: return <ImportPage />;
     }
@@ -88,14 +91,14 @@ export default function App() {
             </button>
           ))}
           <div className="nav-label">分析</div>
-          {ROUTES.slice(1, 6).map((r) => (
+          {ROUTES.slice(1, 7).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
               {!account && <span className="dim" style={{ marginLeft: "auto", fontSize: 10 }}>—</span>}
             </button>
           ))}
           <div className="nav-label">系統</div>
-          {ROUTES.slice(6).map((r) => (
+          {ROUTES.slice(7).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
             </button>
@@ -111,7 +114,7 @@ export default function App() {
                   <div style={{ fontSize: 12, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {account.wizard || "我的帳號"}
                   </div>
-                  <div className="tiny dim">{account.units.length} 魔靈 · {account.runes.length} 符文</div>
+                  <div className="tiny dim">{account.units.length} 魔靈 · {account.runes.length} 符文 · {account.artifacts.length} 神器</div>
                 </div>
               </div>
             </div>
@@ -154,7 +157,7 @@ export default function App() {
       </div>
 
       <nav className="mobile-nav">
-        {ROUTES.filter((r) => ["import", "overview", "speed", "optimizer", "runes"].includes(r.key)).map((r) => (
+        {ROUTES.filter((r) => ["import", "overview", "speed", "optimizer", "runes", "artifacts"].includes(r.key)).map((r) => (
           <button key={r.key} className={route === r.key ? "active" : ""} onClick={() => go(r.key)}>
             {r.icon}
             <span>{r.label}</span>

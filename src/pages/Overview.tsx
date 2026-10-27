@@ -1,4 +1,4 @@
-import { Activity, ArrowUpRight, Gauge, Gem, Star, Users } from "lucide-react";
+import { Activity, ArrowUpRight, Gauge, Gem, Sparkles, Star, Users } from "lucide-react";
 import { useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
@@ -30,6 +30,12 @@ export default function OverviewPage() {
       <div className="grid g4">
         <Tile icon={<Users size={16} />} k="魔靈" v={fmt(account.units.length)} sub={`六星 ${summary.sixStar} 隻`} />
         <Tile icon={<Gem size={16} />} k="符文" v={fmt(account.runes.length)} sub={`已裝備 ${fmt(equipped)} 顆`} />
+        <Tile
+          icon={<Sparkles size={16} />}
+          k="神器"
+          v={fmt(account.artifacts.length)}
+          sub={`已裝備 ${fmt(account.artifacts.filter((a) => a.occupied > 0).length)} 件`}
+        />
         <Tile icon={<Star size={16} />} k="平均符文效率" v={`${summary.avgEff.toFixed(1)}%`} sub="以同星級副屬上限計算" />
         <Tile
           icon={<Gauge size={16} />}

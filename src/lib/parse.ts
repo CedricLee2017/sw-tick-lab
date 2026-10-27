@@ -1,7 +1,7 @@
 /** SWEX / SWOP JSON 解析（寬容格式） */
 import { runeEfficiency } from "./stats";
 import { RUNE_SETS, SET_BY_ID } from "./constants";
-import type { Account, Artifact, Rune, Unit } from "./types";
+import type { Account, Artifact, ArtifactSub, Rune, Unit } from "./types";
 
 const num = (v: unknown, d = 0): number => {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -117,6 +117,52 @@ function subs(v: unknown, grindFirst = false): Rune["subs"] {
     .filter((s) => s.t > 0);
 }
 
+/** 神器主效果：SWEX 原始格式是陣列，部分備份格式是 "102 100 15 0 0" 字串 */
+function artifactMain(v: unknown): { t: number; v: number } {
+  if (typeof v === "string") {
+    const parts = v.trim().split(/\s+/);
+    return { t: num(parts[0]), v: num(parts[1]) };
+  }
+  return pair(v);
+}
+
+function artifactSubs(v: unknown): ArtifactSub[] {
+  return list(v)
+    .map((s): ArtifactSub => {
+      if (Array.isArray(s)) {
+        // [效果 id, 數值, 強化次數, 轉換次數, 未知欄位]
+        return { t: num(s[0]), v: num(s[1]), up: num(s[2]), roll: num(s[3]), extra: num(s[4]) };
+      }
+      if (s && typeof s === "object") {
+        const o = s as Record<string, unknown>;
+        return {
+          t: num(o.type ?? o.t ?? o.effect ?? o.effect_id),
+          v: num(o.value ?? o.v ?? o.val),
+          up: num(o.upgrade ?? o.up ?? o.upgrade_count),
+          roll: num(o.reroll ?? o.roll ?? o.reroll_count),
+        };
+      }
+      return { t: 0, v: 0 };
+    })
+    .filter((s) => s.t > 0);
+}
+
+function artifactOf(a: any, owner = 0): Artifact {
+  return {
+    id: num(a.rid ?? a.artifact_id ?? a.id),
+    type: num(a.type ?? a.artifact_type, 1),
+    attr: num(a.attribute ?? a.attr),
+    style: num(a.unit_style ?? a.style),
+    occupied: num(a.occupied_id ?? a.occupied) || owner,
+    main: artifactMain(a.pri_effect ?? a.pri_eff ?? a.main),
+    subs: artifactSubs(a.sec_effects ?? a.sec_eff ?? a.subs),
+    level: Math.min(15, Math.max(0, num(a.level ?? a.upgrade_curr, 0))),
+    rank: num(a.rank, 0),
+    stars: num(a.natural_rank ?? a.class, 5),
+    locked: truthy(a.locked),
+  };
+}
+
 
 export interface ParseResult {
   account: Account | null;
@@ -125,7 +171,7 @@ export interface ParseResult {
 }
 
 /** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值 */
-export const PARSE_VERSION = 3;
+export const PARSE_VERSION = 4;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -255,6 +301,47 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     }
   }
 
+  // 神器：頂層 artifacts 只有未裝備的（occupied_id = 0）；已裝備的只會出現在 unit.artifacts。
+  // 兩邊以 rid 合併，並以 unit.artifacts 內的 owner 為準。
+  const artifactMap = new Map<number, Artifact>();
+  const nestedArtifactOwner = new Map<number, number>();
+  let nestedArtifacts = 0;
+  let duplicateArtifacts = 0;
+  for (const a of list(body.artifacts ?? body.artifact_list)) {
+    if (!a || typeof a !== "object") continue;
+    const art = artifactOf(a);
+    if (!art.id) continue;
+    if (artifactMap.has(art.id)) duplicateArtifacts++;
+    artifactMap.set(art.id, art);
+  }
+  for (const u of rawUnits) {
+    if (!u || typeof u !== "object") continue;
+    const uid = num(u.unit_id ?? u.id);
+    for (const a of list(u.artifacts ?? u.artifact_ids)) {
+      const aid = typeof a === "object" ? num(a?.rid ?? a?.artifact_id ?? a?.id) : num(a);
+      if (!aid) continue;
+      nestedArtifacts++;
+      if (uid) nestedArtifactOwner.set(aid, uid);
+      if (a && typeof a === "object") {
+        const art = artifactOf(a, uid);
+        if (art.id) artifactMap.set(art.id, art);
+      }
+    }
+  }
+  for (const [aid, uid] of nestedArtifactOwner) {
+    const art = artifactMap.get(aid);
+    if (art && !art.occupied) art.occupied = uid;
+  }
+  const artifacts = [...artifactMap.values()];
+  const artifactOccupied = new Map<number, number[]>();
+  for (const a of artifacts) {
+    if (a.occupied > 0) {
+      const arr = artifactOccupied.get(a.occupied) ?? [];
+      arr.push(a.id);
+      artifactOccupied.set(a.occupied, arr);
+    }
+  }
+
   const units: Unit[] = [];
   let skippedUnits = 0;
   for (const u of rawUnits) {
@@ -277,29 +364,29 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     const occ = occupiedMap.get(id);
     if (occ && occ.length > unitRunes.length) unitRunes = occ;
 
+    const nestedIds = list(u.artifacts ?? u.artifact_ids)
+      .map((a: any) => num(a?.rid ?? a?.artifact_id ?? a))
+      .filter(Boolean);
+    const unitArtifacts = [...new Set([...nestedIds, ...(artifactOccupied.get(id) ?? [])])]
+      .filter((aid) => artifactMap.has(aid))
+      .slice(0, 2);
+
     units.push({
       id,
       master,
       stars: Math.min(6, Math.max(1, num(u.class ?? u.stars ?? u.star, 6))),
       level: num(u.unit_level ?? u.level, 40),
       runes: unitRunes.slice(0, 6),
-      artifacts: list(u.artifacts ?? u.artifact_ids).map((a: any) => num(a?.rid ?? a?.artifact_id ?? a)).filter(Boolean),
+      artifacts: unitArtifacts,
       locked: truthy(u.locked),
     });
   }
 
-  const rawArtifacts: any[] = list(body.artifacts ?? body.artifact_list);
-  const artifacts: Artifact[] = rawArtifacts.map((a: any) => ({
-    id: num(a.rid ?? a.artifact_id ?? a.id),
-    type: num(a.type ?? a.artifact_type, 1),
-    attr: num(a.attribute ?? a.attr),
-    occupied: num(a.occupied_id ?? a.occupied),
-    main: pair(a.pri_eff ?? a.main),
-    subs: list(a.sec_eff)
-      .map((s: any) => (Array.isArray(s) ? { t: typeOf(s[0]), v: num(s[1]) } : { t: typeOf(s?.type ?? s?.t), v: num(s?.value ?? s?.v) }))
-      .filter((s) => s.t > 0),
-    level: Math.min(15, num(a.level, 0)),
-  }));
+  if (nestedArtifacts > 0) {
+    const equipped = artifacts.filter((a) => a.occupied > 0).length;
+    warnings.push(`已從魔靈身上補齊裝備中的神器 ${equipped} 件（總計 ${artifacts.length} 件）。`);
+  }
+  if (duplicateArtifacts > 0) warnings.push(`略過 ${duplicateArtifacts} 件重複 ID 的神器。`);
 
   const rawBuildings = list(body.building_list ?? body.buildings).filter(
     (b: any) => b && typeof b === "object" && num(b.building_master_id ?? b.master_id ?? b.id) > 0,
@@ -359,6 +446,20 @@ export function exportAccount(account: Account): string {
       class: u.stars,
       unit_level: u.level,
       rune_ids: u.runes,
+      artifact_ids: u.artifacts,
+    })),
+    artifacts: account.artifacts.map((a) => ({
+      rid: a.id,
+      type: a.type,
+      attribute: a.attr,
+      unit_style: a.style,
+      occupied_id: a.occupied,
+      natural_rank: a.stars,
+      rank: a.rank,
+      level: a.level,
+      pri_effect: [a.main.t, a.main.v, a.level, 0, 0],
+      sec_effects: a.subs.map((s) => [s.t, s.v, s.up ?? 0, s.roll ?? 0, s.extra ?? 0]),
+      locked: a.locked ? 1 : 0,
     })),
     runes: account.runes.map((r) => ({
       rune_id: r.id,

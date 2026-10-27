@@ -4,19 +4,20 @@ import {
 } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
 import { useSummary } from "../lib/accountStats";
-import { MonsterPicker, MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
+import { MonsterPicker, MonsterIcon, NumberField, RuneCard, ArtifactCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
 import { DamagePanel } from "../components/DamagePanel";
 import {
   computeSkillDamage, defaultSkill, loadSkillData, skillsForMonster,
   type DamageOptions, type DamageResult, type Skill, type SkillData,
 } from "../lib/damage";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
+import { artifactFlat } from "../lib/artifacts";
 import {
   FOCUS_LIMIT, FOCUS_OPTIONS, STAT_KEYS, buildAt, normalizeFocus, statsAt,
   type Build, type OptRequest, type OptResult, maxSpeedBound, scoreOf, speedNeededForTick,
 } from "../lib/optimizer";
 import { baseStats, setSummary, tickOf, statsForRunes } from "../lib/stats";
-import type { FocusEntry, Monster, Rune, Stats } from "../lib/types";
+import type { Artifact, FocusEntry, Monster, Rune, Stats } from "../lib/types";
 
 const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
 const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25 && s.id !== 99);
@@ -235,6 +236,8 @@ export default function OptimizerPage() {
     alliesAlive: 4,
     // 召喚師公會技能預設不計入；設定頁的「計入公會技能」可改預設
     useGuild: settings.bonus.useGuild,
+    enemyEl: 0,
+    useArtifacts: true,
   });
   const patchDmg = (patch: Partial<DamageOptions>) => setDmgOpts((o) => ({ ...o, ...patch }));
 
@@ -346,6 +349,9 @@ export default function OptimizerPage() {
 
   const boxMonster = useMemo(() => (monsterId ? summary?.views.find((v) => v.monster.id === monsterId) : undefined), [monsterId, summary]);
   const anyMonster: Monster | undefined = boxMonster?.monster;
+  /** 目標魔靈目前裝備的神器（配符時視為固定加成） */
+  const equippedArtifacts = boxMonster?.artifacts ?? [];
+  const artFlat = useMemo(() => artifactFlat(equippedArtifacts), [equippedArtifacts]);
 
   /** 只列出帳號內實際擁有的魔靈（同一隻多份只顯示一次） */
   const ownedMonsters = useMemo(() => {
@@ -471,6 +477,7 @@ export default function OptimizerPage() {
       relaxSub: relax,
       intangible,
       focus: normalizeFocus(focus),
+      artifactFlat: artFlat,
     };
     const id = ++runId.current;
     const t0 = performance.now();
@@ -567,8 +574,8 @@ export default function OptimizerPage() {
     for (const b of builds) {
       const runes = b.runes.filter((r): r is Rune => !!r);
       // withSkills = true：傷害用實戰數值（含一般召喚師技能，公會技能依勾選）
-      const stats = statsForRunes(base, runes, dmgBonus, rta, true);
-      map.set(b, { dmg: computeSkillDamage(stats, dmgSkill, dmgOpts), stats });
+      const stats = statsForRunes(base, runes, dmgBonus, rta, true, equippedArtifacts);
+      map.set(b, { dmg: computeSkillDamage(stats, dmgSkill, dmgOpts, equippedArtifacts), stats });
     }
     return map;
   };
@@ -590,11 +597,11 @@ export default function OptimizerPage() {
       const atk = s.atk + Math.ceil((base.atk * pctAtk) / 100);
       const def = s.def + Math.ceil((base.def * pctDef) / 100);
       const stats: Stats = { ...s, hp, atk, def, cd: s.cd + cdAdd, ehp: Math.floor((hp * (1140 + 3.5 * def)) / 1000) };
-      arr[i] = computeSkillDamage(stats, dmgSkill, dmgOpts).total;
+      arr[i] = computeSkillDamage(stats, dmgSkill, dmgOpts, equippedArtifacts).total;
     }
     return arr;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, dmgOn, dmgSkill, sortKey, bonus, dmgOpts, base, rta]);
+  }, [result, dmgOn, dmgSkill, sortKey, bonus, dmgOpts, base, rta, equippedArtifacts]);
 
   const sortOptions = useMemo(() => {
     if (!dmgOn || !dmgSkill) return SORT_OPTIONS;
@@ -1048,6 +1055,7 @@ export default function OptimizerPage() {
                 damage={damageByBuild.get(b)?.dmg}
                 damageStats={damageByBuild.get(b)?.stats}
                 damageSkill={dmgSkill}
+                artifacts={equippedArtifacts}
                 guildOn={dmgOpts.useGuild}
                 ownerOf={(rid) => {
                   const u = account?.units.find((x) => x.runes.includes(rid));
@@ -1149,6 +1157,7 @@ function BuildCard({
   damage,
   damageStats,
   damageSkill,
+  artifacts,
   guildOn,
 }: {
   build: Build;
@@ -1164,6 +1173,7 @@ function BuildCard({
   damage?: DamageResult;
   damageStats?: Stats;
   damageSkill?: Skill;
+  artifacts: Artifact[];
   guildOn: boolean;
 }) {
   const s = build.stats;
@@ -1188,8 +1198,13 @@ function BuildCard({
                   <Target size={10} /> 焦點 {Math.round(build.focusFit)}%
                 </span>
               )}
+              {artifacts.length > 0 && (
+                <span className="chip muted" style={{ padding: "1px 7px", fontSize: 10.5 }} title="已裝備神器的主效果已計入面板">
+                  <Sparkles size={10} /> 神器 {artifacts.length}
+                </span>
+              )}
               {damage && damageSkill && (
-                <span className="chip gold" style={{ padding: "1px 7px", fontSize: 10.5 }} title={`S${damageSkill.slot} ${damageSkill.n} · ${damage.hits} 段 · 每段 ${fmt(damage.perHit)} · 總計 ${fmt(damage.total)}${damageStats ? ` · 傷害用面板 ATK ${fmt(damageStats.atk)} / CD ${damageStats.cd}%` : ""}`}>
+                <span className="chip gold" style={{ padding: "1px 7px", fontSize: 10.5 }} title={`S${damageSkill.slot} ${damageSkill.n} · ${damage.hits} 段 · 每段 ${fmt(damage.perHit)} · 總計 ${fmt(damage.total)}${damageStats ? ` · 傷害用面板 ATK ${fmt(damageStats.atk)} / CD ${damageStats.cd}%` : ""}${damage.artifact?.applied.length ? ` · 神器：${damage.artifact.applied.join("、")}` : ""}`}>
                   傷害 {fmt(damage.perHit)}{damage.hits > 1 ? ` ×${damage.hits} = ${fmt(damage.total)}` : ""}
                 </span>
               )}
@@ -1241,6 +1256,16 @@ function BuildCard({
                       <span className="v mono">ATK {fmt(damageStats.atk)} · CD {damageStats.cd}%</span>
                     </div>
                   )}
+                  {damage.artifact && damage.artifact.applied.length > 0 && (
+                    <div className="kv">
+                      <span className="k">神器傷害加成</span>
+                      <span className="v" style={{ textAlign: "right" }}>
+                        {damage.artifact.cd > 0 && `暴傷 +${damage.artifact.cd}%`}
+                        {damage.artifact.cd > 0 && damage.artifact.dmg > 0 && " · "}
+                        {damage.artifact.dmg > 0 && `傷害 +${damage.artifact.dmg}%`}
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -1277,6 +1302,18 @@ function BuildCard({
             <button className="btn btn-sm" onClick={onPlan}><ArrowRight size={13} /> 配符清單 / 換符計畫</button>
             <button className="btn btn-sm btn-ghost" onClick={onSave}><Save size={13} /> 儲存為配裝</button>
           </div>
+
+          {artifacts.length > 0 && (
+            <>
+              <div className="rune-wheel-head" style={{ marginTop: 14 }}>
+                <span className="rune-wheel-title">神器（固定加成）</span>
+                <span className="tiny dim">主效果已計入上面所有面板與 EHP；傷害另計技能暴傷 / 對屬性傷害</span>
+              </div>
+              <div className="grid g2" style={{ gap: 8 }}>
+                {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} detail />)}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

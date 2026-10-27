@@ -8,7 +8,8 @@ import {
   SUB_STAT_MAX,
   type StatKey,
 } from "./constants";
-import type { BonusConfig, Monster, Rune, Stats, Unit } from "./types";
+import type { Artifact, BonusConfig, Monster, Rune, Stats, Unit } from "./types";
+import { ARTIFACT_MAIN } from "./artifacts";
 
 const MAX_STAT_NAME: Record<number, string> = {
   1: "HP flat",
@@ -127,6 +128,15 @@ export function addRuneToAccum(a: StatAccum, rune: Rune, grind = true) {
   if (rune.prefix?.t) apply(rune.prefix.t, rune.prefix.v);
   for (const s of rune.subs) apply(s.t, s.v + (grind ? s.g : 0));
   a.sets[rune.set] = (a.sets[rune.set] ?? 0) + 1;
+}
+
+/** 神器主效果（固定體力 / 攻擊 / 防禦）計入累計值 */
+export function addArtifactToAccum(a: StatAccum, artifact: Artifact) {
+  const meta = ARTIFACT_MAIN[artifact.main.t];
+  if (!meta) return;
+  if (meta.key === "hp") a.flatHp += artifact.main.v;
+  else if (meta.key === "atk") a.flatAtk += artifact.main.v;
+  else if (meta.key === "def") a.flatDef += artifact.main.v;
 }
 
 /** 套裝加成（能量 15% HP 等） */
@@ -250,9 +260,11 @@ export function statsForRunes(
   bonus: BonusConfig,
   rta = false,
   withSkills = false,
+  artifacts: Artifact[] = [],
 ): Stats {
   const a = emptyAccum();
   for (const r of runes) addRuneToAccum(a, r, bonus.grind);
+  for (const art of artifacts) addArtifactToAccum(a, art);
   applySetBonuses(a, base);
   return finalizeStats(base, a, bonus, rta, withSkills);
 }

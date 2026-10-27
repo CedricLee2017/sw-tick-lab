@@ -34,6 +34,7 @@ const {
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
+  artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
 } = engine;
 
 let passed = 0;
@@ -698,6 +699,103 @@ check("炸彈：不暴擊、無視防禦", () => {
   assert.equal(bomb.perHit, Math.floor(8000 * (1000 / 1140)));
   assert.equal(bomb.total, Math.floor(8000 * (1000 / 1140)));
   assert.equal(bomb.bomb, true);
+});
+
+/* ── 7. 神器 ────────────────────────────────────── */
+console.log("\n[7] 神器");
+check("神器效果 ID 對照與文字", () => {
+  assert.ok(artifactSubText({ t: 200, v: 18 }).includes("攻擊力"));
+  assert.ok(artifactSubText({ t: 304, v: 4 }).includes("暗屬性"));
+  assert.ok(artifactSubText({ t: 218, v: 0.3 }).includes("0.3%"));
+  assert.ok(artifactSubText({ t: 410, v: 9 }).includes("技能 3／4"));
+  assert.equal(artifactKindText({ type: 1, attr: 2, style: 0 }).includes("火"), true);
+  assert.equal(artifactKindText({ type: 2, attr: 0, style: 4 }), "支援型");
+  assert.equal(artifactTypeText(2), "類型神器");
+});
+
+check("神器主效果：固定體力 / 攻擊 / 防禦", () => {
+  const arts = [
+    { id: 1, type: 1, attr: 1, style: 0, occupied: 0, main: { t: 100, v: 1500 }, subs: [], level: 15, rank: 5, stars: 5, locked: false },
+    { id: 2, type: 2, attr: 0, style: 2, occupied: 0, main: { t: 101, v: 100 }, subs: [], level: 15, rank: 5, stars: 4, locked: false },
+  ];
+  assert.equal(artifactMainText(arts[0]), "體力 +1,500");
+  assert.deepEqual(artifactFlat(arts), { hp: 1500, atk: 100, def: 0 });
+});
+
+check("神器副效果：技能暴傷與對屬性傷害", () => {
+  const art = {
+    id: 1, type: 1, attr: 1, style: 0, occupied: 0, main: { t: 100, v: 1500 },
+    subs: [{ t: 402, v: 20 }, { t: 301, v: 5 }, { t: 224, v: 10 }],
+    level: 15, rank: 5, stars: 5, locked: false,
+  };
+  const aoe = { id: 1, n: "x", slot: 3, hits: 1, aoe: true, passive: false, cool: 0, max: 0, f: "{ATK}*2", raw: "", sc: [], up: 0, e: [], d: "" };
+  const single = { ...aoe, aoe: false, slot: 1 };
+  const a = artifactDamageBonus([art], aoe, 1);
+  assert.equal(a.cd, 20, "S3 暴傷 +20");
+  assert.equal(a.dmg, 5, "對水屬性 +5");
+  assert.equal(a.applied.length, 2);
+  const b = artifactDamageBonus([art], single, 0);
+  assert.equal(b.cd, 10, "單體技能暴傷 +10；未指定敵方屬性時不計屬性傷害");
+  assert.equal(b.dmg, 0);
+});
+
+check("神器解析：字串 / 陣列主效果、已裝備合併", () => {
+  const raw = {
+    unit_list: [{
+      unit_id: 501, unit_master_id: 17012, class: 6, unit_level: 40,
+      runes: [{ rune_id: 9001, occupied_id: 501, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] }],
+      artifacts: [
+        { rid: 7001, occupied_id: 501, type: 1, attribute: 2, unit_style: 0, natural_rank: 5, rank: 5, level: 15, pri_effect: [100, 1500, 15, 0, 0], sec_effects: [[304, 4, 0, 0, 0], [219, 4, 0, 0, 0]] },
+        { rid: 7002, occupied_id: 501, type: 2, attribute: 0, unit_style: 2, natural_rank: 4, rank: 5, level: 15, pri_effect: "101 100 15 0 0", sec_effects: [[206, 6, 0, 0, 0]] },
+      ],
+    }],
+    runes: [],
+    artifacts: [
+      { rid: 7001, occupied_id: 0, type: 1, attribute: 2, natural_rank: 5, rank: 5, level: 15, pri_effect: [100, 1500, 15, 0, 0], sec_effects: [[304, 4, 0, 0, 0]] },
+      { rid: 7003, occupied_id: 0, type: 1, attribute: 3, natural_rank: 4, rank: 4, level: 15, pri_effect: [102, 100, 15, 0, 0], sec_effects: [[301, 5, 0, 0, 0]] },
+    ],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "artifacts.json");
+  assert.equal(p.error, undefined, p.error);
+  const arts = p.account.artifacts;
+  assert.equal(arts.length, 3);
+  assert.deepEqual(p.account.units[0].artifacts, [7001, 7002]);
+  const a1 = arts.find((a) => a.id === 7001);
+  assert.equal(a1.occupied, 501, "已裝備神器以 unit 內的 owner 為準");
+  assert.equal(a1.main.t, 100);
+  assert.equal(a1.subs[0].t, 304);
+  const a2 = arts.find((a) => a.id === 7002);
+  assert.equal(a2.main.t, 101, "pri_effect 字串格式");
+  assert.equal(a2.main.v, 100);
+  assert.equal(a2.style, 2);
+  assert.equal(arts.find((a) => a.id === 7003).occupied, 0);
+  assert.ok(p.warnings.some((w) => w.includes("神器")));
+});
+
+check("神器主效果計入面板與 EHP", () => {
+  const raw = {
+    unit_list: [{
+      unit_id: 501, unit_master_id: 17012, class: 6, unit_level: 40,
+      runes: [{ rune_id: 9001, occupied_id: 501, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] }],
+      artifacts: [
+        { rid: 7001, occupied_id: 501, type: 1, attribute: 2, natural_rank: 5, rank: 5, level: 15, pri_effect: [100, 1500, 15, 0, 0], sec_effects: [] },
+        { rid: 7002, occupied_id: 501, type: 2, attribute: 0, unit_style: 2, natural_rank: 4, rank: 5, level: 15, pri_effect: [101, 100, 15, 0, 0], sec_effects: [] },
+      ],
+    }],
+    runes: [],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "artifacts.json");
+  const a = p.account;
+  const u = a.units[0];
+  const monster = MONSTERS.find((m) => m.id === u.master);
+  const base = baseStats(monster, u.stars, u.level);
+  const arts = u.artifacts.map((id) => a.artifacts.find((x) => x.id === id));
+  const runes = u.runes.map((id) => a.runes.find((r) => r.id === id));
+  const before = statsForRunes(base, runes, defaultBonus(), false, false, []);
+  const after = statsForRunes(base, runes, defaultBonus(), false, false, arts);
+  assert.equal(after.hp - before.hp, 1500);
+  assert.equal(after.atk - before.atk, 100);
+  assert.ok(after.ehp > before.ehp);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

@@ -1,5 +1,6 @@
 /** 技能傷害估算（以 SWARFARM 技能倍率公式 + 配裝面板代入） */
-import type { Stats } from "./types";
+import type { Artifact, Stats } from "./types";
+import { artifactDamageBonus } from "./artifacts";
 
 export interface Skill {
   id: number;
@@ -49,6 +50,10 @@ export interface DamageOptions {
   alliesAlive: number;
   /** 是否計入公會建築（公會攻擊/暴傷旗幟） */
   useGuild: boolean;
+  /** 敵方屬性 1–5；0 = 未指定（神器「對某屬性傷害」不計入） */
+  enemyEl: number;
+  /** 是否計入神器的直接傷害加成（技能暴傷 / 屬性傷害） */
+  useArtifacts: boolean;
 }
 
 export interface DamageResult {
@@ -63,6 +68,8 @@ export interface DamageResult {
   unsupported: string[];
   /** 是否為炸彈（不暴擊、無視防禦） */
   bomb: boolean;
+  /** 神器套用的暴傷 / 屬性傷害加成 */
+  artifact?: { cd: number; dmg: number; applied: string[] };
 }
 
 let skillPromise: Promise<SkillData> | null = null;
@@ -168,7 +175,15 @@ function evalFormula(formula: string, vars: Record<string, number>): { value: nu
 }
 
 /** 依面板與選項估算一招技能的傷害 */
-export function computeSkillDamage(stats: Stats, skill: Skill, opts: DamageOptions): DamageResult {
+export function computeSkillDamage(
+  stats: Stats,
+  skill: Skill,
+  opts: DamageOptions,
+  artifacts?: Artifact[],
+): DamageResult {
+  const artifact = opts.useArtifacts !== false
+    ? artifactDamageBonus(artifacts, skill, opts.enemyEl)
+    : { cd: 0, dmg: 0, applied: [] };
   const atk = stats.atk * (1 + (opts.atkBuff + opts.leadAtk) / 100);
   const hp = stats.hp;
   const selfHpPct = Math.max(0, Math.min(100, opts.selfHpPct));
@@ -204,9 +219,10 @@ export function computeSkillDamage(stats: Stats, skill: Skill, opts: DamageOptio
   const skillUpFrac = opts.skillUps ? Math.max(0, skill.up) / 100 : 0;
   let critFactor = 1;
   if (!bomb) {
-    if (opts.crit === "crit") critFactor = 1 + Math.max(0, stats.cd) / 100;
+    const cd = Math.max(0, stats.cd) + artifact.cd;
+    if (opts.crit === "crit") critFactor = 1 + cd / 100;
     else if (opts.crit === "average") {
-      critFactor = 1 + (Math.max(0, Math.min(100, stats.cr)) / 100) * (Math.max(0, stats.cd) / 100);
+      critFactor = 1 + (Math.max(0, Math.min(100, stats.cr)) / 100) * (cd / 100);
     }
   }
   const brandMul = opts.brand ? 1.25 : 1;
@@ -215,7 +231,7 @@ export function computeSkillDamage(stats: Stats, skill: Skill, opts: DamageOptio
   const mitigation = ignoreDef ? 1000 / 1140 : 1000 / (1140 + 3.5 * effectiveDef);
 
   const preMitigation = Math.max(0, parsed.value);
-  const rawPerHit = preMitigation * (brandMul * critFactor + skillUpFrac);
+  const rawPerHit = preMitigation * (brandMul * critFactor + skillUpFrac) * (1 + artifact.dmg / 100);
   // SWOP 使用 Math.floor
   const perHit = Math.floor(rawPerHit * mitigation);
   return {
@@ -226,6 +242,7 @@ export function computeSkillDamage(stats: Stats, skill: Skill, opts: DamageOptio
     rawTotal: Math.floor(rawPerHit * hits),
     unsupported: parsed.unsupported,
     bomb,
+    artifact,
   };
 }
 
