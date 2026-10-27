@@ -1144,6 +1144,7 @@ export default function OptimizerPage() {
                   saveLoadout({
                     name: `${anyMonster?.name ?? "魔靈"} · Tick ${b.stats.tick}`,
                     monsterId,
+                    unitId: boxMonster?.unit.id ?? 0,
                     runeIds: b.runes.filter(Boolean).map((r) => r!.id),
                     stats: b.stats,
                   });

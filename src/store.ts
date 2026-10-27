@@ -21,6 +21,8 @@ export interface Loadout {
   id: string;
   name: string;
   monsterId: number;
+  /** 儲存時的 unit_id（同一隻魔靈可能有多份，舊資料可能沒有） */
+  unitId?: number;
   runeIds: number[];
   stats: Stats;
   createdAt: number;

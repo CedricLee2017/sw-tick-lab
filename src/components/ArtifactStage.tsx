@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
 import { ArtifactCard, RuneCard, TickBadge, fmt, setColor } from "./ui";
@@ -32,6 +32,8 @@ export function ArtifactStage({
   artifacts,
   skill,
   dmgOpts,
+  autoRunKey = 0,
+  sourceLabel = "目前裝備符文",
 }: {
   /** 換魔靈、換排序、換技能或重新配符時要清空第二階段結果 */
   stageKey: string;
@@ -43,6 +45,10 @@ export function ArtifactStage({
   artifacts: Artifact[];
   skill?: Skill;
   dmgOpts: DamageOptions;
+  /** 數字變動時自動執行一次（用於點擊收藏配裝後立即計算） */
+  autoRunKey?: number;
+  /** 符文來源說明（目前裝備 / 收藏配裝） */
+  sourceLabel?: string;
 }) {
   const account = useStore((s) => s.account);
   const [mode, setMode] = useState<Stage2Mode>("skill");
@@ -119,6 +125,17 @@ export function ArtifactStage({
     }, 30);
   };
 
+  // 從收藏配裝點選後，自動執行一次
+  const autoRef = useRef(0);
+  useEffect(() => {
+    if (!autoRunKey || autoRef.current === autoRunKey) return;
+    if (!skill || builds.length === 0) return;
+    autoRef.current = autoRunKey;
+    const t = window.setTimeout(() => run(), 60);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRunKey, skill?.id, builds.length]);
+
   const shown = out?.pairs.slice(0, 10) ?? [];
   const scoreLabel = mode === "skill" ? "招式傷害" : "追傷";
   const auto = artifactAutoLabels(monster);
@@ -132,7 +149,7 @@ export function ArtifactStage({
           </div>
           <div className="card-sub">
             {builds.length === 1
-              ? "使用目前魔靈裝備的符文（固定），不重新配符；每類神器取前 5 件（屬性 5 + 類型 5，含其他魔靈裝備中的神器），共 25 對"
+              ? `使用${sourceLabel}（固定），不重新配符；每類神器取前 5 件（屬性 5 + 類型 5，含其他魔靈裝備中的神器），共 25 對`
               : `取目前排序前 ${fmt(builds.length)} 組符文；每類神器取前 5 件（屬性 5 + 類型 5，含其他魔靈裝備中的神器），共 25 對`}
           </div>
           <div className="row wrap" style={{ gap: 6, marginTop: 6 }}>
@@ -231,7 +248,7 @@ export function ArtifactStage({
               最佳神器組合 <span className="dim tiny" style={{ fontWeight: 400 }}>前 10 對 / 共 {out.pairs.length} 對</span>
             </div>
             <span className="tiny dim">
-              屬性 {out.type1.length} 件 · 類型 {out.type2.length} 件 · {out.builds === 1 ? "使用目前符文" : `運算 ${out.builds} 組符文`} · {out.ms} ms
+              屬性 {out.type1.length} 件 · 類型 {out.type2.length} 件 · {out.builds === 1 ? `使用${sourceLabel}` : `運算 ${out.builds} 組符文`} · {out.ms} ms
             </span>
           </div>
           {out.warnings.map((w) => <div key={w} className="alert warn" style={{ marginTop: 8, padding: "7px 9px", fontSize: 11.5 }}>{w}</div>)}

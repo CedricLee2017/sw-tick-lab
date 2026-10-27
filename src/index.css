@@ -314,6 +314,35 @@ p { margin: 0; }
 }
 .build-fav-chip:hover { border-color: rgba(242,198,92,.4); color: var(--gold); }
 .build-fav { display: flex; flex-direction: column; }
+
+/* ── 配神器：魔靈搜尋 / 收藏配裝 ───────────────── */
+.unit-picker { position: relative; }
+.unit-search-icon { position: absolute; left: 10px; top: 10px; color: var(--muted-2); }
+.unit-clear {
+  position: absolute; right: 7px; top: 7px; width: 22px; height: 22px;
+  display: inline-grid; place-items: center; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.unit-clear:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.unit-pop {
+  position: absolute; z-index: 90; top: calc(100% + 4px); left: 0; right: 0;
+  max-height: 300px; overflow-y: auto;
+  background: #0e1626; border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 24px 50px -20px #000;
+}
+.unit-pop button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px;
+  border: 0; border-bottom: 1px solid var(--line-soft); background: transparent;
+  color: var(--text); text-align: left; cursor: pointer; font-size: 12px;
+}
+.unit-pop button:hover { background: rgba(88, 166, 255, .07); }
+.saved-build-card {
+  display: flex; align-items: center; gap: 7px; min-width: 150px; max-width: 220px;
+  padding: 6px 9px; border: 1px solid var(--line-soft); border-radius: 9px;
+  background: rgba(11,17,32,.55); color: var(--text); cursor: pointer; text-align: left;
+}
+.saved-build-card:hover { border-color: var(--line); }
+.saved-build-card.on { border-color: rgba(242,198,92,.55); background: rgba(242,198,92,.07); }
 .rune-sub .gem { color: #5ee6d0; font-size: 10px; }
 .artifact {
   background: linear-gradient(150deg, rgba(232, 121, 249, .08), rgba(11, 17, 32, .78) 42%);
