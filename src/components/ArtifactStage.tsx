@@ -3,7 +3,7 @@ import { ChevronDown, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
 import { ArtifactCard, RuneCard, TickBadge, fmt, setColor } from "./ui";
 import { ELEMENTS } from "../lib/constants";
-import { ARTIFACT_EFFECT_MAX, artifactEffectLabel } from "../lib/artifacts";
+import { ARTIFACT_EFFECT_MAX, artifactAutoLabels, artifactEffectLabel } from "../lib/artifacts";
 import type { DamageOptions, Skill } from "../lib/damage";
 import type { Build } from "../lib/optimizer";
 import { runStage2, type Stage2Focus, type Stage2Mode, type Stage2Output } from "../lib/stage2";
@@ -121,6 +121,7 @@ export function ArtifactStage({
 
   const shown = out?.pairs.slice(0, 10) ?? [];
   const scoreLabel = mode === "skill" ? "招式傷害" : "追傷";
+  const auto = artifactAutoLabels(monster);
 
   return (
     <div className="card card-pad artifact-stage">
@@ -131,6 +132,14 @@ export function ArtifactStage({
           </div>
           <div className="card-sub">
             取目前排序前 {fmt(builds.length)} 組符文；每類神器取前 5 件（屬性 5 + 類型 5，含其他魔靈裝備中的神器），共 25 對
+          </div>
+          <div className="row wrap" style={{ gap: 6, marginTop: 6 }}>
+            <span className="chip muted" title="依魔靈屬性自動決定，另包含無形屬性神器">
+              屬性神器：{auto.attribute}（含無形）
+            </span>
+            <span className="chip muted" title="依魔靈類型自動決定，另包含無形類型神器">
+              類型神器：{auto.archetype}（含無形）
+            </span>
           </div>
         </div>
         <span className="chip gold">符文不變 · 只換神器</span>

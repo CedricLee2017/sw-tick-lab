@@ -35,7 +35,7 @@ const {
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
-  artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit,
+  artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels,
   rtaStats, rtaView,
 } = engine;
 
@@ -713,6 +713,22 @@ check("神器效果 ID 對照與文字", () => {
   assert.equal(artifactKindText({ type: 1, attr: 2, style: 0 }).includes("火"), true);
   assert.equal(artifactKindText({ type: 2, attr: 0, style: 4 }), "支援型");
   assert.equal(artifactTypeText(2), "類型神器");
+});
+
+check("神器自動套用魔靈屬性 / 類型（含無形）", () => {
+  const lushen = MONSTERS.find((m) => m.id === 13413); // 風 / 攻擊型
+  assert.deepEqual(artifactAutoLabels(lushen), { attribute: "風屬性", archetype: "攻擊型" });
+  const mk = (type, attr, style) => ({
+    id: 1, type, attr, style, occupied: 0, main: { t: 100, v: 1500 }, subs: [], level: 15, rank: 5, stars: 5, locked: false,
+  });
+  assert.equal(artifactEligible(mk(1, 3, 0), lushen), true, "風屬性神器可用");
+  assert.equal(artifactEligible(mk(1, 2, 0), lushen), false, "火屬性神器不可用");
+  assert.equal(artifactEligible(mk(1, 98, 0), lushen), true, "無形屬性神器可用");
+  assert.equal(artifactEligible(mk(2, 0, 1), lushen), true, "攻擊型神器可用");
+  assert.equal(artifactEligible(mk(2, 0, 2), lushen), false, "防禦型神器不可用");
+  assert.equal(artifactEligible(mk(2, 0, 98), lushen), true, "無形類型神器可用");
+  assert.equal(artifactKindText(mk(1, 98, 0)), "無形");
+  assert.equal(artifactKindText(mk(2, 0, 98)), "無形");
 });
 
 check("神器主效果：固定體力 / 攻擊 / 防禦", () => {

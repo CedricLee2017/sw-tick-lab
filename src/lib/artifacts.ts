@@ -15,7 +15,7 @@ export const ARTIFACT_ARCHETYPES: Record<number, string> = {
   2: "防禦型",
   3: "體力型",
   4: "支援型",
-  98: "特殊",
+  98: "無形",
 };
 
 export const ARTIFACT_RANKS: Record<number, string> = {
@@ -142,7 +142,7 @@ export function artifactSubsText(art: Artifact): string {
 /** 屬性 / 類型神器的副標題 */
 export function artifactKindText(art: Artifact): string {
   if (art.type === 2) return ARTIFACT_ARCHETYPES[art.style] ?? "類型神器";
-  if (art.attr === 98) return "特殊屬性";
+  if (art.attr === 98) return "無形";
   return `${ELEMENTS[art.attr as 1 | 2 | 3 | 4 | 5]?.name ?? "?"}屬性`;
 }
 
@@ -220,6 +220,16 @@ export const ARTIFACT_ARCH_STYLE: Record<string, number> = {
   Support: 4,
   Material: 5,
 };
+
+/** 第二階段自動套用的屬性 / 類型（含無形） */
+export function artifactAutoLabels(monster: Pick<Monster, "el" | "arch">): { attribute: string; archetype: string } {
+  const attr = ELEMENTS[monster.el as 1 | 2 | 3 | 4 | 5]?.name ?? "?";
+  const style = ARTIFACT_ARCH_STYLE[monster.arch ?? ""] ?? 0;
+  return {
+    attribute: `${attr}屬性`,
+    archetype: ARTIFACT_ARCHETYPES[style] ?? "類型",
+  };
+}
 
 /**
  * 神器對「這一招、這個敵人屬性」可直接計算的傷害加成。
