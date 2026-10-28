@@ -10,7 +10,7 @@ type DeckWithEquip = Deck;
 const DECK_TYPE_LABELS: Record<number, string> = {
   1: "競技場",
   2: "公會戰（進攻）",
-  3: "B5",
+  3: "異界（三頭）",
   4: "迷宮（一般）",
   5: "救援",
   6: "試練之塔",
@@ -24,16 +24,23 @@ const DECK_TYPE_LABELS: Record<number, string> = {
   15: "光之塔",
   16: "暗之塔",
   17: "天空之塔",
+  19: "次元團戰（1P）",
+  20: "次元團戰（2P）",
+  21: "次元團戰（3P）",
   22: "據點戰（進攻）",
   23: "混沌",
   24: "卡伊洛斯",
-  25: "異界",
+  25: "異界（單頭）",
   26: "次元",
+  27: "討伐戰",
+  100: "競技場防守（本機）",
+  101: "競技場防守（伺服器）",
+  102: "據點戰防守",
 };
 
 const deckTypeLabel = (type: number) => DECK_TYPE_LABELS[type] ?? `類型 ${type}`;
-/** 遊戲 deck_type 1–27；尚無名稱的類型仍以編號列出 */
-const DECK_TYPE_NUMBERS = Array.from({ length: 27 }, (_, i) => i + 1);
+/** 遊戲 deck_type 1–27，加上內部使用的防守隊代碼 100–102 */
+const DECK_TYPE_NUMBERS = [...Array.from({ length: 27 }, (_, i) => i + 1), 100, 101, 102];
 
 export default function DecksPage() {
   const account = useStore((s) => s.account);
@@ -43,6 +50,8 @@ export default function DecksPage() {
   const [open, setOpen] = useState<DeckWithEquip | null>(null);
 
   const decks = account?.decks ?? [];
+  const defenseDecks = account?.defenseDecks ?? [];
+  const allDecks = useMemo(() => [...decks, ...defenseDecks], [decks, defenseDecks]);
 
   const unitName = (id: number) => {
     const u = account?.units.find((x) => x.id === id);
@@ -65,13 +74,13 @@ export default function DecksPage() {
 
   const types = useMemo(() => {
     const counts = new Map<number, number>();
-    for (const d of decks) counts.set(d.type, (counts.get(d.type) ?? 0) + 1);
+    for (const d of allDecks) counts.set(d.type, (counts.get(d.type) ?? 0) + 1);
     return DECK_TYPE_NUMBERS.map((t) => [t, counts.get(t) ?? 0] as [number, number]);
-  }, [decks]);
+  }, [allDecks]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return decks
+    return allDecks
       .filter((d) => !type || d.type === type)
       .filter((d) => {
         if (!term) return true;
@@ -82,7 +91,7 @@ export default function DecksPage() {
         });
       })
       .sort((a, b) => a.type - b.type || a.seq - b.seq);
-  }, [decks, type, q, account]);
+  }, [allDecks, type, q, account]);
 
   const grouped = useMemo(() => {
     const m = new Map<number, Deck[]>();
@@ -106,7 +115,9 @@ export default function DecksPage() {
             <Layers size={15} className="gold" /> 預設隊
           </div>
           <div className="card-sub">
-            遊戲內 deck_list 共 {fmt(decks.length)} 組；已命名類型顯示名稱，尚未命名的類型（例如 9、18、19、20）以「類型 N」列出。
+            deck_list {fmt(decks.length)} 組
+            {defenseDecks.length > 0 && <> ＋ 防守隊 {fmt(defenseDecks.length)} 組</>}
+            ；已命名類型顯示名稱，尚未命名的類型以「類型 N」列出。
           </div>
         </div>
         <div className="row" style={{ gap: 8 }}>
@@ -115,7 +126,7 @@ export default function DecksPage() {
             <input className="input" style={{ width: 210, paddingLeft: 28 }} placeholder="搜尋魔靈 / 類型 / 序號" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <select className="select" style={{ width: 200 }} value={type} onChange={(e) => setType(Number(e.target.value))}>
-            <option value={0}>全部類型（{decks.length}）</option>
+            <option value={0}>全部類型（{allDecks.length}）</option>
             {types.map(([t, n]) => (
               <option key={t} value={t}>{deckTypeLabel(t)}{n > 0 ? `（${n} 隊）` : "（尚無預設隊）"}</option>
             ))}
@@ -129,7 +140,7 @@ export default function DecksPage() {
             <span className="focus-title">類型總覽</span>
             <span className="tiny dim">尚未命名的類型以編號列出</span>
           </div>
-          <span className="tiny dim">類型 1–27</span>
+          <span className="tiny dim">類型 1–27 ＋ 防守隊</span>
         </div>
         <div className="row wrap" style={{ gap: 5, marginTop: 8 }}>
           {types.map(([t, n]) => (
@@ -147,11 +158,11 @@ export default function DecksPage() {
         </div>
       </div>
 
-      {decks.length === 0 ? (
+      {allDecks.length === 0 ? (
         <div className="empty" style={{ padding: "60px 20px" }}>
           <Layers size={40} style={{ opacity: .3, marginBottom: 10 }} />
           <div style={{ fontWeight: 600, color: "var(--text)" }}>這份存檔沒有預設隊資料</div>
-          <div className="tiny" style={{ marginTop: 4 }}>請確認匯出的 JSON 包含 <span className="mono">deck_list</span>。</div>
+          <div className="tiny" style={{ marginTop: 4 }}>請確認匯出的 JSON 包含 <span className="mono">deck_list</span> 或防守隊欄位。</div>
         </div>
       ) : (
         <div className="col" style={{ gap: 16 }}>
@@ -159,7 +170,9 @@ export default function DecksPage() {
             <div key={t}>
               <div className="row between" style={{ gap: 8, marginBottom: 7 }}>
                 <div className="card-title">{deckTypeLabel(t)} <span className="dim tiny" style={{ fontWeight: 400 }}>類型 {t} · {list.length} 隊</span></div>
-                <span className="tiny dim">{list[0]?.units.length ?? 0} 人隊</span>
+                <span className="tiny dim">
+                  {[...new Set(list.map((d) => d.units.length))].sort((a, b) => a - b).map((n) => `${n} 人`).join(" / ")}隊
+                </span>
               </div>
               <div className="grid g3" style={{ gap: 10 }}>
                 {list.map((d) => {
@@ -188,6 +201,7 @@ export default function DecksPage() {
                         <span>{d.equip.reduce((s, e) => s + e.runes.length, 0)} 顆符文</span>
                         <span>{d.equip.reduce((s, e) => s + e.artifacts.length, 0)} 件神器</span>
                       </div>
+                      {d.battlePower ? <div className="tiny dim">戰力 {fmt(d.battlePower)}</div> : null}
                     </button>
                   );
                 })}
@@ -201,7 +215,7 @@ export default function DecksPage() {
       {open && (
         <Modal title={`${deckTypeLabel(open.type)} · 第 ${open.seq} 隊`} onClose={() => setOpen(null)} width={940}>
           <div className="row between wrap" style={{ gap: 8, marginBottom: 12 }}>
-            <span className="tiny dim">共 {open.units.length} 隻 · 隊長 {open.leader ? unitName(open.leader) : "未設定"}</span>
+            <span className="tiny dim">共 {open.units.length} 隻{open.leader ? ` · 隊長 ${unitName(open.leader)}` : ""}{open.battlePower ? ` · 戰力 ${fmt(open.battlePower)}` : ""}</span>
             <span className="tiny dim">預設隊快照（符文 / 神器配置）</span>
           </div>
           <div className="col" style={{ gap: 14 }}>

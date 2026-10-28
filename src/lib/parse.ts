@@ -147,6 +147,17 @@ function artifactSubs(v: unknown): ArtifactSub[] {
     .filter((s) => s.t > 0);
 }
 
+/** 預設隊 / 防守隊的裝備快照 */
+function deckEquip(v: unknown): DeckEquip[] {
+  return list(v)
+    .map((e: any): DeckEquip => ({
+      unit: num(e?.unit_id ?? e?.unit),
+      runes: list(e?.rune_id_list ?? e?.runes).map((x: unknown) => num(x)).filter(Boolean),
+      artifacts: list(e?.artifact_id_list ?? e?.artifacts).map((x: unknown) => num(x)).filter(Boolean),
+    }))
+    .filter((e: DeckEquip) => e.unit > 0);
+}
+
 function artifactOf(a: any, owner = 0): Artifact {
   return {
     id: num(a.rid ?? a.artifact_id ?? a.id),
@@ -171,7 +182,7 @@ export interface ParseResult {
 }
 
 /** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值 */
-export const PARSE_VERSION = 6;
+export const PARSE_VERSION = 7;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -465,22 +476,59 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
 
   // 預設隊（deck_list）：遊戲內各內容的隊伍快照；equip 內含每隻魔靈的符文 / 神器配置。
   const decks: Deck[] = list(body.deck_list)
-    .map((d: any): Deck => {
-      const equip: DeckEquip[] = list(d?.equip).map((e: any) => ({
-        unit: num(e?.unit_id),
-        runes: list(e?.rune_id_list).map((x: unknown) => num(x)).filter(Boolean),
-        artifacts: list(e?.artifact_id_list).map((x: unknown) => num(x)).filter(Boolean),
-      })).filter((e: DeckEquip) => e.unit > 0);
-      return {
-        type: num(d?.deck_type),
-        seq: num(d?.deck_seq),
-        units: list(d?.unit_id_list).map((x: unknown) => num(x)).filter(Boolean),
-        leader: num(d?.leader_unit_id),
-        equip,
-      };
-    })
+    .map((d: any): Deck => ({
+      type: num(d?.deck_type),
+      seq: num(d?.deck_seq),
+      units: list(d?.unit_id_list).map((x: unknown) => num(x)).filter(Boolean),
+      leader: num(d?.leader_unit_id),
+      equip: deckEquip(d?.equip),
+    }))
     .filter((d: Deck) => d.type > 0);
   if (decks.length > 0) warnings.push(`預設隊：找到 ${decks.length} 組。`);
+
+  // 專為防守而設的隊伍：
+  //   defense_deck_info                 競技場防守（本機）
+  //   server_arena_defense_deck_info    競技場防守（伺服器）
+  //   guildsiege_defense_deck_*         據點戰防守（多隊）
+  const defenseDecks: Deck[] = [];
+  const addDefense = (deck: Deck | null) => { if (deck && deck.units.length > 0) defenseDecks.push(deck); };
+  const arenaDefense = body.defense_deck_info;
+  if (arenaDefense && typeof arenaDefense === "object") {
+    addDefense({
+      type: 100,
+      seq: 1,
+      units: list(arenaDefense.unit_id_list).map((x: unknown) => num(x)).filter(Boolean),
+      leader: 0,
+      equip: deckEquip(arenaDefense.equip),
+      battlePower: num(arenaDefense.battle_power),
+    });
+  }
+  const serverArena = body.server_arena_defense_deck_info;
+  if (serverArena && typeof serverArena === "object") {
+    addDefense({
+      type: 101,
+      seq: 1,
+      units: list(serverArena.unit_id_list)
+        .map((x: any) => (x && typeof x === "object" ? num(x.unit_id) : num(x)))
+        .filter(Boolean),
+      leader: 0,
+      equip: deckEquip(serverArena.equip),
+    });
+  }
+  const siegeList = list(body.guildsiege_defense_deck_unit_list);
+  const siegeEquip = body.guildsiege_defense_deck_equip_list ?? {};
+  siegeList.forEach((d: any, index: number) => {
+    const deckId = num(d?.deck_id);
+    const eq = deckId ? (siegeEquip[String(deckId)] ?? siegeEquip[deckId]) : undefined;
+    addDefense({
+      type: 102,
+      seq: index + 1,
+      units: list(d?.unit_id_list).map((x: unknown) => num(x)).filter(Boolean),
+      leader: 0,
+      equip: deckEquip(eq?.equip ?? d?.equip),
+    });
+  });
+  if (defenseDecks.length > 0) warnings.push(`防守隊：找到 ${defenseDecks.length} 組。`);
 
   return {
     account: {
@@ -495,6 +543,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       version,
       rta,
       decks,
+      defenseDecks,
     },
     warnings,
   };

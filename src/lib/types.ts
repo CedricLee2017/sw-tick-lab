@@ -116,13 +116,15 @@ export interface DeckEquip {
 }
 
 export interface Deck {
-  /** deck_type（遊戲內分類） */
+  /** deck_type（遊戲內分類）；防守隊使用 100+ 的內部代碼 */
   type: number;
   /** deck_seq（該分類中的第幾隊） */
   seq: number;
   units: number[];
   leader: number;
   equip: DeckEquip[];
+  /** 防守隊的戰力（競技場防守會有） */
+  battlePower?: number;
 }
 
 export interface Account {
@@ -140,6 +142,8 @@ export interface Account {
   rta?: RtaData;
   /** 預設隊（deck_list） */
   decks?: Deck[];
+  /** 防守隊（競技場 / 據點戰等） */
+  defenseDecks?: Deck[];
 }
 
 export interface BonusConfig {

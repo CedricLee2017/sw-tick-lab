@@ -1035,4 +1035,61 @@ check("預設隊：解析 deck_list 與裝備快照", () => {
   assert.ok(p.warnings.some((w) => w.includes("預設隊")));
 });
 
+check("防守隊：解析競技場與據點戰防守", () => {
+  const raw = {
+    unit_list: [{
+      unit_id: 501, unit_master_id: 13413, class: 6, unit_level: 40,
+      runes: [{ rune_id: 9001, occupied_id: 501, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] }],
+    }],
+    runes: [{ rune_id: 9001, occupied_id: 501, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] }],
+    defense_deck_info: {
+      wizard_id: 1,
+      unit_id_list: [501],
+      battle_power: 51448,
+      equip: [{ unit_id: 501, rune_id_list: [9001], artifact_id_list: [7001] }],
+    },
+    server_arena_defense_deck_info: {
+      wizard_id: 1,
+      unit_id_list: [{ unit_id: 501, pos_id: 1 }],
+      equip: [{ unit_id: 501, rune_id_list: [9001], artifact_id_list: [] }],
+    },
+    guildsiege_defense_deck_unit_list: [
+      { guild_id: 9, deck_id: 111, wizard_id: 1, unit_id_list: [501] },
+      { guild_id: 9, deck_id: 222, wizard_id: 1, unit_id_list: [502] },
+    ],
+    guildsiege_defense_deck_equip_list: {
+      222: { wizard_id: 1, deck_id: 222, equip: [{ unit_id: 502, rune_id_list: [9002], artifact_id_list: [7002] }] },
+    },
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "defense.json");
+  assert.equal(p.error, undefined, p.error);
+  assert.equal(p.account.defenseDecks.length, 4);
+  const [arena, server, siege1, siege2] = p.account.defenseDecks;
+  assert.equal(arena.type, 100);
+  assert.deepEqual(arena.units, [501]);
+  assert.equal(arena.battlePower, 51448);
+  assert.deepEqual(arena.equip[0].runes, [9001]);
+  assert.equal(server.type, 101);
+  assert.deepEqual(server.units, [501]);
+  assert.equal(siege1.type, 102);
+  assert.equal(siege1.seq, 1);
+  assert.deepEqual(siege1.units, [501]);
+  assert.equal(siege2.seq, 2);
+  assert.deepEqual(siege2.units, [502]);
+  assert.deepEqual(siege2.equip[0].runes, [9002]);
+  assert.deepEqual(siege2.equip[0].artifacts, [7002]);
+  assert.ok(p.warnings.some((w) => w.includes("防守隊")));
+});
+
+check("防守隊：沒有防守資料時不產生隊伍", () => {
+  const raw = {
+    unit_list: [],
+    runes: [{ rune_id: 9001, occupied_id: 0, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] }],
+    guildsiege_defense_deck_unit_list: [],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "nodef.json");
+  assert.equal(p.error, undefined, p.error);
+  assert.deepEqual(p.account.defenseDecks, []);
+});
+
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
