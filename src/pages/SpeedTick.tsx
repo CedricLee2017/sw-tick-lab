@@ -303,12 +303,29 @@ export default function SpeedTickPage() {
     ]);
   };
 
+  /**
+   * 複製到「對面隊伍」：攻擊方複製出防守方（反之亦然），速度完全相同。
+   * 兩隊的隊長技 % 可能不同，所以把原本生效的隊長加成固定到複製體上，
+   * 這樣複製出來的角色才會是同速（畫面上會顯示成該隊的 Speed Lead）。
+   */
   const copyUnit = (src: TickCalcUnit) => {
-    if (units.length >= MAX_UNITS) return;
+    if (units.length >= MAX_UNITS) return notify(`最多只能加入 ${MAX_UNITS} 隻魔靈`, "err");
+    const team: "blue" | "red" = src.team === "blue" ? "red" : "blue";
+    const srcLead = src.leadOverride ?? (src.team === "blue" ? leadBlue : leadRed);
+    const destLead = team === "blue" ? leadBlue : leadRed;
+    const spd = blocksOf(src).normal;
     setUnits((prev) => [
       ...prev,
-      { ...src, id: uid(), priority: Math.max(0, ...prev.map((x) => x.priority)) + 1 },
+      {
+        ...src,
+        id: uid(),
+        team,
+        // 兩隊隊長加成相同時不需要覆寫，讓它跟著該隊設定走
+        leadOverride: srcLead === destLead ? null : srcLead,
+        priority: Math.max(0, ...prev.map((x) => x.priority)) + 1,
+      },
     ]);
+    notify(`已複製 ${src.name} 到${team === "blue" ? "攻擊方（藍）" : "防守方（紅）"}：${spd} 速`);
   };
 
   /** 由符文計算固定速度與迅速套裝 */
@@ -629,7 +646,7 @@ export default function SpeedTickPage() {
                       >
                         {u.team === "blue" ? "✕" : "○"}
                       </button>
-                      <button type="button" className="btn btn-sm btn-ghost btn-icon" title="複製這隻" onClick={() => copyUnit(u)}>
+                      <button type="button" className="btn btn-sm btn-ghost btn-icon" title="複製到對面隊伍（同速）" onClick={() => copyUnit(u)}>
                         <Copy size={12} />
                       </button>
                       <button type="button" className="btn btn-sm btn-ghost btn-icon" title="刪除" onClick={() => removeUnit(u.id)}>
