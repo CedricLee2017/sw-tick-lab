@@ -135,7 +135,7 @@ export default function SettingsPage() {
           <div className="mono" style={{ fontSize: 30, fontWeight: 800, marginTop: 4 }}>
             +{totalPct}%
           </div>
-          <div className="tiny dim">圖騰 {bonus.towerSpd}% · 隊長 {bonus.leadSpd}% · Buff {bonus.buffSpd}%</div>
+          <div className="tiny dim">圖騰 {bonus.towerSpd}% · 隊長 {bonus.leadSpd}% · 強化 {bonus.buffSpd}%</div>
         </div>
         <div className="card card-pad">
           <div className="row tiny dim" style={{ gap: 7 }}>
@@ -232,7 +232,7 @@ export default function SettingsPage() {
         <div className="col" style={{ gap: 16 }}>
           <div className="card">
             <div className="card-head">
-              <div className="card-title">隊長技與速度 Buff</div>
+              <div className="card-title">隊長技與速度強化</div>
               <span className="chip muted">套用至所有試算</span>
             </div>
             <div className="card-pad col" style={{ gap: 12 }}>
@@ -245,11 +245,11 @@ export default function SettingsPage() {
                 ))}
               </div>
               <div className="divider" />
-              <NumberField label="速度 Buff %（戰鬥中）" value={bonus.buffSpd} min={0} max={50} step={5} onChange={(v) => patchBonus({ buffSpd: v })} hint="開場有速度 Buff 時才需要填入，例如 +30%" />
+              <NumberField label="速度強化 %（戰鬥中）" value={bonus.buffSpd} min={0} max={50} step={5} onChange={(v) => patchBonus({ buffSpd: v })} hint="開場有速度強化時才需要填入，例如 +30%" />
               <div className="row wrap" style={{ gap: 5 }}>
                 {[0, 30].map((v) => (
                   <button key={v} className={`btn btn-sm ${bonus.buffSpd === v ? "btn-primary" : "btn-ghost"}`} onClick={() => patchBonus({ buffSpd: v })}>
-                    {v === 0 ? "不計 Buff" : `Buff +${v}%`}
+                    {v === 0 ? "不計強化" : `強化 +${v}%`}
                   </button>
                 ))}
               </div>
@@ -270,7 +270,7 @@ export default function SettingsPage() {
               </div>
               <div className="card" style={{ padding: 11 }}>
                 <div className="kv"><span className="k">目標總速度</span><span className="v mono gold">{targetSpeed}</span></div>
-                <div className="kv"><span className="k">建築 + 隊長 + Buff</span><span className="v mono">+{Math.ceil((baseSpd * totalPct) / 100)}</span></div>
+                <div className="kv"><span className="k">建築 + 隊長 + 強化</span><span className="v mono">+{Math.ceil((baseSpd * totalPct) / 100)}</span></div>
                 <div className="kv"><span className="k">符文需要</span><span className="v mono gold">{runeNeed} 速</span></div>
               </div>
               <div className="tiny dim">點「速度實驗室」可以用同一組設定模擬出手順序。</div>
@@ -313,7 +313,7 @@ export default function SettingsPage() {
             <div className="field">
               <label>每個位置候選符文數：{settings.pool}</label>
               <input type="range" min={6} max={15} value={settings.pool} onChange={(e) => setPool(Number(e.target.value))} />
-              <span className="hint">上限 15 顆（15⁶ = 1,139 萬組，一次「完整」預算就能全部算完）。有設定 FOCUS 時，這 15 顆由焦點比重挑選。</span>
+              <span className="hint">上限 15 顆（15⁶ = 1,139 萬組，一次「完整」預算就能全部算完）。有設定焦點時，這 15 顆由焦點比重挑選。</span>
             </div>
           </div>
         </div>

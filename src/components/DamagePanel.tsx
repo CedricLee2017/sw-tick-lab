@@ -108,7 +108,7 @@ export function DamagePanel({
                 checked={opts.atkBuff > 0}
                 onChange={(e) => onOptsChange({ atkBuff: e.target.checked ? 50 : 0 })}
               />
-              攻擊強化（ATK Buff +50%）
+              攻擊強化（+50%）
             </label>
             <label className="row tiny" style={{ gap: 6, cursor: skill.up > 0 ? "pointer" : "default", opacity: skill.up > 0 ? 1 : .5 }}>
               <input type="checkbox" disabled={skill.up <= 0} checked={opts.skillUps && skill.up > 0} onChange={(e) => onOptsChange({ skillUps: e.target.checked })} />

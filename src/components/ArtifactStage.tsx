@@ -223,11 +223,11 @@ export function ArtifactStage({
       </div>
 
       <div className="grid g2" style={{ marginTop: 10 }}>
-        <FocusEditor title="屬性神器 Focus" value={focus1} onChange={setFocus1} />
-        <FocusEditor title="類型神器 Focus" value={focus2} onChange={setFocus2} />
+        <FocusEditor title="屬性神器焦點" value={focus1} onChange={setFocus1} />
+        <FocusEditor title="類型神器焦點" value={focus2} onChange={setFocus2} />
       </div>
       <div className="hint" style={{ marginTop: 6 }}>
-        Focus 是硬性 Min / Max 篩選：每條選定效果都要符合才會進入候選。有設定 Focus 時，先依契合度（數值 ÷ 該效果上限 × 權重）排序，同分再比傷害 / 追傷。
+        焦點是硬性最小／最大篩選：每條選定效果都要符合才會進入候選。有設定焦點時，先依契合度（數值 ÷ 該效果上限 × 權重）排序，同分再比傷害 / 追傷。
       </div>
 
       <div className="row wrap" style={{ marginTop: 12, gap: 8 }}>
@@ -267,8 +267,8 @@ export function ArtifactStage({
                       <TickBadge spd={p.stats.spd} rta={rta} />
                       <span className="tiny dim">{setSummary(BuildSets(p))}</span>
                       {(p.focus[0] > 0 || p.focus[1] > 0) && (
-                        <span className="chip muted" title="Focus 契合度（數值 ÷ 效果上限 × 權重）">
-                          Focus {Math.round(p.focus[0])}% / {Math.round(p.focus[1])}%
+                        <span className="chip muted" title="焦點契合度（數值 ÷ 效果上限 × 權重）">
+                          焦點 {Math.round(p.focus[0])}% / {Math.round(p.focus[1])}%
                         </span>
                       )}
                     </div>
@@ -367,7 +367,7 @@ function FocusEditor({
         </button>
       </div>
       {value.length === 0 ? (
-        <div className="tiny dim" style={{ padding: "4px 0" }}>未設定 Focus：此類神器只依主屬性與傷害 / 追傷排序。</div>
+        <div className="tiny dim" style={{ padding: "4px 0" }}>未設定焦點：此類神器只依主屬性與傷害 / 追傷排序。</div>
       ) : (
         <div className="col" style={{ gap: 5, marginTop: 5 }}>
           {value.map((f, i) => {
@@ -386,9 +386,9 @@ function FocusEditor({
                   {EFFECT_IDS.map((id) => <option key={id} value={id}>{artifactEffectLabel(id)}</option>)}
                 </select>
                 <div className="artifact-focus-range">
-                  <span className="tiny dim">Min</span>
+                  <span className="tiny dim">最小</span>
                   <input className="input mono" type="number" min={0} max={max} step={step} value={f.min} onChange={(e) => update(i, { min: Number(e.target.value) || 0 })} />
-                  <span className="tiny dim">Max</span>
+                  <span className="tiny dim">最大</span>
                   <input className="input mono" type="number" min={0} max={max} step={step} value={f.max} onChange={(e) => update(i, { max: Number(e.target.value) || 0 })} />
                 </div>
                 <select className="select" style={{ width: 78 }} value={f.weight} onChange={(e) => update(i, { weight: Number(e.target.value) })}>

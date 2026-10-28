@@ -78,7 +78,7 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "lushen-max-dmg",
     name: "極限輸出風丑",
-    desc: "憤怒 ×4 + 刀刃 ×2 · 攻擊% / 爆傷 / 攻擊% · Focus 攻擊 / 暴率 / 暴傷 各 10 分 · 暴率 100%",
+    desc: "憤怒 ×4 + 刀刃 ×2 · 攻擊% / 爆傷 / 攻擊% · 焦點 攻擊 / 暴率 / 暴傷 各 10 分 · 暴率 100%",
     monsterId: 13413,
     monsterName: "風丑",
     groups: [{ set: 5, pieces: 4 }, { set: 4, pieces: 2 }],
@@ -100,7 +100,7 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "swift-first",
     name: "迅速1速",
-    desc: "迅速 ×4 + 意志 ×2 · 2 號速度 · Focus 速度 10 分 · 不設速度下限",
+    desc: "迅速 ×4 + 意志 ×2 · 2 號速度 · 焦點 速度 10 分 · 不設速度下限",
     groups: [{ set: 3, pieces: 4 }, { set: 15, pieces: 2 }],
     // 2 號速度
     mains: { 2: 8 },
@@ -116,7 +116,7 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "violent-will-res-t5",
     name: "暴走意志百抗T5",
-    desc: "暴走 ×4 + 意志 ×2 · 2 號速度 / 4 號體力% · Focus 體力 / 防禦 / 抵抗 / 速度 各 10 分 · T5 + 抵抗 100%",
+    desc: "暴走 ×4 + 意志 ×2 · 2 號速度 / 4 號體力% · 焦點 體力 / 防禦 / 抵抗 / 速度 各 10 分 · T5 + 抵抗 100%",
     groups: [{ set: 13, pieces: 4 }, { set: 15, pieces: 2 }],
     // 2 號速度、4 號體力%（6 號留給抵抗或體力%，由 EHP 排序挑最好的一組）
     mains: { 2: 8, 4: 2 },
@@ -136,7 +136,7 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "ehp-max",
     name: "EHP最大化",
-    desc: "能量 ×3 · 體力% / 防禦% / 體力% · Focus 體力 / 防禦 各 10 分 · EHP 排序",
+    desc: "能量 ×3 · 體力% / 防禦% / 體力% · 焦點 體力 / 防禦 各 10 分 · EHP 排序",
     groups: [{ set: 1, pieces: 2 }, { set: 1, pieces: 2 }, { set: 1, pieces: 2 }],
     mains: { 2: 2, 4: 6, 6: 2 },
     limits: {},
@@ -906,7 +906,7 @@ export default function OptimizerPage() {
                 </div>
                 <div className="card" style={{ padding: 10, background: "rgba(242,198,92,.05)", borderColor: "rgba(242,198,92,.22)" }}>
                   <div className="kv"><span className="k">目標總速度</span><span className="v mono gold">{tickNeed.target}</span></div>
-                  <div className="kv"><span className="k">建築+隊長+Buff</span><span className="v mono">+{Math.ceil((base.spd * (bonus.towerSpd + bonus.leadSpd + bonus.buffSpd)) / 100)}</span></div>
+                  <div className="kv"><span className="k">建築+隊長+強化</span><span className="v mono">+{Math.ceil((base.spd * (bonus.towerSpd + bonus.leadSpd + bonus.buffSpd)) / 100)}</span></div>
                   <div className="kv"><span className="k">符文至少需要</span><span className="v mono gold">{tickNeed.runeSpeed} 速</span></div>
                   <div className="kv">
                     <span className="k">目前符文上限</span>
@@ -955,7 +955,7 @@ export default function OptimizerPage() {
               <NumberField label="速度圖騰 %" value={bonus.towerSpd} onChange={(v) => patchBonus({ towerSpd: v })} min={0} max={20} step={0.5} />
               <NumberField label="隊長技 %" value={bonus.leadSpd} onChange={(v) => patchBonus({ leadSpd: v })} min={0} max={50} />
             </div>
-            <NumberField label="速度 Buff %（一般 30）" value={bonus.buffSpd} onChange={(v) => patchBonus({ buffSpd: v })} min={0} max={50} step={5} />
+            <NumberField label="速度強化 %（一般 30）" value={bonus.buffSpd} onChange={(v) => patchBonus({ buffSpd: v })} min={0} max={50} step={5} />
 
             <div className="divider" />
             <div className="tiny dim">其他實戰下限（含一般召喚師技能，0 = 不限）</div>
@@ -1502,7 +1502,7 @@ function FocusEditor({
       <div className="row between" style={{ gap: 8 }}>
         <div className="row" style={{ gap: 6 }}>
           <Target size={13} className="gold" />
-          <span className="focus-title">焦點屬性 FOCUS</span>
+          <span className="focus-title">焦點屬性</span>
           <span className="tiny dim">{value.length}/{FOCUS_LIMIT}</span>
         </div>
         {value.length > 0 && (

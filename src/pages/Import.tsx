@@ -96,13 +96,13 @@ export default function ImportPage() {
           </h2>
           <p style={{ marginTop: 12 }}>
             上傳 SWEX / SWOP 匯出的 JSON，立即分析魔靈、符文與速度分佈。
-            配符時直接輸入「我要 Tick 5」，系統會自動把建築、速度隊長技、速度 Buff 與套裝換算成符文速度需求，
+            配符時直接輸入「我要 Tick 5」，系統會自動把建築、速度隊長技、速度強化與套裝換算成符文速度需求，
             再從你的符文庫找出最佳組合。
           </p>
           <div className="row wrap" style={{ marginTop: 18, gap: 8 }}>
             <span className="chip">速度圖騰 15%</span>
             <span className="chip">隊長技 28%</span>
-            <span className="chip">速度 Buff 30%</span>
+            <span className="chip">速度強化 30%</span>
             <span className="chip">Tick 5 = 286 速</span>
           </div>
         </div>

@@ -108,7 +108,7 @@ export default function SpeedPage() {
                 <div className="grid g3">
                   <NumberField label="速度圖騰 %" value={bonus.towerSpd} min={0} max={20} step={0.5} onChange={(v) => patchBonus({ towerSpd: v })} />
                   <NumberField label="速度隊長技 %" value={bonus.leadSpd} min={0} max={50} onChange={(v) => patchBonus({ leadSpd: v })} />
-                  <NumberField label="速度 Buff %" value={bonus.buffSpd} min={0} max={50} step={5} onChange={(v) => patchBonus({ buffSpd: v })} />
+                  <NumberField label="速度強化 %" value={bonus.buffSpd} min={0} max={50} step={5} onChange={(v) => patchBonus({ buffSpd: v })} />
                 </div>
 
                 <label className="row" style={{ gap: 8, cursor: "pointer" }}>
@@ -146,7 +146,7 @@ export default function SpeedPage() {
                 <div className="card" style={{ padding: 12 }}>
                   <div className="kv"><span className="k">目標總速度</span><span className="v mono">{targetSpeed}</span></div>
                   <div className="kv"><span className="k">基礎速度</span><span className="v mono">{effectiveBase}</span></div>
-                  <div className="kv"><span className="k">建築 + 隊長 + Buff（{pct}%）</span><span className="v mono green">+{Math.ceil((effectiveBase * pct) / 100)}</span></div>
+                  <div className="kv"><span className="k">建築 + 隊長 + 強化（{pct}%）</span><span className="v mono green">+{Math.ceil((effectiveBase * pct) / 100)}</span></div>
                   <div className="kv"><span className="k">迅速套裝 +25%</span><span className="v mono green">+{swift ? Math.ceil((effectiveBase * 25) / 100) : 0}</span></div>
                   <div className="kv"><span className="k">目前裝備速度</span><span className="v mono">{view ? view.stats.spd : "—"}</span></div>
                 </div>
@@ -172,7 +172,7 @@ export default function SpeedPage() {
             <div className="card-head">
               <div>
                 <div className="card-title">Tick 門檻一覽（基礎速度 {effectiveBase}）</div>
-                <div className="card-sub">其他條件固定為目前設定：圖騰 {bonus.towerSpd}% · 隊長 {bonus.leadSpd}% · Buff {bonus.buffSpd}%{swift ? " · 迅速 25%" : ""}</div>
+                <div className="card-sub">其他條件固定為目前設定：圖騰 {bonus.towerSpd}% · 隊長 {bonus.leadSpd}% · 強化 {bonus.buffSpd}%{swift ? " · 迅速 25%" : ""}</div>
               </div>
             </div>
             <div className="card-pad">
