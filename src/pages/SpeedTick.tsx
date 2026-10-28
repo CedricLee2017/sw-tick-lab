@@ -114,6 +114,11 @@ function loadSaves(): SavedCalc[] {
 const numOr0 = (v: string) => Number(v) || 0;
 const clampTick = (v: number) => Math.max(0, Math.min(TICKS[TICKS.length - 1], Math.round(v)));
 
+/** 元素篩選按鈕的顏色（與全域 --water / --fire … 一致） */
+const EL_COLOR: Record<number, string> = {
+  1: "var(--water)", 2: "var(--fire)", 3: "var(--wind)", 4: "var(--light)", 5: "var(--dark)",
+};
+
 export default function SpeedTickPage() {
   const runeMap = useStore((s) => s.runeMap);
   const loadouts = useStore((s) => s.loadouts);
@@ -136,6 +141,14 @@ export default function SpeedTickPage() {
   const [saveNote, setSaveNote] = useState("");
   const [q, setQ] = useState("");
   const [loadOpen, setLoadOpen] = useState(false);
+  // 手動新增：先開魔靈選擇視窗（可搜尋 / 依元素與胎生星級縮小範圍）
+  const [pickOpen, setPickOpen] = useState(false);
+  const [pickQ, setPickQ] = useState("");
+  const [pickEl, setPickEl] = useState(0);
+  const [pickNat, setPickNat] = useState(0);
+  const [pickAwake, setPickAwake] = useState(false);
+  const [pickedCount, setPickedCount] = useState(0);
+  const [lastPicked, setLastPicked] = useState("");
   const [boostModal, setBoostModal] = useState<{
     team: "blue" | "red";
     from: number;
@@ -229,25 +242,55 @@ export default function SpeedTickPage() {
   };
 
   const addMonster = (id: number) => {
-    if (units.length >= MAX_UNITS) return;
     const m = MONSTER_MAP.get(id);
-    setUnits((prev) => [
-      ...prev,
-      {
-        id: uid(),
-        name: m?.name ?? "新魔靈",
-        monsterId: id,
-        baseSpd: m?.spd ?? 100,
-        runeSpd: 0,
-        swift: false,
-        buff: false,
-        artifactPct: 0,
-        team: "blue",
-        priority: prev.length + 1,
-      },
-    ]);
+    setUnits((prev) => {
+      if (prev.length >= MAX_UNITS) return prev;
+      return [
+        ...prev,
+        {
+          id: uid(),
+          name: m?.name ?? "新魔靈",
+          monsterId: id,
+          baseSpd: m?.spd ?? 100,
+          runeSpd: 0,
+          swift: false,
+          buff: false,
+          artifactPct: 0,
+          team: "blue",
+          priority: prev.length + 1,
+        },
+      ];
+    });
     setQ("");
   };
+
+  const openPicker = () => {
+    if (units.length >= MAX_UNITS) return notify(`最多只能加入 ${MAX_UNITS} 隻魔靈`, "err");
+    setPickedCount(0);
+    setLastPicked("");
+    setPickQ("");
+    setPickEl(0);
+    setPickNat(0);
+    setPickAwake(false);
+    setPickOpen(true);
+  };
+
+  /** 魔靈選擇視窗的清單：依元素 / 胎生星級 / 關鍵字篩選，高星級優先 */
+  const pickList = useMemo(() => {
+    const term = pickQ.trim().toLowerCase();
+    const el = ELEMENTS[pickEl as 1 | 2 | 3 | 4 | 5];
+    return MONSTERS.filter((m) => {
+      if (pickEl && m.el !== pickEl) return false;
+      if (pickNat && m.nat !== pickNat) return false;
+      if (pickAwake && !m.awk) return false;
+      if (!term) return true;
+      return (
+        m.name.toLowerCase().includes(term) ||
+        (el?.name ?? "").includes(term) ||
+        `${m.nat}★`.includes(term)
+      );
+    }).sort((a, b) => b.nat - a.nat || b.awk - a.awk || a.name.localeCompare(b.name));
+  }, [pickQ, pickEl, pickNat, pickAwake]);
 
   const addBlank = () => {
     if (units.length >= MAX_UNITS) return;
@@ -543,7 +586,7 @@ export default function SpeedTickPage() {
               onChange={(e) => setQ(e.target.value)}
               disabled={units.length >= MAX_UNITS}
             />
-            <button className="btn" onClick={addBlank} disabled={units.length >= MAX_UNITS}>手動新增</button>
+            <button className="btn" onClick={openPicker} disabled={units.length >= MAX_UNITS}>手動新增</button>
             {q.trim() && (
               <div className="st-search-results">
                 {searchResults.length === 0 && <div className="tiny dim" style={{ padding: 10 }}>找不到魔靈</div>}
@@ -720,7 +763,7 @@ export default function SpeedTickPage() {
                 <button className="btn btn-primary" onClick={() => setLoadOpen(true)}>
                   <Upload size={13} /> 從儲存庫載入
                 </button>
-                <button className="btn" onClick={addBlank}><Plus size={13} /> 手動新增</button>
+                <button className="btn" onClick={openPicker}><Plus size={13} /> 手動新增</button>
               </div>
             </div>
           )}
@@ -1290,6 +1333,97 @@ export default function SpeedTickPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {pickOpen && (
+        <Modal title="選擇魔靈" width={980} onClose={() => setPickOpen(false)}>
+          <div className="mp-toolbar">
+            <input
+              autoFocus
+              className="input"
+              placeholder="搜尋魔靈名稱（英文，例如 Lushen）…"
+              value={pickQ}
+              onChange={(e) => setPickQ(e.target.value)}
+            />
+            <div className="mp-filter-row">
+              <span className="mp-label">元素</span>
+              <button type="button" className={`mp-chip ${pickEl === 0 ? "on" : ""}`} onClick={() => setPickEl(0)}>全部</button>
+              {[1, 2, 3, 4, 5].map((el) => (
+                <button
+                  key={el}
+                  type="button"
+                  className={`mp-chip ${pickEl === el ? "on" : ""}`}
+                  style={{ color: EL_COLOR[el] }}
+                  onClick={() => setPickEl(el)}
+                >
+                  <i className="mp-dot" />
+                  {ELEMENTS[el as 1].name}
+                </button>
+              ))}
+            </div>
+            <div className="mp-filter-row">
+              <span className="mp-label">胎生星級</span>
+              <button type="button" className={`mp-chip ${pickNat === 0 ? "on" : ""}`} onClick={() => setPickNat(0)}>全部</button>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} type="button" className={`mp-chip ${pickNat === n ? "on" : ""}`} onClick={() => setPickNat(n)}>
+                  {n}★
+                </button>
+              ))}
+              <label className="row tiny" style={{ gap: 6, marginLeft: "auto", cursor: "pointer" }}>
+                <input type="checkbox" checked={pickAwake} onChange={(e) => setPickAwake(e.target.checked)} />
+                只顯示已覺醒
+              </label>
+            </div>
+          </div>
+
+          <div className="mp-count">
+            符合 {pickList.length} 隻
+            {pickList.length > 0 && " · 點擊即可加入，可連續加入多隻"}
+          </div>
+
+          <div className="mp-grid">
+            {pickList.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className="mp-card"
+                disabled={units.length >= MAX_UNITS}
+                title={`${m.name} · ${ELEMENTS[m.el as 1].name} · ${m.nat}★ · 基礎速度 ${m.spd}`}
+                onClick={() => {
+                  addMonster(m.id);
+                  setPickedCount((c) => c + 1);
+                  setLastPicked(m.name);
+                }}
+              >
+                <MonsterIcon id={m.id} size={48} />
+                <span className="mp-name">{m.name}</span>
+                <span className="mp-meta">
+                  <span className={`el-${m.el}`}>{ELEMENTS[m.el as 1].name}</span> · {m.nat}★
+                </span>
+              </button>
+            ))}
+            {pickList.length === 0 && (
+              <div className="empty" style={{ gridColumn: "1 / -1", padding: "32px 16px" }}>找不到符合條件的魔靈</div>
+            )}
+          </div>
+
+          <div className="row between" style={{ marginTop: 12, gap: 10 }}>
+            <span className="tiny dim">
+              已加入 {pickedCount} 隻{lastPicked && `（最近：${lastPicked}）`} · 目前 {units.length}/{MAX_UNITS}
+              {units.length >= MAX_UNITS && " · 已達上限"}
+            </span>
+            <div className="row" style={{ gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => { addBlank(); setPickOpen(false); }}
+              >
+                新增空白自訂魔靈
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => setPickOpen(false)}>完成</button>
+            </div>
+          </div>
+        </Modal>
       )}
 
     </>

@@ -442,6 +442,47 @@ p { margin: 0; }
   margin-top: 6px; border: 1px solid var(--line-soft); border-radius: 8px;
   padding: 8px 10px; background: rgba(11,17,32,.5); font-size: 12.5px;
 }
+
+/* ── 魔靈選擇視窗（Speed Tick 手動新增） ───────────── */
+.mp-toolbar { display: grid; gap: 8px; margin-bottom: 10px; }
+.mp-filter-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mp-label {
+  min-width: 54px; font-size: 11px; font-weight: 800;
+  letter-spacing: .06em; color: var(--muted);
+}
+.mp-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
+  background: rgba(11, 17, 32, .6); color: var(--muted);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.mp-chip:hover { border-color: rgba(242, 198, 92, .5); }
+.mp-chip.on {
+  background: rgba(242, 198, 92, .14); border-color: rgba(242, 198, 92, .65); color: var(--gold);
+}
+.mp-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: currentColor; display: inline-block;
+}
+.mp-count { font-size: 11.5px; color: var(--muted); margin: 2px 0 8px; }
+.mp-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 6px;
+  max-height: 54vh; overflow-y: auto; padding-right: 4px;
+}
+.mp-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 4px 6px; border-radius: 10px; border: 1px solid transparent;
+  background: rgba(11, 17, 32, .45); color: var(--text); cursor: pointer;
+  content-visibility: auto; contain-intrinsic-size: 104px;
+}
+.mp-card:hover:not(:disabled) { background: rgba(88, 166, 255, .1); border-color: rgba(88, 166, 255, .4); }
+.mp-card:active:not(:disabled) { transform: scale(.97); }
+.mp-card:disabled { opacity: .35; cursor: not-allowed; }
+.mp-name {
+  max-width: 100%; font-size: 11px; font-weight: 600; text-align: center; line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mp-meta { font-size: 9.5px; color: var(--muted); }
 .deck-detail {
   border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px;
   background: rgba(11,17,32,.35);
