@@ -420,6 +420,28 @@ p { margin: 0; }
 .st-tv-mon.acted .mon-icon { box-shadow: 0 0 0 2px rgba(242,198,92,.5); }
 .st-tv-bar { width: 46px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
 .st-tv-bar span { display: block; height: 100%; }
+.st-team-btn {
+  font-size: 9px; line-height: 1.5; padding: 0 4px; border-radius: 4px; cursor: pointer;
+  background: transparent; border: 1px solid;
+}
+.st-team-btn.blue { color: #8ab4ff; border-color: rgba(110,168,255,.5); }
+.st-team-btn.red { color: #ff9a9a; border-color: rgba(255,122,122,.5); }
+.st-team-btn:hover { background: rgba(255,255,255,.08); }
+.st-modal-sec { border-top: 1px solid var(--line-soft); padding: 10px 0; }
+.st-modal-sec:first-of-type { border-top: 0; padding-top: 0; }
+.st-modal-label { font-size: 11px; font-weight: 800; letter-spacing: .08em; color: var(--muted); }
+.st-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.st-type {
+  border: 1px solid var(--line); border-radius: 10px; background: rgba(11,17,32,.45);
+  padding: 10px; text-align: center; cursor: pointer; color: var(--text);
+}
+.st-type.on { border-color: rgba(242,198,92,.7); background: rgba(242,198,92,.1); }
+.st-type-icon { font-size: 20px; line-height: 1.2; }
+.st-type .t { font-weight: 700; font-size: 12.5px; }
+.st-pending {
+  margin-top: 6px; border: 1px solid var(--line-soft); border-radius: 8px;
+  padding: 8px 10px; background: rgba(11,17,32,.5); font-size: 12.5px;
+}
 .deck-detail {
   border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px;
   background: rgba(11,17,32,.35);

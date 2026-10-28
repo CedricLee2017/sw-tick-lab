@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { RotateCcw, Save as SaveIcon, Timer, Trash2, Upload, X, Copy, ArrowRight } from "lucide-react";
 import { ELEMENTS } from "../lib/constants";
 import { MONSTERS, MONSTER_MAP } from "../store";
-import { MonsterIcon } from "../components/ui";
+import { MonsterIcon, Modal } from "../components/ui";
 import {
   AB_RATES,
   LEAD_PRESETS,
@@ -113,6 +113,7 @@ function loadSaves(): SavedCalc[] {
 }
 
 const numOr0 = (v: string) => Number(v) || 0;
+const clampTick = (v: number) => Math.max(0, Math.min(TICKS[TICKS.length - 1], Math.round(v)));
 
 export default function SpeedTickPage() {
   const [init] = useState<CalcState>(loadState);
@@ -131,6 +132,13 @@ export default function SpeedTickPage() {
   const [saveName, setSaveName] = useState("");
   const [saveNote, setSaveNote] = useState("");
   const [q, setQ] = useState("");
+  const [boostModal, setBoostModal] = useState<{
+    team: "blue" | "red";
+    from: number;
+    to: number;
+    mode: "increase" | "decrease" | "clear" | "fill";
+    amount: number;
+  } | null>(null);
 
   useEffect(() => {
     const state: CalcState = { rate, totemBlue, leadBlue, totemRed, leadRed, sortBy, units, boosts, mods, adds };
@@ -339,6 +347,49 @@ export default function SpeedTickPage() {
     if (!Number.isFinite(n)) return;
     if (found) setAdds(adds.map((a) => (a === found ? { ...a, value: n, mode: pct ? "pct" : "flat" } : a)));
     else setAdds([...adds, { id: uid("a"), unitId, tick, value: n, mode: pct ? "pct" : "flat" }]);
+  };
+
+  const openBoostModal = (team: "blue" | "red", tick: number) =>
+    setBoostModal({ team, from: tick, to: tick, mode: "clear", amount: 30 });
+
+  /** 套用拉條視窗：一次處理某隊在 Tick 範圍內的拉條 / 清除 / 補到 100% */
+  const applyBoostModal = () => {
+    if (!boostModal) return;
+    const lo = Math.min(boostModal.from, boostModal.to);
+    const hi = Math.max(boostModal.from, boostModal.to);
+    const team = boostModal.team;
+    const targets = units.filter((u) => u.team === team);
+    const targetIds = new Set(targets.map((u) => u.id));
+    let next = boosts.filter((b) => !(b.tick >= lo && b.tick <= hi && targetIds.has(b.unitId)));
+
+    if (boostModal.mode !== "clear") {
+      for (let t = lo; t <= hi; t++) {
+        for (const u of targets) {
+          if (boostModal.mode === "fill") {
+            const cell = frameMap.get(t)?.cells.find((c) => c.unitId === u.id);
+            const oldPct = boosts.find((b) => b.unitId === u.id && b.tick === t)?.pct ?? 0;
+            const ab = (cell?.ab ?? 0) - oldPct;
+            const add = Math.max(0, 100 - ab);
+            if (add > 0.05) next.push({ id: uid("b"), unitId: u.id, tick: t, pct: Math.round(add * 100) / 100 });
+          } else {
+            const pct = boostModal.mode === "increase" ? boostModal.amount : -boostModal.amount;
+            next.push({ id: uid("b"), unitId: u.id, tick: t, pct });
+          }
+        }
+      }
+    }
+    setBoosts(next);
+    setBoostModal(null);
+  };
+
+  const boostPreview = () => {
+    if (!boostModal) return "";
+    const lo = Math.min(boostModal.from, boostModal.to);
+    const hi = Math.max(boostModal.from, boostModal.to);
+    const label = boostModal.team === "blue" ? "藍隊" : "紅隊";
+    if (boostModal.mode === "clear") return `將清除${label}在 Tick ${lo} - ${hi} 的攻擊條加成`;
+    if (boostModal.mode === "fill") return `將把${label}在 Tick ${lo} - ${hi} 的攻擊條補到 100%`;
+    return `將對${label}在 Tick ${lo} - ${hi} ${boostModal.mode === "increase" ? "增加" : "減少"} ${Math.abs(boostModal.amount)}% 攻擊條`;
   };
 
   return (
@@ -718,6 +769,31 @@ export default function SpeedTickPage() {
               <table className="table st-matrix" style={{ minWidth: 120 + TICKS.length * 74 }}>
                 <thead>
                   <tr>
+                    <th style={{ fontSize: 10 }}>Team</th>
+                    {TICKS.map((t) => (
+                      <th key={t} style={{ padding: "2px 3px" }}>
+                        <div className="row" style={{ gap: 2, justifyContent: "center" }}>
+                          <button
+                            type="button"
+                            className="st-team-btn blue"
+                            title={`藍隊拉條工具（Tick ${t}）`}
+                            onClick={() => openBoostModal("blue", t)}
+                          >
+                            藍
+                          </button>
+                          <button
+                            type="button"
+                            className="st-team-btn red"
+                            title={`紅隊拉條工具（Tick ${t}）`}
+                            onClick={() => openBoostModal("red", t)}
+                          >
+                            紅
+                          </button>
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                  <tr>
                     <th>Monster</th>
                     {TICKS.map((t) => <th key={t} className="num">{t}</th>)}
                   </tr>
@@ -942,6 +1018,107 @@ export default function SpeedTickPage() {
           </div>
         </div>
       )}
+      {boostModal && (
+        <Modal
+          title={`ATTACK BAR BOOST - ${boostModal.team === "blue" ? "藍隊" : "紅隊"}`}
+          onClose={() => setBoostModal(null)}
+          width={640}
+        >
+          <div className="st-modal-sec">
+            <div className="st-modal-label">TICK RANGE</div>
+            <div className="tiny dim">選擇這個調整要套用的 Tick 範圍</div>
+            <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
+              <span className="tiny dim">From:</span>
+              <input
+                className="input mono"
+                type="number"
+                min={0}
+                max={TICKS[TICKS.length - 1]}
+                value={boostModal.from}
+                onChange={(e) => setBoostModal({ ...boostModal, from: clampTick(Number(e.target.value)) })}
+                style={{ width: 80 }}
+              />
+              <span className="tiny dim">To:</span>
+              <input
+                className="input mono"
+                type="number"
+                min={0}
+                max={TICKS[TICKS.length - 1]}
+                value={boostModal.to}
+                onChange={(e) => setBoostModal({ ...boostModal, to: clampTick(Number(e.target.value)) })}
+                style={{ width: 80 }}
+              />
+              <button className="btn btn-sm" onClick={() => setBoostModal({ ...boostModal, to: TICKS[TICKS.length - 1] })}>Max</button>
+            </div>
+            <div className="tiny dim" style={{ marginTop: 6 }}>預設為你按下的 Tick，可以自行調整範圍。</div>
+          </div>
+
+          <div className="st-modal-sec">
+            <div className="st-modal-label">MODIFIER TYPE</div>
+            <div className="st-type-grid">
+              {([
+                { key: "decrease", icon: "↓", title: "Decrease", sub: "負向拉條" },
+                { key: "clear", icon: "✕", title: "Clear", sub: "移除拉條" },
+                { key: "increase", icon: "↑", title: "Increase", sub: "正向拉條" },
+                { key: "fill", icon: "⟳", title: "Fill to 100%", sub: "自動補滿攻擊條" },
+              ] as const).map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  className={`st-type ${boostModal.mode === t.key ? "on" : ""}`}
+                  onClick={() => setBoostModal({ ...boostModal, mode: t.key })}
+                >
+                  <div className="st-type-icon">{t.icon}</div>
+                  <div className="t">{t.title}</div>
+                  <div className="tiny dim">{t.sub}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(boostModal.mode === "increase" || boostModal.mode === "decrease") && (
+            <div className="st-modal-sec">
+              <div className="st-modal-label">AMOUNT</div>
+              <div className="tiny dim">選擇{boostModal.mode === "increase" ? "增加" : "減少"}的攻擊條 %</div>
+              <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+                {[10, 15, 20, 25, 30, 40, 50, 100].map((v) => (
+                  <button
+                    key={v}
+                    className={`btn btn-sm ${boostModal.amount === v ? "btn-primary" : ""}`}
+                    onClick={() => setBoostModal({ ...boostModal, amount: v })}
+                  >
+                    {boostModal.mode === "increase" ? "+" : "−"}{v}%
+                  </button>
+                ))}
+                <span className="row" style={{ gap: 4 }}>
+                  <span className="tiny dim">Custom:</span>
+                  <input
+                    className="input mono"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={boostModal.amount}
+                    onChange={(e) => setBoostModal({ ...boostModal, amount: Math.max(1, Math.min(200, Number(e.target.value) || 1)) })}
+                    style={{ width: 72 }}
+                  />
+                  <span className="tiny dim">%</span>
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="st-modal-sec">
+            <div className="st-modal-label">PENDING ACTION（預覽）</div>
+            <div className="st-pending">{boostPreview()}</div>
+          </div>
+
+          <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+            <button className="btn" onClick={() => setBoostModal(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={applyBoostModal}>Set</button>
+          </div>
+        </Modal>
+      )}
+
       {tab === "faq" && (
         <div className="card card-pad">
           <div className="card-title" style={{ marginBottom: 10 }}>FAQ</div>
