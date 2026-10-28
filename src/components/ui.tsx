@@ -143,7 +143,7 @@ export function RuneCard({
           {set?.name ?? `套裝${rune.set}`}
           {rune.ancient && <span className="rune-tag">遠古</span>}
           {rune.locked && <span className="rune-tag muted" title="遊戲內已鎖定">鎖</span>}
-          {locked && <span className="rune-tag gold" title="應用程式鎖定：不可被其他魔靈配符使用">App 鎖</span>}
+          {locked && <span className="rune-tag gold" title="本機鎖定：不可被其他魔靈配符使用">本機鎖</span>}
           {excluded && <span className="rune-tag red" title="已排除：不會進入配符">排除</span>}
         </div>
         <div className="rune-actions">

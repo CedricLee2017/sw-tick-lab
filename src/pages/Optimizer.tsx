@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowRight, Copy, Loader2, Save, Sparkles, Wand2, Gauge, ChevronDown, Plus, Target, X, Zap,
-  Lock, Unlock, Ban, Pin, RotateCcw,
+  Lock, Unlock, Ban, Pin, RotateCcw, Shirt,
 } from "lucide-react";
 import { useStore, monsterLabel, type Loadout, type RuneFlag } from "../store";
 import { useSummary } from "../lib/accountStats";
@@ -193,6 +193,7 @@ export default function OptimizerPage() {
   const saveLoadout = useStore((s) => s.saveLoadout);
   const notify = useStore((s) => s.notify);
   const setRuneFlag = useStore((s) => s.setRuneFlag);
+  const equipRunes = useStore((s) => s.equipRunes);
   const loadouts = useStore((s) => s.loadouts);
 
   const [monsterId, setMonsterId] = useState(0);
@@ -459,12 +460,12 @@ export default function OptimizerPage() {
     const slots = new Set<number>();
     for (const id of includedRunes) {
       const r = runeMap.get(id);
-      if (!r) return notify(`找不到固定使用的符文 #${id}`, "err");
-      if (slots.has(r.slot)) return notify(`位置 ${r.slot} 有兩顆固定使用的符文，請移除一顆`, "err");
+      if (!r) return notify(`找不到包括的符文 #${id}`, "err");
+      if (slots.has(r.slot)) return notify(`位置 ${r.slot} 有兩顆包括的符文，請移除一顆`, "err");
       slots.add(r.slot);
-      if (excludedRunes.includes(id)) return notify("同一顆符文不能同時排除與固定使用", "err");
+      if (excludedRunes.includes(id)) return notify("同一顆符文不能同時排除與包括", "err");
       if (lockedRunes.includes(id) && (!targetUnit || r.occupied !== targetUnit)) {
-        return notify("固定使用的符文中有已鎖定在別的魔靈身上的符文，請先解除鎖定", "err");
+        return notify("包括的符文中有已鎖定在別的魔靈身上的符文，請先解除鎖定", "err");
       }
     }
     const canRelax = hasFour && hasTwo && !relax;
@@ -562,8 +563,22 @@ export default function OptimizerPage() {
     if (ids.length === 0) return;
     if (kind === "included" && on) setRuneFlag("included", includedRunes, false);
     setRuneFlag(kind, ids, on);
-    const label = kind === "locked" ? "鎖定" : kind === "excluded" ? "排除" : "固定使用";
+    const label = kind === "locked" ? "鎖定" : kind === "excluded" ? "排除" : "包括";
     notify(`已${on ? "加入" : "解除"} ${ids.length} 顆符文的${label}`);
+  };
+
+  /** 一鍵把整組符文裝備到目前選取的魔靈（僅本機模擬） */
+  const equipBuild = (build: Build) => {
+    const target = boxMonster?.unit.id ?? 0;
+    if (!target) return notify("請先選擇帳號內的魔靈", "err");
+    const ids = build.runes.filter((r): r is Rune => !!r).map((r) => r.id);
+    const n = equipRunes(target, ids);
+    notify(
+      n > 0
+        ? `已將 ${n} 顆符文上符到 ${anyMonster?.name ?? "魔靈"}（僅本機模擬，不會修改遊戲）`
+        : "上符失敗：沒有可用的符文",
+      n > 0 ? "ok" : "err",
+    );
   };
 
   /** 從 BUILDS 收藏帶入整組符文（固定使用） */
@@ -573,7 +588,7 @@ export default function OptimizerPage() {
     setRuneFlag("included", l.runeIds, true);
     setMode("speed");
     setSpeedTarget(0);
-    notify(`已帶入收藏配裝「${l.name}」；符文已設為 Include`);
+    notify(`已帶入收藏配裝「${l.name}」；符文已設為包括`);
   };
 
   // 技能資料只載入一次
@@ -1010,8 +1025,8 @@ export default function OptimizerPage() {
             <div className="card card-pad builds-strip">
               <div className="row between" style={{ gap: 8 }}>
                 <div className="row" style={{ gap: 8, minWidth: 0 }}>
-                  <span className="focus-title">BUILDS</span>
-                  <span className="tiny dim">點擊套用收藏（符文設為 Include）</span>
+                  <span className="focus-title">配裝收藏</span>
+                  <span className="tiny dim">點擊套用收藏（符文設為包括）</span>
                 </div>
                 <a className="tiny" href="#/builds">全部收藏 →</a>
               </div>
@@ -1134,6 +1149,7 @@ export default function OptimizerPage() {
                 includedSet={new Set(includedRunes)}
                 onToggleRuneFlag={(kind, id) => setRuneFlag(kind, [id], !(kind === "locked" ? lockedRunes : kind === "excluded" ? excludedRunes : includedRunes).includes(id))}
                 onBuildFlag={(kind, on) => setBuildFlag(b, kind, on)}
+                onEquip={() => equipBuild(b)}
                 ownerOf={(rid) => {
                   const u = account?.units.find((x) => x.runes.includes(rid));
                   return u ? monsterLabel(u.master) : "";
@@ -1241,6 +1257,7 @@ function BuildCard({
   includedSet,
   onToggleRuneFlag,
   onBuildFlag,
+  onEquip,
 }: {
   build: Build;
   index: number;
@@ -1261,6 +1278,7 @@ function BuildCard({
   includedSet: Set<number>;
   onToggleRuneFlag: (kind: RuneFlag, id: number) => void;
   onBuildFlag: (kind: RuneFlag, on: boolean) => void;
+  onEquip: () => void;
 }) {
   const s = build.stats;
   const mainSets = Object.entries(build.sets).sort((a, b) => b[1] - a[1]);
@@ -1394,12 +1412,13 @@ function BuildCard({
 
           <div className="row wrap" style={{ marginTop: 8, gap: 6 }}>
             <span className="tiny dim" style={{ alignSelf: "center" }}>整組設定：</span>
+            <button className="btn btn-sm btn-ghost" onClick={onEquip}><Shirt size={12} /> 一鍵上符</button>
             <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("locked", true)}><Lock size={12} /> 一鍵鎖符</button>
             <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("locked", false)}><Unlock size={12} /> 解除鎖符</button>
-            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("excluded", true)}><Ban size={12} /> 一鍵 Exclude</button>
-            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("excluded", false)}><RotateCcw size={12} /> 解除 Exclude</button>
-            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("included", true)}><Pin size={12} /> 固定使用此組合</button>
-            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("included", false)}><X size={12} /> 解除 Include</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("excluded", true)}><Ban size={12} /> 一鍵排除</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("excluded", false)}><RotateCcw size={12} /> 解除排除</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("included", true)}><Pin size={12} /> 包括此組合</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBuildFlag("included", false)}><X size={12} /> 取消包括</button>
           </div>
         </div>
       )}

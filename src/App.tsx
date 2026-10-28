@@ -25,7 +25,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "rta", label: "RTA", icon: <Swords size={17} />, title: "RTA 世界競技場", sub: "最愛魔靈的 RTA 獨立配裝與速度排行" },
   { key: "optimizer", label: "配符", icon: <Wand2 size={17} />, title: "一鍵配符", sub: "以 Tick 為條件的符文最佳化" },
   { key: "artifact-opt", label: "配神器", icon: <Sparkles size={17} />, title: "配神器", sub: "使用目前魔靈的裝備符文，直接最佳化神器" },
-  { key: "builds", label: "配裝", icon: <Bookmark size={17} />, title: "配裝收藏 BUILDS", sub: "收藏的符文組合，隨時查看或帶回配符" },
+  { key: "builds", label: "配裝", icon: <Bookmark size={17} />, title: "配裝收藏", sub: "收藏的符文組合，隨時查看或帶回配符" },
   { key: "monsters", label: "魔靈", icon: <Users size={17} />, title: "魔靈圖鑑", sub: "你的魔靈盒與目前配裝" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
   { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },

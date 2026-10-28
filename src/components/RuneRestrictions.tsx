@@ -73,7 +73,7 @@ export function RuneRestrictions({ targetUnit }: { targetUnit: number }) {
       });
       if (blocked.length > 0) {
         next = next.filter((id) => !blocked.includes(id));
-        notify(`有 ${blocked.length} 顆符文已鎖定在別的魔靈，不能加入固定使用`, "err");
+        notify(`有 ${blocked.length} 顆符文已鎖定在別的魔靈，不能加入包括`, "err");
       }
     }
     if (next.length > 0) setRuneFlag(tab, next, true);
@@ -84,7 +84,7 @@ export function RuneRestrictions({ targetUnit }: { targetUnit: number }) {
     if (!u) return;
     if (u.runes.length === 0) return notify("這隻魔靈目前沒有裝備符文", "err");
     addIds(u.runes);
-    notify(`已將 ${MONSTER_MAP.get(u.master)?.name ?? "魔靈"} 的 ${u.runes.length} 顆符文加入${tab === "excluded" ? "排除" : "固定使用"}`);
+    notify(`已將 ${MONSTER_MAP.get(u.master)?.name ?? "魔靈"} 的 ${u.runes.length} 顆符文加入${tab === "excluded" ? "排除" : "包括"}`);
   };
 
   const addRune = (r: Rune) => {
@@ -98,20 +98,20 @@ export function RuneRestrictions({ targetUnit }: { targetUnit: number }) {
     <div className="card card-pad rune-restrict">
       <div className="row between" style={{ gap: 8 }}>
         <div className="card-title">符文限制</div>
-        <span className="tiny dim">Exclude / Include</span>
+        <span className="tiny dim">排除／包括</span>
       </div>
       <div className="tabs" style={{ width: "100%", marginTop: 8 }}>
         <button type="button" className={`tab ${tab === "excluded" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => setTab("excluded")}>
-          <Ban size={12} /> 排除 Exclude（{settings.excludedRunes.length}）
+          <Ban size={12} /> 排除（{settings.excludedRunes.length}）
         </button>
         <button type="button" className={`tab ${tab === "included" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => setTab("included")}>
-          <Pin size={12} /> 固定使用 Include（{settings.includedRunes.length}）
+          <Pin size={12} /> 包括（{settings.includedRunes.length}）
         </button>
       </div>
       <div className="hint" style={{ marginTop: 6 }}>
         {tab === "excluded"
           ? "排除的符文不會進入任何配符；加入整隻魔靈會排除牠目前裝備的全部符文。"
-          : "固定使用的符文會鎖定該位置；每個位置最多一顆，加入整隻魔靈會固定牠目前裝備的全部符文。"}
+          : "包括的符文會固定使用在該位置；每個位置最多一顆，加入整隻魔靈會包括牠目前裝備的全部符文。"}
       </div>
 
       <div className="grid g2" style={{ gap: 6, marginTop: 8 }}>
