@@ -89,35 +89,130 @@ export interface TurnEvent {
   ab: number;
 }
 
+/** 拉條：在指定 Tick 為某隻魔靈增加攻擊條 % */
+export interface AbBoost {
+  id: string;
+  unitId: string;
+  tick: number;
+  pct: number;
+}
+
+/** 速度增減：從指定 Tick 起，速度 ±% */
+export interface SpeedModifier {
+  id: string;
+  unitId: string;
+  tick: number;
+  pct: number;
+}
+
+/** 額外速度：從指定 Tick 起，固定值或 % 加成 */
+export interface ExtraSpeed {
+  id: string;
+  unitId: string;
+  tick: number;
+  value: number;
+  mode: "flat" | "pct";
+}
+
+export interface FrameCell {
+  unitId: string;
+  /** 該 Tick 開始時的攻擊條 %（含拉條） */
+  ab: number;
+  /** 這個 Tick 是否有出手 */
+  acted: boolean;
+}
+
+export interface TickFrame {
+  tick: number;
+  cells: FrameCell[];
+}
+
+export interface AdvancedResult {
+  events: TurnEvent[];
+  frames: TickFrame[];
+}
+
 /** 模擬出手順序；同一 Tick 內攻擊條高者先，同攻擊條時比 priority */
 export function simulateTickOrder(
   units: { id: string; name: string; spd: number; team: "blue" | "red"; priority: number }[],
   ratePct: number,
   maxTurns = 24,
 ): TurnEvent[] {
-  const state = units.map((u) => ({ ...u, ab: 0 }));
-  const out: TurnEvent[] = [];
-  if (!units.length || ratePct <= 0) return out;
+  return simulateAdvanced(units, ratePct, {}, maxTurns, 500).events;
+}
+
+/**
+ * 進階模擬：拉條、速度增減、額外速度。
+ * `mods` / `adds` 從指定 Tick 起持續生效，`boosts` 只在指定 Tick 生效一次。
+ */
+export function simulateAdvanced(
+  units: { id: string; name: string; spd: number; team: "blue" | "red"; priority: number }[],
+  ratePct: number,
+  opts: { boosts?: AbBoost[]; mods?: SpeedModifier[]; adds?: ExtraSpeed[] } = {},
+  maxTurns = 40,
+  maxTicks = 20,
+): AdvancedResult {
+  const { boosts = [], mods = [], adds = [] } = opts;
+  const ab = new Map<string, number>(units.map((u) => [u.id, 0]));
+  const events: TurnEvent[] = [];
+  const frames: TickFrame[] = [];
+  if (!units.length || ratePct <= 0) return { events, frames };
+
+  const speedAt = (u: { id: string; spd: number }, tick: number) => {
+    const modPct = mods.filter((m) => m.unitId === u.id && m.tick <= tick).reduce((s, m) => s + m.pct, 0);
+    let spd = u.spd * (1 + modPct / 100);
+    for (const a of adds) {
+      if (a.unitId !== u.id || a.tick > tick) continue;
+      spd += a.mode === "flat" ? a.value : (u.spd * a.value) / 100;
+    }
+    return Math.max(0, spd);
+  };
+
   let tick = 0;
-  while (out.length < maxTurns && tick < 500) {
+  while (tick < 500 && events.length < maxTurns) {
     tick++;
-    for (const s of state) s.ab += s.spd * (ratePct / 100);
+    for (const u of units) ab.set(u.id, (ab.get(u.id) ?? 0) + speedAt(u, tick) * (ratePct / 100));
+    for (const b of boosts) {
+      if (b.tick !== tick) continue;
+      if (ab.has(b.unitId)) ab.set(b.unitId, (ab.get(b.unitId) ?? 0) + b.pct);
+    }
+
+    const cells: FrameCell[] = units.map((u) => ({ unitId: u.id, ab: ab.get(u.id) ?? 0, acted: false }));
+
     let guard = 0;
     while (guard++ < 60) {
-      const ready = state.filter((s) => s.ab >= 100 - 1e-9);
+      const ready = units.filter((u) => (ab.get(u.id) ?? 0) >= 100 - 1e-9);
       if (!ready.length) break;
       ready.sort(
         (a, b) =>
-          b.ab - a.ab ||
+          (ab.get(b.id) ?? 0) - (ab.get(a.id) ?? 0) ||
           a.priority - b.priority ||
           (a.team === b.team ? 0 : a.team === "blue" ? -1 : 1) ||
           a.name.localeCompare(b.name),
       );
-      const s = ready[0];
-      s.ab -= 100;
-      out.push({ turn: out.length + 1, tick, id: s.id, name: s.name, team: s.team, spd: s.spd, ab: Math.round(s.ab * 10) / 10 });
-      if (out.length >= maxTurns) break;
+      const u = ready[0];
+      const left = (ab.get(u.id) ?? 0) - 100;
+      ab.set(u.id, left);
+      const cell = cells.find((c) => c.unitId === u.id);
+      if (cell) cell.acted = true;
+      events.push({
+        turn: events.length + 1,
+        tick,
+        id: u.id,
+        name: u.name,
+        team: u.team,
+        spd: Math.round(speedAt(u, tick) * 10) / 10,
+        ab: Math.round(left * 10) / 10,
+      });
+      if (events.length >= maxTurns) break;
+    }
+
+    if (frames.length < maxTicks) {
+      frames.push({
+        tick,
+        cells: cells.map((c) => ({ ...c, ab: Math.round(c.ab * 10) / 10 })),
+      });
     }
   }
-  return out;
+  return { events, frames };
 }

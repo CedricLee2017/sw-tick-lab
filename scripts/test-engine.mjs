@@ -39,7 +39,7 @@ const {
   rtaStats, rtaView,
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
-  tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder,
+  tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced,
 } = engine;
 
 let passed = 0;
@@ -1167,6 +1167,35 @@ check("Speed Tick 計算器：速度、門檻與出手順序", () => {
   assert.equal(order[2].id, "slow");
   assert.equal(order[2].tick, 15);
   assert.equal(order[0].turn, 1);
+
+  // 拉條：兩隻同速，其中一隻在 Tick 5 拉 50% 攻擊條
+  const adv = simulateAdvanced(
+    [
+      { id: "a", name: "A", spd: 100, team: "blue", priority: 1 },
+      { id: "b", name: "B", spd: 100, team: "red", priority: 2 },
+    ],
+    7,
+    { boosts: [{ id: "x", unitId: "a", tick: 5, pct: 50 }] },
+    4,
+    20,
+  );
+  assert.equal(adv.events[0].id, "a");
+  assert.equal(adv.events[0].tick, 8);
+  assert.equal(Math.round(adv.frames[7].cells.find((c) => c.unitId === "a").ab), 106);
+
+  // 速度增減：從 Tick 1 起 +30% 速度
+  const modded = simulateAdvanced(
+    [
+      { id: "a", name: "A", spd: 100, team: "blue", priority: 1 },
+      { id: "b", name: "B", spd: 100, team: "red", priority: 2 },
+    ],
+    7,
+    { mods: [{ id: "m", unitId: "a", tick: 1, pct: 30 }] },
+    1,
+    20,
+  );
+  assert.equal(modded.events[0].id, "a");
+  assert.equal(modded.events[0].tick, 11);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
