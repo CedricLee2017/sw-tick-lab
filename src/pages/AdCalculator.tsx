@@ -16,6 +16,14 @@ import { NumberField, fmt } from "../components/ui";
 import type { Artifact } from "../lib/types";
 
 const ZERO: AdEffects = { hp: 0, atk: 0, def: 0, spd: 0 };
+const round2 = (v: number) => Math.round(v * 100) / 100;
+const normEffects = (e: AdEffects): AdEffects => ({
+  hp: round2(e.hp),
+  atk: round2(e.atk),
+  def: round2(e.def),
+  spd: round2(e.spd),
+});
+const pct = (v: number) => `${round2(v)}%`;
 
 export default function AdCalculatorPage() {
   const account = useStore((s) => s.account);
@@ -74,7 +82,7 @@ export default function AdCalculatorPage() {
   }, [account, q, type, stats, hits, owner]);
 
   const addArtifact = (a: Artifact) => {
-    setEffects((e) => addAdEffects(e, artifactAdEffects(a)));
+    setEffects((e) => normEffects(addAdEffects(e, artifactAdEffects(a))));
     notify(`已加入 ${artifactKindText(a)} 的追傷效果`);
   };
 
@@ -161,7 +169,7 @@ export default function AdCalculatorPage() {
           <div className="grid g2" style={{ marginTop: 10 }}>
             {partRows.map((p) => (
               <div key={p.key} className="kv">
-                <span className="k">{p.label} {p.pct}%</span>
+                <span className="k">{p.label} {pct(p.pct)}</span>
                 <span className="v mono gold">{fmt(result.parts[p.key])}</span>
               </div>
             ))}
@@ -212,13 +220,13 @@ export default function AdCalculatorPage() {
                 </div>
               </div>
               <div className="tiny dim" style={{ marginTop: 5, minHeight: 32 }}>
-                {e.hp > 0 && <>HP {e.hp}% </>}
-                {e.atk > 0 && <>ATK {e.atk}% </>}
-                {e.def > 0 && <>DEF {e.def}% </>}
-                {e.spd > 0 && <>SPD {e.spd}%</>}
+                {e.hp > 0 && <>HP {pct(e.hp)} </>}
+                {e.atk > 0 && <>ATK {pct(e.atk)} </>}
+                {e.def > 0 && <>DEF {pct(e.def)} </>}
+                {e.spd > 0 && <>SPD {pct(e.spd)}</>}
               </div>
               <div className="row" style={{ gap: 5, marginTop: 6 }}>
-                <button className="btn btn-sm btn-ghost" onClick={() => setEffects(e)}>套用</button>
+                <button className="btn btn-sm btn-ghost" onClick={() => setEffects(normEffects(e))}>套用</button>
                 <button className="btn btn-sm btn-ghost" onClick={() => addArtifact(art)}>加入</button>
               </div>
             </div>
