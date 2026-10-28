@@ -39,6 +39,7 @@ const {
   rtaStats, rtaView,
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
+  tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder,
 } = engine;
 
 let passed = 0;
@@ -1118,6 +1119,54 @@ check("預設隊：速度隊長技的內容與屬性範圍", () => {
   assert.equal(spdLeaderApplies(inugami, 2, "dungeon"), false);
 
   assert.equal(spdLeaderSkill(10514), null);
+});
+
+check("Speed Tick 計算器：速度、門檻與出手順序", () => {
+  // 一般 7%
+  assert.equal(tickFor(130, 7), 11);
+  assert.equal(tickFor(477, 7), 3);
+  assert.equal(minSpeedForTick(11, 7), 130);
+  // RTA 1.5%
+  assert.equal(tickFor(400, 1.5), 17);
+  // 討伐 4.5%
+  assert.equal(tickFor(300, 4.5), 8);
+
+  const b = tickBrackets(7, 12);
+  assert.equal(b[0].tick, 1);
+  assert.equal(b[0].minSpeed, minSpeedForTick(1, 7));
+  assert.equal(b[1].minSpeed, minSpeedForTick(2, 7));
+  assert.equal(b[1].maxSpeed, b[0].minSpeed - 1);
+  for (const x of b) {
+    assert.equal(tickFor(x.minSpeed, 7), x.tick);
+    if (Number.isFinite(x.maxSpeed) && x.maxSpeed >= x.minSpeed) assert.equal(tickFor(x.maxSpeed, 7), x.tick);
+  }
+
+  const unit = {
+    id: "a", name: "A", monsterId: 0, baseSpd: 100, runeSpd: 100,
+    swift: true, buff: false, artifactPct: 0, team: "blue", priority: 1,
+  };
+  const plain = calcUnitSpeeds(unit, { totem: 15, lead: 0 });
+  assert.equal(plain.normal, 240); // 100 + 15 + 25 + 100
+  assert.equal(plain.buffed, 270); // + 30% 基礎速度
+  assert.equal(plain.debuffed, 210);
+  const withArtifact = calcUnitSpeeds({ ...unit, artifactPct: 10 }, { totem: 15, lead: 0 });
+  assert.equal(withArtifact.buffed, 273); // Buff 變成 +33%
+
+  const order = simulateTickOrder(
+    [
+      { id: "fast", name: "快", spd: 200, team: "blue", priority: 1 },
+      { id: "slow", name: "慢", spd: 100, team: "red", priority: 2 },
+    ],
+    7,
+    3,
+  );
+  assert.equal(order[0].id, "fast");
+  assert.equal(order[0].tick, 8);
+  assert.equal(order[1].id, "fast");
+  assert.equal(order[1].tick, 15);
+  assert.equal(order[2].id, "slow");
+  assert.equal(order[2].tick, 15);
+  assert.equal(order[0].turn, 1);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

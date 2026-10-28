@@ -7,5 +7,6 @@ export * from "../src/lib/stage2";
 export * from "../src/lib/rta";
 export * from "../src/lib/adCalculator";
 export * from "../src/lib/deckSpeed";
+export * from "../src/lib/speedTick";
 export { parseAccountJSON, exportAccount } from "../src/lib/parse";
 export { default as MONSTERS } from "../src/data/monsters.json";

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap");
+﻿@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap");
 
 :root {
   --bg: #070a12;
@@ -359,6 +359,11 @@ p { margin: 0; }
   border: 1px solid rgba(242,198,92,.4);
   pointer-events: none;
 }
+/* ── Speed Tick 計算器 ───────────────────────────── */
+.st-row {
+  border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px;
+  background: rgba(11,17,32,.35);
+}
 .deck-detail {
   border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px;
   background: rgba(11,17,32,.35);
@@ -619,3 +624,4 @@ p { margin: 0; }
   .mobile-nav button.active { color: var(--gold); }
   .mobile-nav svg { width: 19px; height: 19px; }
 }
+
