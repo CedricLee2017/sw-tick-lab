@@ -24,6 +24,8 @@ export interface TickCalcUnit {
   buff: boolean;
   /** 神器「速度增加效果 +%」 */
   artifactPct: number;
+  /** 速度隊長技 %；null / 未設定 = 使用隊伍設定 */
+  leadOverride?: number | null;
   team: "blue" | "red";
   /** 同速度時的出手優先度，數字越小越先 */
   priority: number;
@@ -54,6 +56,32 @@ export function calcUnitSpeeds(u: TickCalcUnit, s: Pick<TickCalcSettings, "totem
 export function activeSpeed(u: TickCalcUnit, s: Pick<TickCalcSettings, "totem" | "lead">): number {
   const v = calcUnitSpeeds(u, s);
   return u.buff ? v.buffed : v.normal;
+}
+
+export interface SpeedBlocks {
+  /** 未計入圖騰 / 隊長技的總速度（基礎 + 迅速 + 符文） */
+  total: number;
+  /** 計入圖騰與隊長技後的速度 */
+  normal: number;
+  /** 速度 Buff（+30%，神器可放大） */
+  buffed: number;
+  /** 降速（-30%） */
+  debuffed: number;
+}
+
+/** SWGT 風格的三段速度：降速 / 一般 / Buff */
+export function calcSpeedBlocks(u: TickCalcUnit, s: Pick<TickCalcSettings, "totem" | "lead">): SpeedBlocks {
+  const pct = (s.totem ?? 0) + (s.lead ?? 0);
+  const swift = u.swift ? Math.ceil((u.baseSpd * 25) / 100) : 0;
+  const total = u.baseSpd + swift + u.runeSpd;
+  const normal = total + Math.ceil((u.baseSpd * pct) / 100);
+  const buffPct = 30 * (1 + (u.artifactPct ?? 0) / 100);
+  return {
+    total,
+    normal,
+    buffed: Math.round(normal * (1 + buffPct / 100)),
+    debuffed: Math.round(normal * 0.7),
+  };
 }
 
 /** 速度 → 需要幾個 Tick 才能第一次出手 */
