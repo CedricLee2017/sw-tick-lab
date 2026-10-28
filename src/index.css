@@ -350,6 +350,15 @@ p { margin: 0; }
 .deck-unit { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 48px; min-width: 0; }
 .deck-unit .tiny { max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: var(--muted); }
 .deck-unit.leader .mon-icon { box-shadow: 0 0 0 2px rgba(242,198,92,.45); }
+.deck-unit-icon { position: relative; display: inline-flex; }
+.deck-tick {
+  position: absolute; right: -6px; bottom: -3px;
+  font-size: 9px; font-weight: 800; line-height: 1;
+  padding: 2px 3px; border-radius: 5px;
+  background: rgba(16,23,40,.95); color: #f2c65c;
+  border: 1px solid rgba(242,198,92,.4);
+  pointer-events: none;
+}
 .deck-detail {
   border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px;
   background: rgba(11,17,32,.35);

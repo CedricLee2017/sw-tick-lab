@@ -4,6 +4,7 @@ import { MONSTER_MAP, monsterLabel, useStore } from "../store";
 import { ELEMENTS } from "../lib/constants";
 import { baseStats, statsForRunes } from "../lib/stats";
 import { DECK_TYPE_NUMBERS, deckTypeLabel } from "../lib/deckTypes";
+import { deckContext, spdLeaderApplies, spdLeaderSkill, SPD_AREA_LABEL } from "../lib/deckSpeed";
 import { ArtifactCard, Modal, MonsterIcon, RuneCard, TickBadge, fmt } from "../components/ui";
 import type { Artifact, Deck, DeckEquip, Rune } from "../lib/types";
 
@@ -130,29 +131,61 @@ export default function DecksPage() {
     return [...m.entries()].sort((a, b) => a[0] - b[0]);
   }, [filtered]);
 
-  /** 依這組預設隊的符文 / 神器快照，算出每隻魔靈的速度、Tick 與速度順序 */
-  const speedInfo = useMemo(() => {
-    const m = new Map<number, { spd: number; tick: number; rank: number }>();
-    if (!open || !account) return m;
-    const rows = open.units.map((uid) => {
-      const u = account.units.find((x) => x.id === uid);
-      const monster = u ? MONSTER_MAP.get(u.master) : undefined;
-      const eq = open.equip.find((e) => e.unit === uid);
-      if (!u || !monster) return { uid, spd: 0, tick: 0 };
-      const runes = (eq?.runes ?? []).map((id) => runeMap.get(id)).filter((r): r is Rune => !!r);
-      const arts = (eq?.artifacts ?? []).map((id) => account.artifacts.find((a) => a.id === id)).filter((a): a is Artifact => !!a);
-      const s = statsForRunes(baseStats(monster, u.stars, u.level), runes, bonus, rta, false, arts);
-      return { uid, spd: s.spd, tick: s.tick };
-    });
-    const sorted = [...rows].sort((a, b) => b.spd - a.spd);
-    const ranks = new Map<number, number>();
-    sorted.forEach((r, i) => {
-      const prev = sorted[i - 1];
-      ranks.set(r.uid, prev && prev.spd === r.spd ? ranks.get(prev.uid) ?? i + 1 : i + 1);
-    });
-    for (const r of rows) m.set(r.uid, { spd: r.spd, tick: r.tick, rank: ranks.get(r.uid) ?? 0 });
-    return m;
-  }, [open, account, runeMap, bonus, rta]);
+  /** 依每組預設隊的符文 / 神器快照，算出每隻魔靈的速度、Tick 與速度順序（含隊長的速隊長技） */
+  const speedByDeck = useMemo(() => {
+    const map = new Map<string, { units: Map<number, { spd: number; tick: number; rank: number }>; leaderUid: number; leader: { pct: number; area: string; master: number } | null }>();
+    if (!account) return map;
+    const artMap = new Map(account.artifacts.map((a) => [a.id, a]));
+    const unitById = new Map(account.units.map((u) => [u.id, u]));
+    for (const d of allDecks) {
+      const key = `${d.type}-${d.seq}`;
+      const context = deckContext(d.type);
+      const leaderUid = d.leader || d.units[0] || 0;
+      const leaderUnit = unitById.get(leaderUid);
+      const skill = leaderUnit ? spdLeaderSkill(leaderUnit.master) : null;
+      const rows = d.units.map((uid) => {
+        const u = unitById.get(uid);
+        const monster = u ? MONSTER_MAP.get(u.master) : undefined;
+        if (!u || !monster) return { uid, spd: 0, tick: 0 };
+        const eq = d.equip.find((e) => e.unit === uid);
+        const runes = (eq?.runes ?? []).map((id) => runeMap.get(id)).filter((r): r is Rune => !!r);
+        const arts = (eq?.artifacts ?? []).map((id) => artMap.get(id)).filter((a): a is Artifact => !!a);
+        const leadPct = !leaderUnit
+          ? bonus.leadSpd
+          : skill && spdLeaderApplies(skill, monster.el, context)
+            ? skill.p
+            : 0;
+        const s = statsForRunes(
+          baseStats(monster, u.stars, u.level),
+          runes,
+          leadPct === bonus.leadSpd ? bonus : { ...bonus, leadSpd: leadPct },
+          rta,
+          false,
+          arts,
+        );
+        return { uid, spd: s.spd, tick: s.tick };
+      });
+      const sorted = [...rows].sort((a, b) => b.spd - a.spd);
+      const ranks = new Map<number, number>();
+      sorted.forEach((r, i) => {
+        const prev = sorted[i - 1];
+        ranks.set(r.uid, prev && prev.spd === r.spd ? ranks.get(prev.uid) ?? i + 1 : i + 1);
+      });
+      const units = new Map<number, { spd: number; tick: number; rank: number }>();
+      for (const r of rows) units.set(r.uid, { spd: r.spd, tick: r.tick, rank: ranks.get(r.uid) ?? 0 });
+      map.set(key, {
+        units,
+        leaderUid,
+        leader: skill && leaderUnit ? { pct: skill.p, area: skill.a, master: leaderUnit.master } : null,
+      });
+    }
+    return map;
+  }, [allDecks, account, runeMap, bonus, rta]);
+
+  /** 目前開啟的預設隊的速度資訊 */
+  const openSpeed = open
+    ? speedByDeck.get(`${open.type}-${open.seq}`)
+    : undefined;
 
   if (!account) return <div className="empty"><Layers size={40} /><div>尚未匯入存檔</div></div>;
 
@@ -227,7 +260,8 @@ export default function DecksPage() {
               </div>
               <div className="grid g3" style={{ gap: 10 }}>
                 {list.map((d) => {
-                  const leader = d.leader ? unitMaster(d.leader) : 0;
+                  const deckSpeed = speedByDeck.get(`${d.type}-${d.seq}`);
+                  const leaderUid = deckSpeed?.leaderUid ?? d.leader;
                   return (
                     <div
                       key={`${d.type}-${d.seq}`}
@@ -252,9 +286,13 @@ export default function DecksPage() {
                       <div className="deck-units">
                         {d.units.map((uid) => {
                           const m = unitMaster(uid);
+                          const info = deckSpeed?.units.get(uid);
                           return (
-                            <span key={uid} className={`deck-unit ${leader === m ? "leader" : ""}`} title={unitName(uid)}>
-                              <MonsterIcon id={m} size={34} />
+                            <span key={uid} className={`deck-unit ${uid === leaderUid ? "leader" : ""}`} title={`${unitName(uid)}${info ? ` · SPD ${info.spd} · Tick ${info.tick}（第 ${info.rank} 速）` : ""}`}>
+                              <span className="deck-unit-icon">
+                                <MonsterIcon id={m} size={34} />
+                                {info && info.spd > 0 && <span className="deck-tick">T{info.tick}</span>}
+                              </span>
                               <span className="tiny">{unitName(uid)}</span>
                             </span>
                           );
@@ -291,7 +329,7 @@ export default function DecksPage() {
       {open && (
         <Modal title={`${deckTypeLabel(open.type)} · 第 ${open.seq} 隊`} onClose={() => setOpen(null)} width={940}>
           <div className="row between wrap" style={{ gap: 8, marginBottom: 12 }}>
-            <span className="tiny dim">共 {open.units.length} 隻{open.leader ? ` · 隊長 ${unitName(open.leader)}` : ""}{open.battlePower ? ` · 戰力 ${fmt(open.battlePower)}` : ""}</span>
+            <span className="tiny dim">共 {open.units.length} 隻{open.leader ? ` · 隊長 ${unitName(open.leader)}` : openSpeed?.leaderUid ? ` · 隊長 ${unitName(openSpeed.leaderUid)}（第 1 位）` : ""}{open.battlePower ? ` · 戰力 ${fmt(open.battlePower)}` : ""}</span>
             <div className="row" style={{ gap: 6 }}>
               <span className="tiny dim">預設隊快照（符文 / 神器配置）</span>
               <button type="button" className="btn btn-sm btn-primary" onClick={() => saveWholeDeck(open)}>
@@ -305,9 +343,9 @@ export default function DecksPage() {
               <span className="tiny dim">速度順序（依此預設隊的符文配置計算）</span>
               <span className="tiny dim">Speed Tick</span>
             </div>
-            <div className="row wrap" style={{ gap: 5 }}>
+            <div className="row wrap" style={{ gap: 5, marginBottom: openSpeed?.leader ? 6 : 0 }}>
               {[...open.units]
-                .map((uid) => ({ uid, info: speedInfo.get(uid) }))
+                .map((uid) => ({ uid, info: openSpeed?.units.get(uid) }))
                 .sort((a, b) => (a.info?.rank ?? 99) - (b.info?.rank ?? 99))
                 .map(({ uid, info }) => (
                   <span key={uid} className="chip muted" title={`SPD ${info?.spd ?? 0} · Tick ${info?.tick ?? 0}`}>
@@ -318,6 +356,11 @@ export default function DecksPage() {
                   </span>
                 ))}
             </div>
+            {openSpeed?.leader && (
+              <div className="tiny" style={{ color: "var(--gold, #f2c65c)" }}>
+                隊長技：{monsterLabel(openSpeed.leader.master)} 速度 +{openSpeed.leader.pct}%（{SPD_AREA_LABEL[openSpeed.leader.area] ?? "全內容"}）
+              </div>
+            )}
           </div>
 
           <div className="col" style={{ gap: 14 }}>
@@ -327,7 +370,7 @@ export default function DecksPage() {
               const eq = openEquip.get(uid);
               const runes = (eq?.runes ?? []).map((id: number) => runeMap.get(id)).filter((r): r is Rune => !!r);
               const artifacts = (eq?.artifacts ?? []).map((id: number) => account.artifacts.find((a) => a.id === id)).filter((a): a is Artifact => !!a);
-              const info = speedInfo.get(uid);
+              const info = openSpeed?.units.get(uid);
               return (
                 <div key={uid} className="deck-detail">
                   <div className="row between" style={{ gap: 10 }}>
@@ -337,7 +380,7 @@ export default function DecksPage() {
                         <div className="row wrap" style={{ gap: 6 }}>
                           <b>{unitName(uid)}</b>
                           {monster && <span className={`el-${monster.el}`} style={{ fontSize: 11 }}>{ELEMENTS[monster.el as 1]?.name}</span>}
-                          {uid === open.leader && <span className="chip gold">隊長</span>}
+                          {uid === (open.leader || openSpeed?.leaderUid) && <span className="chip gold">隊長</span>}
                           {info && info.spd > 0 && (
                             <>
                               <span className="chip">第 {info.rank} 速</span>

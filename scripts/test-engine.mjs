@@ -38,6 +38,7 @@ const {
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels,
   rtaStats, rtaView,
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
+  deckContext, spdLeaderSkill, spdLeaderApplies,
 } = engine;
 
 let passed = 0;
@@ -1090,6 +1091,33 @@ check("防守隊：沒有防守資料時不產生隊伍", () => {
   const p = parseAccountJSON(JSON.stringify(raw), "nodef.json");
   assert.equal(p.error, undefined, p.error);
   assert.deepEqual(p.account.defenseDecks, []);
+});
+
+check("預設隊：速度隊長技的內容與屬性範圍", () => {
+  assert.equal(deckContext(1), "arena");
+  assert.equal(deckContext(2), "guild");
+  assert.equal(deckContext(3), "dungeon");
+  assert.equal(deckContext(100), "arena");
+  assert.equal(deckContext(102), "guild");
+
+  const ereshion = spdLeaderSkill(30713);
+  assert.equal(ereshion.p, 33);
+  assert.equal(ereshion.a, "Arena");
+  assert.equal(spdLeaderApplies(ereshion, 3, "arena"), true);
+  assert.equal(spdLeaderApplies(ereshion, 3, "guild"), false);
+
+  const seara = spdLeaderSkill(15713);
+  assert.equal(seara.p, 24);
+  assert.equal(spdLeaderApplies(seara, 1, "guild"), true);
+  assert.equal(spdLeaderApplies(seara, 1, "dungeon"), true);
+
+  const inugami = spdLeaderSkill(11001);
+  assert.equal(inugami.a, "Element");
+  assert.equal(inugami.e, "Water");
+  assert.equal(spdLeaderApplies(inugami, 1, "dungeon"), true);
+  assert.equal(spdLeaderApplies(inugami, 2, "dungeon"), false);
+
+  assert.equal(spdLeaderSkill(10514), null);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
