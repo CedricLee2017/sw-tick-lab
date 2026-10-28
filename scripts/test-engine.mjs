@@ -178,6 +178,29 @@ check("解析成功", () => {
   assert.equal(parsed.account.runes.length, 144);
   assert.ok(parsed.account.buildings.length >= 9);
 });
+check("取得時間軸", () => {
+  assert.equal(parsed.account?.summons?.length ?? 0, 44);
+  const times = (parsed.account?.summons ?? []).map((s) => s.createdAt);
+  assert.deepEqual(times, [...times].sort().reverse());
+  assert.ok(times.every((t) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(t)));
+});
+check("背包 / 保管箱魔靈也會列入取得記錄", () => {
+  const p = parseAccountJSON(JSON.stringify({
+    unit_list: [
+      { unit_id: 1, unit_master_id: 17012, class: 6, unit_level: 40, create_time: "2026-01-02 03:04:05" },
+    ],
+    unit_storage_normal_list: [
+      { unit_id: 2, unit_master_id: 17013, class: 5, unit_level: 1, create_time: "2026-01-01 00:00:00" },
+    ],
+    runes: [
+      { rune_id: 9, set_id: 3, slot_no: 1, class: 6, upgrade_curr: 15, pri_eff: [8, 42], sec_eff: [], occupied_id: 0 },
+    ],
+  }), "storage.json");
+  assert.equal(p.error, undefined);
+  assert.equal(p.account?.summons?.length, 2);
+  assert.equal(p.account?.summons?.[0]?.unitId, 1);
+  assert.equal(p.account?.summons?.[1]?.unitId, 2);
+});
 const account = parsed.account;
 check("自動偵測速度圖騰 15%", () => {
   const b = bonusFromBuildings(account.buildings, { leadSpd: 28 });

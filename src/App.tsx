@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText,
 } from "lucide-react";
 import { useStore } from "./store";
 import ImportPage from "./pages/Import";
 import OverviewPage from "./pages/Overview";
 import MonstersPage from "./pages/Monsters";
+import SummonLogPage from "./pages/SummonLog";
 import SpeedPage from "./pages/SpeedLab";
 import RtaPage from "./pages/Rta";
 import BuildsPage from "./pages/Builds";
@@ -19,7 +20,7 @@ import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 
-type RouteKey = "import" | "overview" | "monsters" | "speed" | "speedtick" | "rta" | "optimizer" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "settings";
+type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -33,6 +34,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "builds", label: "儲存庫", icon: <Bookmark size={17} />, title: "儲存庫", sub: "預設隊與配裝收藏，隨時查看或帶回配符" },
   { key: "decks", label: "預設隊", icon: <Layers size={17} />, title: "預設隊", sub: "遊戲內 deck_list：所有已儲存的隊伍與配置" },
   { key: "monsters", label: "魔靈", icon: <Users size={17} />, title: "魔靈圖鑑", sub: "你的魔靈盒與目前配裝" },
+  { key: "summonlog", label: "魔靈召喚記錄", icon: <ScrollText size={17} />, title: "魔靈召喚記錄", sub: "原4 / 原5 魔靈的取得時間軸" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
   { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },
   { key: "settings", label: "設定", icon: <SettingsIcon size={17} />, title: "設定", sub: "建築、隊長技與進階選項" },
@@ -83,6 +85,7 @@ export default function App() {
       case "builds": return <BuildsPage />;
       case "decks": return <DecksPage />;
       case "monsters": return <MonstersPage />;
+      case "summonlog": return <SummonLogPage />;
       case "runes": return <RunesPage />;
       case "artifacts": return <ArtifactsPage />;
       case "settings": return <SettingsPage />;
@@ -109,14 +112,14 @@ export default function App() {
             </button>
           ))}
           <div className="nav-label">分析</div>
-          {ROUTES.slice(1, 13).map((r) => (
+          {ROUTES.slice(1, 14).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
               {!account && <span className="dim" style={{ marginLeft: "auto", fontSize: 10 }}>—</span>}
             </button>
           ))}
           <div className="nav-label">系統</div>
-          {ROUTES.slice(13).map((r) => (
+          {ROUTES.slice(14).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
             </button>
@@ -175,7 +178,7 @@ export default function App() {
       </div>
 
       <nav className="mobile-nav">
-        {ROUTES.filter((r) => ["import", "overview", "speed", "speedtick", "rta", "optimizer", "artifact-opt", "artifact-ad", "builds", "decks", "runes", "artifacts"].includes(r.key)).map((r) => (
+        {ROUTES.filter((r) => ["import", "overview", "speed", "speedtick", "rta", "optimizer", "artifact-opt", "artifact-ad", "builds", "decks", "summonlog", "runes", "artifacts"].includes(r.key)).map((r) => (
           <button key={r.key} className={route === r.key ? "active" : ""} onClick={() => go(r.key)}>
             {r.icon}
             <span>{r.label}</span>

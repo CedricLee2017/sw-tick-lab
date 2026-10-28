@@ -139,12 +139,16 @@ for (let u = 0; u < 18; u++) {
   }
 }
 
-const unit_list = units.map(({ m, unitId }) => ({
+// create_time 讓「魔靈召喚記錄」頁在示範帳號也有資料（間隔 17 天，最新在前）。
+const demoNow = Date.UTC(2026, 9, 25, 12, 0, 0);
+const unit_list = units.map(({ m, unitId }, i) => ({
   unit_id: unitId,
   unit_master_id: m.id,
   class: 6,
   unit_level: 40,
   stars: 6,
+  create_time: new Date(demoNow - i * 17 * 86400000).toISOString().slice(0, 19).replace("T", " "),
+  source: 42,
   rune_ids: runes.filter((r) => r.occupied_id === unitId).map((r) => r.rune_id),
   artifacts: [],
   locked: 0,

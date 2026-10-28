@@ -1,7 +1,7 @@
 /** SWEX / SWOP JSON 解析（寬容格式） */
 import { runeEfficiency } from "./stats";
 import { RUNE_SETS, SET_BY_ID } from "./constants";
-import type { Account, Artifact, ArtifactSub, Deck, DeckEquip, Rune, RtaData, RtaLoadout, Unit } from "./types";
+import type { Account, Artifact, ArtifactSub, Deck, DeckEquip, Rune, RtaData, RtaLoadout, SummonRecord, Unit } from "./types";
 
 const num = (v: unknown, d = 0): number => {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -181,8 +181,8 @@ export interface ParseResult {
   warnings: string[];
 }
 
-/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值 */
-export const PARSE_VERSION = 7;
+/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值、取得時間軸 */
+export const PARSE_VERSION = 8;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -393,6 +393,43 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     });
   }
 
+  // 魔靈取得時間軸：Unit 只保留最終狀態，但每隻魔靈都有 create_time。
+  // 一般魔靈在 unit_list，背包 / 保管箱的在另外的清單，兩邊都要收。
+  const summons: SummonRecord[] = [];
+  const summonSeen = new Set<number>();
+  const summonSources = [
+    ...rawUnits,
+    ...list(body.unit_storage_normal_list),
+    ...list(body.unit_storage_awaken_list),
+    ...list(body.unit_depository_list),
+  ];
+  for (const u of summonSources) {
+    if (!u || typeof u !== "object") continue;
+    const unitId = num(u.unit_id ?? u.id);
+    const master = num(u.unit_master_id ?? u.master_id ?? u.masterId);
+    let createdAt = "";
+    if (typeof u.create_time === "string") createdAt = u.create_time.trim();
+    else if (num(u.create_time) > 0) {
+      // 數字 timestamp 已經是絕對時間，保留 Z 讓顯示端不再套用伺服器時區。
+      createdAt = new Date(num(u.create_time) * 1000).toISOString();
+    }
+    if (!master || !/^\d{4}-\d{2}-\d{2}/.test(createdAt)) continue;
+    if (unitId && summonSeen.has(unitId)) continue;
+    if (unitId) summonSeen.add(unitId);
+    summons.push({
+      unitId,
+      master,
+      stars: Math.min(6, Math.max(1, num(u.class ?? u.stars ?? u.star, 6))),
+      level: num(u.unit_level ?? u.level, 1),
+      createdAt,
+      source: num(u.source),
+    });
+  }
+  summons.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (summons.length > 0) {
+    warnings.push(`魔靈取得記錄：${summons.length} 筆（含背包 / 保管箱）。`);
+  }
+
   if (nestedArtifacts > 0) {
     const equipped = artifacts.filter((a) => a.occupied > 0).length;
     warnings.push(`已從魔靈身上補齊裝備中的神器 ${equipped} 件（總計 ${artifacts.length} 件）。`);
@@ -544,6 +581,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       rta,
       decks,
       defenseDecks,
+      summons,
     },
     warnings,
   };
@@ -551,6 +589,8 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
 
 /** 產生下載用的精簡 JSON（可再次匯入） */
 export function exportAccount(account: Account): string {
+  const summonMap = new Map((account.summons ?? []).map((s) => [s.unitId, s]));
+  const unitIds = new Set(account.units.map((u) => u.id));
   return JSON.stringify({
     format: "sw-tick-lab",
     version: 1,
@@ -560,9 +600,24 @@ export function exportAccount(account: Account): string {
       unit_master_id: u.master,
       class: u.stars,
       unit_level: u.level,
+      create_time: summonMap.get(u.id)?.createdAt,
+      source: summonMap.get(u.id)?.source,
       rune_ids: u.runes,
       artifact_ids: u.artifacts,
     })),
+    // 背包 / 保管箱中的魔靈不在 account.units，另外輸出才能保留取得時間軸。
+    unit_storage_normal_list: (account.summons ?? [])
+      .filter((s) => !unitIds.has(s.unitId))
+      .map((s) => ({
+        unit_id: s.unitId,
+        unit_master_id: s.master,
+        class: s.stars,
+        unit_level: s.level,
+        create_time: s.createdAt,
+        source: s.source,
+        rune_ids: [],
+        artifacts: [],
+      })),
     artifacts: account.artifacts.map((a) => ({
       rid: a.id,
       type: a.type,

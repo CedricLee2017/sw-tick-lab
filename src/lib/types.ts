@@ -95,6 +95,23 @@ export interface Unit {
   locked: boolean;
 }
 
+/**
+ * 魔靈取得記錄：SWEX / SWOP 匯出檔沒有逐筆召喚 API，
+ * 這裡以每隻魔靈的 create_time（取得時間）與 source 建立時間軸。
+ * 包含背包 / 保管箱中的魔靈。
+ */
+export interface SummonRecord {
+  unitId: number;
+  master: number;
+  /** 取得當下的星級（unit class） */
+  stars: number;
+  level: number;
+  /** 遊戲回傳的 create_time，格式 YYYY-MM-DD HH:mm:ss */
+  createdAt: string;
+  /** 遊戲回傳的 source 代碼（用途未公開，保留原始值） */
+  source: number;
+}
+
 /** RTA（世界競技場）獨立配裝：同一顆符文可以同時出現在一般與 RTA 配裝中 */
 export interface RtaLoadout {
   runes: number[];
@@ -144,6 +161,8 @@ export interface Account {
   decks?: Deck[];
   /** 防守隊（競技場 / 據點戰等） */
   defenseDecks?: Deck[];
+  /** 魔靈取得記錄（舊存檔可能沒有；需重新匯入） */
+  summons?: SummonRecord[];
 }
 
 export interface BonusConfig {
