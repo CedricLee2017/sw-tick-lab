@@ -72,7 +72,7 @@ export default function BuildsPage() {
     <>
       <div className="row between wrap" style={{ gap: 10, marginBottom: 14 }}>
         <div>
-          <div className="card-title">配裝收藏</div>
+          <div className="card-title">配裝儲存庫</div>
           <div className="card-sub">儲存有興趣的符文組合；隨時查看，或一鍵帶回配符頁</div>
         </div>
         <span className="chip gold">{loadouts.length} 組</span>

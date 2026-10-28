@@ -244,7 +244,7 @@ export default function ArtifactOptimizerPage() {
             <span className="focus-title">已儲存的魔靈符文組合</span>
             <span className="tiny dim">點一下即可選擇該魔靈與符文，並立即計算神器</span>
           </div>
-          <a className="tiny" href="#/builds">管理收藏 →</a>
+          <a className="tiny" href="#/builds">管理儲存庫 →</a>
         </div>
         {loadouts.length === 0 ? (
           <div className="tiny dim" style={{ marginTop: 7 }}>

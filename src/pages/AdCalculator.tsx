@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Calculator, Flame, Search } from "lucide-react";
-import { MONSTER_MAP, monsterLabel, useStore } from "../store";
+import { MONSTER_MAP, monsterLabel, useStore, type Loadout } from "../store";
 import {
   addAdEffects,
   artifactAdEffects,
@@ -12,7 +12,7 @@ import {
 } from "../lib/adCalculator";
 import { baseStats, statsForRunes } from "../lib/stats";
 import { artifactKindText, artifactMainText, artifactSubText } from "../lib/artifacts";
-import { NumberField, fmt } from "../components/ui";
+import { MonsterIcon, NumberField, fmt } from "../components/ui";
 import type { Artifact } from "../lib/types";
 
 const ZERO: AdEffects = { hp: 0, atk: 0, def: 0, spd: 0 };
@@ -30,7 +30,9 @@ export default function AdCalculatorPage() {
   const settings = useStore((s) => s.settings);
   const runeMap = useStore((s) => s.runeMap);
   const notify = useStore((s) => s.notify);
+  const loadouts = useStore((s) => s.loadouts);
   const [unitId, setUnitId] = useState(0);
+  const [saved, setSaved] = useState<Loadout | null>(null);
   const [stats, setStats] = useState<AdStats>({ hp: 40000, atk: 2000, def: 1000, spd: 200 });
   const [effects, setEffects] = useState<AdEffects>({ hp: 0.3, atk: 4, def: 4, spd: 40 });
   const [hits, setHits] = useState(3);
@@ -53,15 +55,35 @@ export default function AdCalculatorPage() {
     return m;
   }, [account]);
 
-  const pickUnit = (id: number) => {
-    setUnitId(id);
-    const picked = units.find((x) => x.u.id === id);
+  const applyUnitStats = (unitIdToUse: number, runeIds: number[]) => {
+    const picked = units.find((x) => x.u.id === unitIdToUse);
     if (!picked || !account) return;
     const { u, m } = picked;
     const artifactMap = new Map(account.artifacts.map((a) => [a.id, a]));
     const arts = u.artifacts.map((aid) => artifactMap.get(aid)).filter((a): a is Artifact => !!a);
-    const s = statsForRunes(baseStats(m!, u.stars, u.level), u.runes.map((rid) => runeMap.get(rid)).filter((r): r is NonNullable<typeof r> => !!r), settings.bonus, settings.rta, true, arts);
+    const runes = runeIds.map((rid) => runeMap.get(rid)).filter((r): r is NonNullable<typeof r> => !!r);
+    const s = statsForRunes(baseStats(m!, u.stars, u.level), runes, settings.bonus, settings.rta, true, arts);
     setStats({ hp: s.hp, atk: s.atk, def: s.def, spd: s.spd });
+  };
+
+  const pickUnit = (id: number) => {
+    setUnitId(id);
+    setSaved(null);
+    const picked = units.find((x) => x.u.id === id);
+    if (!picked) return;
+    applyUnitStats(id, picked.u.runes);
+  };
+
+  /** 使用已儲存的魔靈符文組合（套用該組合的符文數值） */
+  const applySaved = (l: Loadout) => {
+    const target =
+      (l.unitId ? units.find((x) => x.u.id === l.unitId && x.u.master === l.monsterId) : undefined) ??
+      units.find((x) => x.u.master === l.monsterId);
+    if (!target) return notify("找不到這組收藏對應的魔靈", "err");
+    setUnitId(target.u.id);
+    setSaved(l);
+    applyUnitStats(target.u.id, l.runeIds);
+    notify(`已套用收藏配裝「${l.name}」的面板數值`);
   };
 
   const result = useMemo(() => calculateAd(stats, effects, hits), [stats, effects, hits]);
@@ -124,6 +146,47 @@ export default function AdCalculatorPage() {
             </select>
           </div>
         </div>
+        {saved && (
+          <div className="row wrap" style={{ gap: 6, marginTop: 10 }}>
+            <span className="chip gold">使用收藏：{saved.name}</span>
+            <button className="btn btn-sm btn-ghost" style={{ padding: "1px 7px", fontSize: 10.5 }} onClick={() => pickUnit(unitId)}>
+              改用目前裝備
+            </button>
+            <span className="tiny dim">已用該組符文重新計算面板數值</span>
+          </div>
+        )}
+      </div>
+
+      <div className="card card-pad" style={{ marginBottom: 14 }}>
+        <div className="row between wrap" style={{ gap: 8 }}>
+          <div className="row" style={{ gap: 7 }}>
+            <span className="focus-title">已儲存的魔靈符文組合</span>
+            <span className="tiny dim">點一下即可用該組符文的面板數值計算追傷</span>
+          </div>
+          <a className="tiny" href="#/builds">管理儲存庫 →</a>
+        </div>
+        {loadouts.length === 0 ? (
+          <div className="tiny dim" style={{ marginTop: 7 }}>尚無收藏。到配符結果按「儲存為配裝」，就會出現在這裡。</div>
+        ) : (
+          <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+            {loadouts.slice(0, 16).map((l) => (
+              <button
+                key={l.id}
+                type="button"
+                className={`saved-build-card ${saved?.id === l.id ? "on" : ""}`}
+                onClick={() => applySaved(l)}
+                title={`${l.name} · ${l.stats.spd} 速`}
+              >
+                <MonsterIcon id={l.monsterId} size={30} />
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: 11.5, fontWeight: 700 }}>{monsterLabel(l.monsterId)}</span>
+                  <span className="tiny dim">T{l.stats.tick} · {l.stats.spd} 速 · {l.runeIds.length}/6</span>
+                </span>
+              </button>
+            ))}
+            {loadouts.length > 16 && <span className="tiny dim" style={{ alignSelf: "center" }}>+{loadouts.length - 16}</span>}
+          </div>
+        )}
       </div>
 
       <div className="grid g2" style={{ gap: 14, alignItems: "start" }}>

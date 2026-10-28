@@ -1025,7 +1025,7 @@ export default function OptimizerPage() {
             <div className="card card-pad builds-strip">
               <div className="row between" style={{ gap: 8 }}>
                 <div className="row" style={{ gap: 8, minWidth: 0 }}>
-                  <span className="focus-title">配裝收藏</span>
+                  <span className="focus-title">儲存庫</span>
                   <span className="tiny dim">點擊套用收藏（符文設為包括）</span>
                 </div>
                 <a className="tiny" href="#/builds">全部收藏 →</a>
