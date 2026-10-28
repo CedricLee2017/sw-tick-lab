@@ -16,7 +16,7 @@ export interface TickCalcUnit {
   monsterId: number;
   /** 基礎速度 */
   baseSpd: number;
-  /** 符文提供的固定速度 */
+  /** 符文 + 套裝的總速度（= 遊戲內 Total Speed − 基礎速度，含迅速加成） */
   runeSpd: number;
   /** 迅速套裝（+25% 基礎速度） */
   swift: boolean;
@@ -40,16 +40,18 @@ export const AB_RATES: { label: string; short: string; rate: number; note: strin
 export const LEAD_PRESETS = [0, 10, 15, 16, 17, 19, 20, 21, 23, 24, 28, 30, 33];
 export const TOTEM_PRESETS = [0, 5, 10, 15];
 
+/** 迅速套裝：基礎速度 +25% */
+export const SWIFT_SET_BONUS_PCT = 25;
+
+/** 迅速套裝提供的固定速度（= ceil(基礎速度 × 25%)，與 SWGT 相同） */
+export function swiftSetBonus(baseSpd: number): number {
+  return Math.ceil((baseSpd * SWIFT_SET_BONUS_PCT) / 100);
+}
+
 /** 單隻魔靈在目前圖騰 / 隊長技下的速度 */
 export function calcUnitSpeeds(u: TickCalcUnit, s: Pick<TickCalcSettings, "totem" | "lead">) {
-  const pct = (s.totem ?? 0) + (s.lead ?? 0);
-  const swift = u.swift ? Math.ceil((u.baseSpd * 25) / 100) : 0;
-  const normal = u.baseSpd + Math.ceil((u.baseSpd * pct) / 100) + swift + u.runeSpd;
-  // 速度 Buff：基礎速度 +30%；神器「速度增加效果」會再放大 Buff 的效果
-  const buffPct = 30 * (1 + (u.artifactPct ?? 0) / 100);
-  const buffed = normal + Math.ceil((u.baseSpd * buffPct) / 100);
-  const debuffed = normal - Math.ceil((u.baseSpd * 30) / 100);
-  return { normal, buffed, debuffed };
+  const b = calcSpeedBlocks(u, s);
+  return { normal: b.normal, buffed: b.buffed, debuffed: b.debuffed };
 }
 
 /** 這隻魔靈實際用於計算 Tick 的速度 */
@@ -59,7 +61,7 @@ export function activeSpeed(u: TickCalcUnit, s: Pick<TickCalcSettings, "totem" |
 }
 
 export interface SpeedBlocks {
-  /** 未計入圖騰 / 隊長技的總速度（基礎 + 迅速 + 符文） */
+  /** 未計入圖騰 / 隊長技的總速度（基礎 + 符文，符文含迅速加成） */
   total: number;
   /** 計入圖騰與隊長技後的速度 */
   normal: number;
@@ -69,12 +71,22 @@ export interface SpeedBlocks {
   debuffed: number;
 }
 
-/** SWGT 風格的三段速度：降速 / 一般 / Buff */
+/**
+ * SWGT 風格的三段速度：降速 / 一般 / Buff。
+ *
+ * 公式與 SWGT 完全一致：
+ *   final = ceil((1 + 天空圖騰% + 速度隊長% + 迅速0.25) × 基礎速度 + (符文速度 − 迅速加成))
+ * 其中 `runeSpd` 是「符文 + 套裝」的總和（= 遊戲內 Total Speed − 基礎速度），
+ * 所以迅速加成要先扣掉、再用倍率加回來，才不會重複計算。
+ */
 export function calcSpeedBlocks(u: TickCalcUnit, s: Pick<TickCalcSettings, "totem" | "lead">): SpeedBlocks {
-  const pct = (s.totem ?? 0) + (s.lead ?? 0);
-  const swift = u.swift ? Math.ceil((u.baseSpd * 25) / 100) : 0;
+  const totem = (s.totem ?? 0) / 100;
+  const lead = (s.lead ?? 0) / 100;
+  const swift = u.swift ? SWIFT_SET_BONUS_PCT / 100 : 0;
+  const swiftBonus = u.swift ? swiftSetBonus(u.baseSpd) : 0;
   const total = Math.ceil(u.baseSpd + u.runeSpd);
-  const normal = u.baseSpd + Math.ceil((u.baseSpd * pct) / 100) + swift + u.runeSpd;
+  const normal = Math.ceil((1 + totem + lead + swift) * u.baseSpd + (u.runeSpd - swiftBonus));
+  // 速度 Buff：最終速度 +30%；神器「速度增加效果」會再放大 Buff 的效果
   const buffPct = 30 * (1 + (u.artifactPct ?? 0) / 100);
   return {
     total,
@@ -113,7 +125,7 @@ export interface TurnEvent {
   name: string;
   team: "blue" | "red";
   spd: number;
-  /** 出手後剩下的攻擊條 %（溢出的部分） */
+  /** 出手當下的攻擊條 %（出手後會歸 0） */
   ab: number;
 }
 
@@ -144,7 +156,7 @@ export interface ExtraSpeed {
 
 export interface FrameCell {
   unitId: string;
-  /** 該 Tick 開始時的攻擊條 %（含拉條） */
+  /** 該 Tick 累積到的攻擊條 %（出手前，含拉條） */
   ab: number;
   /** 這個 Tick 是否有出手 */
   acted: boolean;
@@ -172,6 +184,10 @@ export function simulateTickOrder(
 /**
  * 進階模擬：拉條、速度增減、額外速度。
  * `mods` / `adds` 從指定 Tick 起持續生效，`boosts` 只在指定 Tick 生效一次。
+ *
+ * 出手規則與 SWGT 相同：
+ * - 每個 Tick 只有「攻擊條最高且 ≥ 100」的那一隻出手
+ * - 出手後攻擊條歸 0，超出的部分不保留
  */
 export function simulateAdvanced(
   units: { id: string; name: string; spd: number; team: "blue" | "red"; priority: number }[],
@@ -205,34 +221,44 @@ export function simulateAdvanced(
       if (ab.has(b.unitId)) ab.set(b.unitId, (ab.get(b.unitId) ?? 0) + b.pct);
     }
 
+    // 這一格顯示「出手前」累積的攻擊條（與 SWGT 的 Tick 表一致）
     const cells: FrameCell[] = units.map((u) => ({ unitId: u.id, ab: ab.get(u.id) ?? 0, acted: false }));
 
-    let guard = 0;
-    while (guard++ < 60) {
-      const ready = units.filter((u) => (ab.get(u.id) ?? 0) >= 100 - 1e-9);
-      if (!ready.length) break;
-      ready.sort(
-        (a, b) =>
-          (ab.get(b.id) ?? 0) - (ab.get(a.id) ?? 0) ||
-          a.priority - b.priority ||
-          (a.team === b.team ? 0 : a.team === "blue" ? -1 : 1) ||
-          a.name.localeCompare(b.name),
-      );
-      const u = ready[0];
-      const left = (ab.get(u.id) ?? 0) - 100;
-      ab.set(u.id, left);
-      const cell = cells.find((c) => c.unitId === u.id);
+    // 一個 Tick 只有一隻出手：攻擊條最高者；同值時比 Priority，再比藍隊優先
+    let actor: (typeof units)[number] | null = null;
+    for (const u of units) {
+      const v = ab.get(u.id) ?? 0;
+      if (v < 100 - 1e-9) continue;
+      if (!actor) {
+        actor = u;
+        continue;
+      }
+      const av = ab.get(actor.id) ?? 0;
+      if (v > av + 1e-9) {
+        actor = u;
+      } else if (Math.abs(v - av) <= 1e-9) {
+        if (u.priority < actor.priority) actor = u;
+        else if (u.priority === actor.priority) {
+          if (u.team !== actor.team && u.team === "blue") actor = u;
+          else if (u.team === actor.team && u.name.localeCompare(actor.name) < 0) actor = u;
+        }
+      }
+    }
+
+    if (actor) {
+      const value = ab.get(actor.id) ?? 0;
+      const cell = cells.find((c) => c.unitId === actor!.id);
       if (cell) cell.acted = true;
       events.push({
         turn: events.length + 1,
         tick,
-        id: u.id,
-        name: u.name,
-        team: u.team,
-        spd: Math.round(speedAt(u, tick) * 10) / 10,
-        ab: Math.round(left * 10) / 10,
+        id: actor.id,
+        name: actor.name,
+        team: actor.team,
+        spd: Math.round(speedAt(actor, tick) * 10) / 10,
+        ab: Math.round(value * 10) / 10,
       });
-      if (events.length >= maxTurns) break;
+      ab.set(actor.id, 0);
     }
 
     if (frames.length < maxTicks) {

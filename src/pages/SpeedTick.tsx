@@ -10,6 +10,7 @@ import {
   LEAD_PRESETS,
   calcSpeedBlocks,
   simulateAdvanced,
+  swiftSetBonus,
   tickBrackets,
   type AbBoost,
   type ExtraSpeed,
@@ -331,6 +332,7 @@ export default function SpeedTickPage() {
   /** 由符文計算固定速度與迅速套裝 */
   const makeUnit = (master: number, runeIds: number[], team: "blue" | "red"): Omit<TickCalcUnit, "id" | "priority"> => {
     const m = MONSTER_MAP.get(master);
+    const baseSpd = m?.spd ?? 100;
     let runeSpd = 0;
     let swiftCount = 0;
     for (const rid of runeIds) {
@@ -341,12 +343,15 @@ export default function SpeedTickPage() {
       if (r.prefix?.t === 8) runeSpd += r.prefix.v;
       for (const s of r.subs) if (s.t === 8) runeSpd += s.v + (s.g ?? 0);
     }
+    // 「符文速度」欄位含套裝加成（= 遊戲 Total Speed − 基礎速度），所以迅速要加進去
+    const swift = swiftCount >= 4;
+    if (swift) runeSpd += swiftSetBonus(baseSpd);
     return {
       name: m?.name ?? "魔靈",
       monsterId: master,
-      baseSpd: m?.spd ?? 100,
+      baseSpd,
       runeSpd,
-      swift: swiftCount >= 4,
+      swift,
       buff: false,
       artifactPct: 0,
       leadOverride: null,
@@ -728,8 +733,16 @@ export default function SpeedTickPage() {
                   </div>
 
                   <div className="st-line">
-                    <span>Spd from Runes (+)</span>
-                    <input className="input mono" type="number" value={u.runeSpd} onChange={(e) => update(u.id, { runeSpd: numOr0(e.target.value) })} />
+                    <span title="符文 + 套裝的總和（= 遊戲內 Total Speed − 基礎速度）；開迅速時要含 25% 的加成">
+                      Spd from Runes (+)
+                    </span>
+                    <input
+                      className="input mono"
+                      type="number"
+                      title="符文 + 套裝的總和（含迅速加成）"
+                      value={u.runeSpd}
+                      onChange={(e) => update(u.id, { runeSpd: numOr0(e.target.value) })}
+                    />
                   </div>
                   <div className="st-line">
                     <span>Artifact Spd Buff + %</span>
@@ -798,7 +811,7 @@ export default function SpeedTickPage() {
                     <th>Monster</th>
                     <th className="num">Base Speed</th>
                     <th>Speed Lead</th>
-                    <th className="num">Spd from Runes (+)</th>
+                    <th className="num" title="符文 + 套裝的總和（含迅速加成）">Spd from Runes (+)</th>
                     <th className="num">Artifact Spd Buff + %</th>
                     <th className="num">Total Speed</th>
                     <th className="num">Final Speed</th>
@@ -853,7 +866,7 @@ export default function SpeedTickPage() {
           <div className="card card-pad">
             <div className="row between" style={{ gap: 8, marginBottom: 6 }}>
               <div className="card-title">TICKS</div>
-              <span className="tiny dim">每格為該 Tick 開始時的攻擊條 %（含拉條）</span>
+              <span className="tiny dim">每格為該 Tick 累積到（出手前）的攻擊條 %；出手後歸 0</span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table className="table st-matrix" style={{ minWidth: 120 + TICKS.length * 74 }}>
@@ -1335,11 +1348,11 @@ export default function SpeedTickPage() {
           <div className="card-title" style={{ marginBottom: 10 }}>FAQ</div>
           <div className="col" style={{ gap: 12 }}>
             {[
-              ["什麼是 Tick？", "遊戲的出手順序由攻擊條決定。每經過一個 Tick，每隻魔靈會依「速度 × 每 Tick 攻擊條 %」增加攻擊條；達到 100% 就能出手，超出的部分會保留。一般為 7%、RTA 為 1.5%、討伐為 4.5%。"],
-              ["速度是怎麼算的？", "最終速度 = 基礎速度 + ceil(基礎速度 ×（天空圖騰 + 速度隊長技）%) + 迅速套裝（基礎速度 +25%）+ 符文速度。速度 Buff 為最終速度再 +30%，降速為 -30%。"],
+              ["什麼是 Tick？", "遊戲的出手順序由攻擊條決定。每經過一個 Tick，每隻魔靈會依「速度 × 每 Tick 攻擊條 %」增加攻擊條；達到 100% 就能出手，出手後攻擊條歸 0。一般為 7%、RTA 為 1.5%、討伐為 4.5%。"],
+              ["速度是怎麼算的？", "最終速度 = ceil((1 + 天空圖騰% + 速度隊長% + 迅速 25%) × 基礎速度 + (符文速度 − 迅速加成))。其中「Spd from Runes (+)」是符文 + 套裝的總和（= 遊戲內 Total Speed − 基礎速度），開迅速時要含那 25%，公式會先扣掉再加回去，所以不會重複計算。速度 Buff 為最終速度再 +30%（神器會放大），降速為 −30%。"],
               ["Total Speed 與三段速度的差別？", "Total Speed 是「基礎速度 + 符文速度」，不含圖騰與隊長技；下面的三段速度才是實際戰鬥中降速／一般／Buff 的數值。"],
               ["三段速度後面的小數字是什麼？", "是「距離下一個 Tick 門檻還差多少速度」，也就是要再快多少才能早一個 Tick 出手。"],
-              ["出手順序怎麼決定？", "同一個 Tick 內攻擊條高者先出手；攻擊條相同時比 Priority，Priority 相同再比藍隊優先。"],
+              ["出手順序怎麼決定？", "每個 Tick 只有攻擊條最高（且 ≥ 100）的那一隻出手；同值時比 Priority，Priority 相同再比藍隊優先。出手後攻擊條歸 0，超出的部分不保留，所以每隻的出手間隔固定是 ceil(100 ÷ 每 Tick 攻條)。"],
               ["拉條、速度增減、額外速度何時生效？", "拉條只在指定的那一個 Tick 生效一次；速度增減與額外速度會從指定 Tick 起持續生效。拉條角通常要設定在自己出手後的下一 Tick。"],
               ["快速套用其他人的設定？", "目前可以直接把設定存到 Saves，之後讀取回來；資料只存在這台電腦的瀏覽器。"],
             ].map(([q, a]) => (

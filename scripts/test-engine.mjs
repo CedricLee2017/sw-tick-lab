@@ -39,7 +39,7 @@ const {
   rtaStats, rtaView,
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
-  tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced,
+  tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
 } = engine;
 
 let passed = 0;
@@ -1146,11 +1146,24 @@ check("Speed Tick 計算器：速度、門檻與出手順序", () => {
     swift: true, buff: false, artifactPct: 0, team: "blue", priority: 1,
   };
   const plain = calcUnitSpeeds(unit, { totem: 15, lead: 0 });
-  assert.equal(plain.normal, 240); // 100 + 15 + 25 + 100
-  assert.equal(plain.buffed, 270); // + 30% 基礎速度
-  assert.equal(plain.debuffed, 210);
+  // SWGT：ceil((1 + 0.15 + 0.25) × 100 + (100 − 25))
+  assert.equal(plain.normal, 215);
+  assert.equal(plain.buffed, 280); // ceil(215 × 1.3)
+  assert.equal(plain.debuffed, 151); // ceil(215 × 0.7)
   const withArtifact = calcUnitSpeeds({ ...unit, artifactPct: 10 }, { totem: 15, lead: 0 });
-  assert.equal(withArtifact.buffed, 273); // Buff 變成 +33%
+  assert.equal(withArtifact.buffed, 286); // Buff 變成 +33%
+
+  // 迅速加成 = ceil(基礎速度 × 25%)
+  assert.equal(swiftSetBonus(101), 26);
+  assert.equal(swiftSetBonus(120), 30);
+
+  // 與 SWGT 相同的輸入必須得到相同的結果（數值取自 SWGT 頁面實測）
+  const swgtNormal = (baseSpd, runeSpd, swift, lead) =>
+    calcUnitSpeeds({ ...unit, baseSpd, runeSpd, swift }, { totem: 15, lead }).normal;
+  assert.equal(swgtNormal(101, 191, true, 33), 340); // Ereshion
+  assert.equal(swgtNormal(120, 0, true, 33), 178); // Kabilla
+  assert.equal(swgtNormal(104, 0, false, 33), 154); // Wind Elder Horn
+  assert.equal(swgtNormal(101, 0, false, 33), 150); // Jasmine
 
   const order = simulateTickOrder(
     [
@@ -1160,13 +1173,26 @@ check("Speed Tick 計算器：速度、門檻與出手順序", () => {
     7,
     3,
   );
+  // 一個 Tick 只有一隻出手，出手後攻條歸 0（溢出不保留）
   assert.equal(order[0].id, "fast");
   assert.equal(order[0].tick, 8);
-  assert.equal(order[1].id, "fast");
+  assert.equal(order[1].id, "slow");
   assert.equal(order[1].tick, 15);
-  assert.equal(order[2].id, "slow");
-  assert.equal(order[2].tick, 15);
+  assert.equal(order[2].id, "fast");
+  assert.equal(order[2].tick, 16);
   assert.equal(order[0].turn, 1);
+
+  // 三隻同時達標時，一 Tick 只讓攻擊條最高（或 Priority 較前）的出手
+  const triple = simulateTickOrder(
+    [
+      { id: "a", name: "A", spd: 200, team: "blue", priority: 1 },
+      { id: "b", name: "B", spd: 190, team: "blue", priority: 2 },
+      { id: "c", name: "C", spd: 180, team: "blue", priority: 3 },
+    ],
+    7,
+    3,
+  );
+  assert.deepEqual(triple.map((e) => [e.tick, e.id]), [[8, "a"], [9, "b"], [10, "c"]]);
 
   // 拉條：兩隻同速，其中一隻在 Tick 5 拉 50% 攻擊條
   const adv = simulateAdvanced(
@@ -1181,6 +1207,7 @@ check("Speed Tick 計算器：速度、門檻與出手順序", () => {
   );
   assert.equal(adv.events[0].id, "a");
   assert.equal(adv.events[0].tick, 8);
+  // Tick 表顯示「出手前」的攻擊條
   assert.equal(Math.round(adv.frames[7].cells.find((c) => c.unitId === "a").ab), 106);
 
   // 速度增減：從 Tick 1 起 +30% 速度
