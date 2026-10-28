@@ -20,8 +20,10 @@ import {
 
 const STORAGE_KEY = "swtick:speedcalc";
 const SAVES_KEY = "swtick:speedcalc:saves";
-const TICKS = Array.from({ length: 16 }, (_, i) => i);
-const MAX_UNITS = 12;
+const TICKS = Array.from({ length: 71 }, (_, i) => i);
+/** 與 SWGT 相同：每隊最多 15 隻（兩隊共 30 隻） */
+const MAX_PER_TEAM = 15;
+const MAX_TOTAL = MAX_PER_TEAM * 2;
 
 type Tab = "monsters" | "advanced" | "order" | "tickview" | "saves" | "faq";
 type SortBy = "added" | "spd" | "spdBuff" | "spdDebuff";
@@ -157,6 +159,15 @@ export default function SpeedTickPage() {
     mode: "increase" | "decrease" | "clear" | "fill";
     amount: number;
   } | null>(null);
+  /** 速度增減 / 額外速度的「範圍套用」：一次填好一段 Tick（與 SWGT 的 From～To 相同） */
+  const [rangeModal, setRangeModal] = useState<{
+    kind: "mod" | "add";
+    unitId: string;
+    from: number;
+    to: number;
+    value: number;
+    mode: "flat" | "pct";
+  } | null>(null);
 
   useEffect(() => {
     const state: CalcState = { rate, totemBlue, leadBlue, totemRed, leadRed, sortBy, units, boosts, mods, adds };
@@ -186,6 +197,9 @@ export default function SpeedTickPage() {
     return u.buff ? b.buffed : b.normal;
   };
 
+  const teamCount = (team: "blue" | "red") => units.filter((u) => u.team === team).length;
+  const teamFull = (team: "blue" | "red") => teamCount(team) >= MAX_PER_TEAM;
+
   const ordered = useMemo(() => {
     const arr = units.map((u, i) => ({ u, i, spd: speedOf(u), b: blocksOf(u) }));
     if (sortBy === "spd") arr.sort((a, b) => b.b.normal - a.b.normal);
@@ -197,18 +211,29 @@ export default function SpeedTickPage() {
 
   const simUnits = useMemo(
     () =>
-      units.map((u, i) => ({
-        id: u.id,
-        name: u.name || `魔靈 ${i + 1}`,
-        spd: speedOf(u),
-        team: u.team,
-        priority: u.priority ?? i + 1,
-      })),
+      units.map((u, i) => {
+        const ctx = ctxOf(u);
+        const artifactPct = u.artifactPct ?? 0;
+        return {
+          id: u.id,
+          name: u.name || `魔靈 ${i + 1}`,
+          spd: speedOf(u),
+          team: u.team,
+          priority: u.priority ?? i + 1,
+          baseSpd: u.baseSpd,
+          runeSpd: u.runeSpd,
+          swift: u.swift,
+          artifactPct,
+          // 額外速度 % 在 SWGT 是加進圖騰 / 隊長這個桶（乘基礎速度）
+          bonusPct: ctx.totem + ctx.lead,
+          buffPct: u.buff ? 30 * (1 + artifactPct / 100) : 0,
+        };
+      }),
     [units, totemBlue, leadBlue, totemRed, leadRed],
   );
 
   const { events, frames } = useMemo(
-    () => simulateAdvanced(simUnits, rate, { boosts, mods, adds }, 40, 16),
+    () => simulateAdvanced(simUnits, rate, { boosts, mods, adds }, 40, TICKS.length),
     [simUnits, rate, boosts, mods, adds],
   );
 
@@ -232,6 +257,13 @@ export default function SpeedTickPage() {
     return above.length ? above[0] - spd : 0;
   };
 
+  /**
+   * Buff 欄的 To Next Tick：SWGT 會把差值除以 Buff 倍率，換算回「還沒 Buff 時」的速度差。
+   * 例如 Buff 後 442、下一階 477 → (477 − 442) ÷ 1.3 ≈ 27。
+   */
+  const buffGapToNextTick = (buffed: number, artifactPct: number) =>
+    Math.round(gapToNextTick(buffed) / (1 + 0.3 * (1 + (artifactPct ?? 0) / 100)));
+
   const update = (id: string, patch: Partial<TickCalcUnit>) =>
     setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
 
@@ -245,7 +277,7 @@ export default function SpeedTickPage() {
   const addMonster = (id: number) => {
     const m = MONSTER_MAP.get(id);
     setUnits((prev) => {
-      if (prev.length >= MAX_UNITS) return prev;
+      if (prev.filter((u) => u.team === "blue").length >= MAX_PER_TEAM) return prev;
       return [
         ...prev,
         {
@@ -266,7 +298,7 @@ export default function SpeedTickPage() {
   };
 
   const openPicker = () => {
-    if (units.length >= MAX_UNITS) return notify(`最多只能加入 ${MAX_UNITS} 隻魔靈`, "err");
+    if (teamFull("blue")) return notify(`藍隊最多 ${MAX_PER_TEAM} 隻魔靈`, "err");
     setPickedCount(0);
     setLastPicked("");
     setPickQ("");
@@ -294,7 +326,7 @@ export default function SpeedTickPage() {
   }, [pickQ, pickEl, pickNat, pickAwake]);
 
   const addBlank = () => {
-    if (units.length >= MAX_UNITS) return;
+    if (teamFull("blue")) return;
     setUnits((prev) => [
       ...prev,
       {
@@ -310,8 +342,8 @@ export default function SpeedTickPage() {
    * 這樣複製出來的角色才會是同速（畫面上會顯示成該隊的 Speed Lead）。
    */
   const copyUnit = (src: TickCalcUnit) => {
-    if (units.length >= MAX_UNITS) return notify(`最多只能加入 ${MAX_UNITS} 隻魔靈`, "err");
     const team: "blue" | "red" = src.team === "blue" ? "red" : "blue";
+    if (teamFull(team)) return notify(`${team === "blue" ? "藍隊" : "紅隊"}最多 ${MAX_PER_TEAM} 隻魔靈`, "err");
     const srcLead = src.leadOverride ?? (src.team === "blue" ? leadBlue : leadRed);
     const destLead = team === "blue" ? leadBlue : leadRed;
     const spd = blocksOf(src).normal;
@@ -360,8 +392,16 @@ export default function SpeedTickPage() {
   };
 
   const appendUnits = (list: Omit<TickCalcUnit, "id" | "priority">[]) => {
-    const room = MAX_UNITS - units.length;
-    const take = list.slice(0, Math.max(0, room));
+    const room: Record<"blue" | "red", number> = {
+      blue: MAX_PER_TEAM - teamCount("blue"),
+      red: MAX_PER_TEAM - teamCount("red"),
+    };
+    const take: Omit<TickCalcUnit, "id" | "priority">[] = [];
+    for (const u of list) {
+      if (room[u.team] <= 0) continue;
+      room[u.team]--;
+      take.push(u);
+    }
     if (!take.length) return 0;
     setUnits((prev) => {
       const start = Math.max(0, ...prev.map((p) => p.priority));
@@ -372,14 +412,14 @@ export default function SpeedTickPage() {
 
   const addLoadout = (l: Loadout) => {
     const n = appendUnits([makeUnit(l.monsterId, l.runeIds, "blue")]);
-    if (n === 0) notify(`最多 ${MAX_UNITS} 隻魔靈`, "err");
+    if (n === 0) notify(`藍隊最多 ${MAX_PER_TEAM} 隻魔靈`, "err");
     else notify(`已加入 ${MONSTER_MAP.get(l.monsterId)?.name ?? "魔靈"}（攻擊方）`);
   };
 
   const addDeckFav = (d: DeckFav) => {
     const team: "blue" | "red" = d.type >= 100 ? "red" : "blue";
     const n = appendUnits(d.units.map((u) => makeUnit(u.master, u.runeIds, team)));
-    if (n === 0) notify(`最多 ${MAX_UNITS} 隻魔靈`, "err");
+    if (n === 0) notify(`${team === "blue" ? "藍隊" : "紅隊"}最多 ${MAX_PER_TEAM} 隻魔靈`, "err");
     else notify(`已加入 ${n} 隻（${team === "blue" ? "攻擊方" : "防守方"}）`);
   };
 
@@ -511,6 +551,61 @@ export default function SpeedTickPage() {
     return `將對${label}在 Tick ${lo} - ${hi} ${boostModal.mode === "increase" ? "增加" : "減少"} ${Math.abs(boostModal.amount)}% 攻擊條`;
   };
 
+  const openRangeModal = (kind: "mod" | "add") =>
+    setRangeModal({
+      kind,
+      unitId: units[0]?.id ?? "",
+      from: 0,
+      to: TICKS[TICKS.length - 1],
+      value: kind === "mod" ? 30 : 20,
+      mode: "flat",
+    });
+
+  /** 套用速度增減 / 額外速度的範圍：每個 Tick 各存一筆（與 SWGT 相同，只影響那一格） */
+  const applyRangeModal = (clearOnly = false) => {
+    if (!rangeModal) return;
+    const lo = Math.min(rangeModal.from, rangeModal.to);
+    const hi = Math.max(rangeModal.from, rangeModal.to);
+    const targets = units.filter((u) => (rangeModal.unitId ? u.id === rangeModal.unitId : true));
+    const ids = new Set(targets.map((u) => u.id));
+    const ticks = TICKS.filter((t) => t >= lo && t <= hi);
+
+    if (rangeModal.kind === "mod") {
+      setMods((prev) => {
+        const kept = prev.filter((m) => !(ids.has(m.unitId) && m.tick >= lo && m.tick <= hi));
+        if (clearOnly) return kept;
+        const added = targets.flatMap((u) =>
+          ticks.map((t) => ({ id: uid("m"), unitId: u.id, tick: t, pct: rangeModal.value })),
+        );
+        return [...kept, ...added];
+      });
+    } else {
+      setAdds((prev) => {
+        const kept = prev.filter((a) => !(ids.has(a.unitId) && a.tick >= lo && a.tick <= hi));
+        if (clearOnly) return kept;
+        const added = targets.flatMap((u) =>
+          ticks.map((t) => ({ id: uid("a"), unitId: u.id, tick: t, value: rangeModal.value, mode: rangeModal.mode })),
+        );
+        return [...kept, ...added];
+      });
+    }
+    setRangeModal(null);
+  };
+
+  const rangePreview = () => {
+    if (!rangeModal) return "";
+    const lo = Math.min(rangeModal.from, rangeModal.to);
+    const hi = Math.max(rangeModal.from, rangeModal.to);
+    const who = rangeModal.unitId
+      ? units.find((u) => u.id === rangeModal.unitId)?.name ?? "魔靈"
+      : "全部魔靈";
+    if (rangeModal.kind === "mod") {
+      return `將把 ${who} 在 Tick ${lo} - ${hi} 的速度增減設為 ${rangeModal.value}%`;
+    }
+    const v = rangeModal.mode === "pct" ? `${rangeModal.value}%` : `${rangeModal.value}`;
+    return `將把 ${who} 在 Tick ${lo} - ${hi} 的額外速度設為 +${v}`;
+  };
+
   return (
     <>
       <div className="row between wrap" style={{ gap: 10, marginBottom: 12 }}>
@@ -606,9 +701,9 @@ export default function SpeedTickPage() {
               placeholder="Name, family, or element…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              disabled={units.length >= MAX_UNITS}
+              disabled={teamFull("blue")}
             />
-            <button className="btn" onClick={openPicker} disabled={units.length >= MAX_UNITS}>手動新增</button>
+            <button className="btn" onClick={openPicker} disabled={teamFull("blue")}>手動新增</button>
             {q.trim() && (
               <div className="st-search-results">
                 {searchResults.length === 0 && <div className="tiny dim" style={{ padding: 10 }}>找不到魔靈</div>}
@@ -664,7 +759,7 @@ export default function SpeedTickPage() {
                     <div className="field">
                       <label>Priority</label>
                       <select className="select" value={u.priority} onChange={(e) => update(u.id, { priority: Number(e.target.value) })}>
-                        {Array.from({ length: 24 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                        {Array.from({ length: 30 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
                       </select>
                     </div>
                     <div className="field">
@@ -774,7 +869,13 @@ export default function SpeedTickPage() {
                       <div className="row" style={{ gap: 4, justifyContent: "center" }}>
                         <b className="mono">{b.buffed}</b>
                         <ArrowRight size={11} className="dim" />
-                        <span className="mono" style={{ fontSize: 12 }}>{gapToNextTick(b.buffed)}</span>
+                        <span
+                          className="mono"
+                          style={{ fontSize: 12 }}
+                          title="Buff 欄的 To Next Tick 會除以 Buff 倍率，換算回未 Buff 時的速度差（與 SWGT 相同）"
+                        >
+                          {buffGapToNextTick(b.buffed, u.artifactPct)}
+                        </span>
                       </div>
                       <small>Atk Spd +</small>
                     </div>
@@ -788,7 +889,7 @@ export default function SpeedTickPage() {
             <div className="empty" style={{ padding: "36px 16px" }}>
               <Timer size={32} style={{ opacity: .3, marginBottom: 8 }} />
               <div style={{ fontWeight: 600, color: "var(--text)" }}>還沒有加入魔靈</div>
-              <div className="tiny dim" style={{ marginTop: 4 }}>可以從儲存庫的配裝或預設隊一鍵載入（最多 12 隻）</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>可以從儲存庫的配裝或預設隊一鍵載入（每隊最多 15 隻）</div>
               <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "center" }}>
                 <button className="btn btn-primary" onClick={() => setLoadOpen(true)}>
                   <Upload size={13} /> 從儲存庫載入
@@ -963,9 +1064,12 @@ export default function SpeedTickPage() {
           <div className="card card-pad">
             <div className="row between" style={{ gap: 8, marginBottom: 6 }}>
               <div className="card-title">SPEED MODIFIER</div>
-              <button className="btn btn-sm" onClick={() => setMods([])}>Clear</button>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn btn-sm" onClick={() => openRangeModal("mod")}>範圍套用</button>
+                <button className="btn btn-sm" onClick={() => setMods([])}>Clear</button>
+              </div>
             </div>
-            <div className="tiny dim" style={{ marginBottom: 6 }}>在對應格輸入速度增減 %（從該 Tick 起持續生效，例如 30 或 -30）</div>
+            <div className="tiny dim" style={{ marginBottom: 6 }}>每格只在該 Tick 生效（例如 30 或 -30）；正向增減會被神器「速度增加效果」放大</div>
             <div style={{ overflowX: "auto" }}>
               <table className="table st-matrix" style={{ minWidth: 120 + TICKS.length * 74 }}>
                 <thead>
@@ -998,9 +1102,12 @@ export default function SpeedTickPage() {
           <div className="card card-pad">
             <div className="row between" style={{ gap: 8, marginBottom: 6 }}>
               <div className="card-title">ADDITIONAL SPEED</div>
-              <button className="btn btn-sm" onClick={() => setAdds([])}>Clear</button>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn btn-sm" onClick={() => openRangeModal("add")}>範圍套用</button>
+                <button className="btn btn-sm" onClick={() => setAdds([])}>Clear</button>
+              </div>
             </div>
-            <div className="tiny dim" style={{ marginBottom: 6 }}>在對應格輸入額外速度（固定值，從該 Tick 起持續生效）</div>
+            <div className="tiny dim" style={{ marginBottom: 6 }}>每格只在該 Tick 生效；固定值加在符文速度，「%」則加進圖騰／隊長桶（乘基礎速度）</div>
             <div style={{ overflowX: "auto" }}>
               <table className="table st-matrix" style={{ minWidth: 120 + TICKS.length * 74 }}>
                 <thead>
@@ -1188,7 +1295,7 @@ export default function SpeedTickPage() {
                           </div>
                         </div>
                       </div>
-                      <button className="btn btn-sm" disabled={units.length >= MAX_UNITS} onClick={() => addLoadout(l)}>
+                      <button className="btn btn-sm" disabled={teamFull("blue")} onClick={() => addLoadout(l)}>
                         加入
                       </button>
                     </div>
@@ -1227,7 +1334,7 @@ export default function SpeedTickPage() {
                           </div>
                         </div>
                       </div>
-                      <button className="btn btn-sm" disabled={units.length >= MAX_UNITS} onClick={() => addDeckFav(d)}>
+                      <button className="btn btn-sm" disabled={teamFull(d.type >= 100 ? "red" : "blue")} onClick={() => addDeckFav(d)}>
                         加入整隊
                       </button>
                     </div>
@@ -1237,7 +1344,7 @@ export default function SpeedTickPage() {
           </div>
 
           <div className="tiny dim" style={{ lineHeight: 1.6 }}>
-            加入後可回到 Monsters 調整隊伍、基礎速度或拉條；最多 12 隻，超過時只會加入剩下的名額。
+            加入後可回到 Monsters 調整隊伍、基礎速度或拉條；每隊最多 15 隻（共 30 隻），超過時只會加入剩下的名額。
           </div>
         </Modal>
       )}
@@ -1343,6 +1450,120 @@ export default function SpeedTickPage() {
         </Modal>
       )}
 
+      {rangeModal && (
+        <Modal
+          title={rangeModal.kind === "mod" ? "SPEED MODIFIER - 範圍套用" : "ADDITIONAL SPEED - 範圍套用"}
+          onClose={() => setRangeModal(null)}
+          width={620}
+        >
+          <div className="st-modal-sec">
+            <div className="st-modal-label">TARGET</div>
+            <div className="tiny dim">選擇要套用的魔靈（或全部）</div>
+            <select
+              className="select"
+              style={{ marginTop: 8, width: "100%" }}
+              value={rangeModal.unitId}
+              onChange={(e) => setRangeModal({ ...rangeModal, unitId: e.target.value })}
+            >
+              <option value="">全部魔靈（{units.length} 隻）</option>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name || "魔靈"}（{u.team === "blue" ? "藍 攻" : "紅 守"}）
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="st-modal-sec">
+            <div className="st-modal-label">TICK RANGE</div>
+            <div className="tiny dim">每個 Tick 會各自存一筆，只影響那一格（與 SWGT 相同）</div>
+            <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
+              <span className="tiny dim">From:</span>
+              <input
+                className="input mono"
+                type="number"
+                min={0}
+                max={TICKS[TICKS.length - 1]}
+                value={rangeModal.from}
+                onChange={(e) => setRangeModal({ ...rangeModal, from: clampTick(Number(e.target.value)) })}
+                style={{ width: 80 }}
+              />
+              <span className="tiny dim">To:</span>
+              <input
+                className="input mono"
+                type="number"
+                min={0}
+                max={TICKS[TICKS.length - 1]}
+                value={rangeModal.to}
+                onChange={(e) => setRangeModal({ ...rangeModal, to: clampTick(Number(e.target.value)) })}
+                style={{ width: 80 }}
+              />
+              <button className="btn btn-sm" onClick={() => setRangeModal({ ...rangeModal, to: TICKS[TICKS.length - 1] })}>Max</button>
+            </div>
+          </div>
+
+          {rangeModal.kind === "add" && (
+            <div className="st-modal-sec">
+              <div className="st-modal-label">SPEED TYPE</div>
+              <div className="st-type-grid">
+                {([
+                  { key: "flat", icon: "#", title: "Flat Speed", sub: "固定值，加在符文速度" },
+                  { key: "pct", icon: "%", title: "Percentage", sub: "% 加進圖騰／隊長桶（乘基礎速度）" },
+                ] as const).map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    className={`st-type ${rangeModal.mode === t.key ? "on" : ""}`}
+                    onClick={() => setRangeModal({ ...rangeModal, mode: t.key })}
+                  >
+                    <div className="st-type-icon">{t.icon}</div>
+                    <div className="t">{t.title}</div>
+                    <div className="tiny dim">{t.sub}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="st-modal-sec">
+            <div className="st-modal-label">AMOUNT</div>
+            <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+              {(rangeModal.kind === "mod" ? [-50, -30, -20, 20, 30, 50] : [5, 10, 15, 20, 30, 50]).map((v) => (
+                <button
+                  key={v}
+                  className={`btn btn-sm ${rangeModal.value === v ? "btn-primary" : ""}`}
+                  onClick={() => setRangeModal({ ...rangeModal, value: v })}
+                >
+                  {v > 0 ? "+" : ""}{v}{rangeModal.kind === "add" && rangeModal.mode === "pct" ? "%" : rangeModal.kind === "mod" ? "%" : ""}
+                </button>
+              ))}
+              <span className="row" style={{ gap: 4 }}>
+                <span className="tiny dim">Custom:</span>
+                <input
+                  className="input mono"
+                  type="number"
+                  value={rangeModal.value}
+                  onChange={(e) => setRangeModal({ ...rangeModal, value: Number(e.target.value) || 0 })}
+                  style={{ width: 80 }}
+                />
+                <span className="tiny dim">{rangeModal.kind === "mod" || rangeModal.mode === "pct" ? "%" : "速"}</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="st-modal-sec">
+            <div className="st-modal-label">PENDING ACTION（預覽）</div>
+            <div className="st-pending">{rangePreview()}</div>
+          </div>
+
+          <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+            <button className="btn" onClick={() => setRangeModal(null)}>Cancel</button>
+            <button className="btn" onClick={() => applyRangeModal(true)}>清除此範圍</button>
+            <button className="btn btn-primary" onClick={() => applyRangeModal(false)}>Set</button>
+          </div>
+        </Modal>
+      )}
+
       {tab === "faq" && (
         <div className="card card-pad">
           <div className="card-title" style={{ marginBottom: 10 }}>FAQ</div>
@@ -1351,9 +1572,9 @@ export default function SpeedTickPage() {
               ["什麼是 Tick？", "遊戲的出手順序由攻擊條決定。每經過一個 Tick，每隻魔靈會依「速度 × 每 Tick 攻擊條 %」增加攻擊條；達到 100% 就能出手，出手後攻擊條歸 0。一般為 7%、RTA 為 1.5%、討伐為 4.5%。"],
               ["速度是怎麼算的？", "最終速度 = ceil((1 + 天空圖騰% + 速度隊長% + 迅速 25%) × 基礎速度 + (符文速度 − 迅速加成))。其中「Spd from Runes (+)」是符文 + 套裝的總和（= 遊戲內 Total Speed − 基礎速度），開迅速時要含那 25%，公式會先扣掉再加回去，所以不會重複計算。速度 Buff 為最終速度再 +30%（神器會放大），降速為 −30%。"],
               ["Total Speed 與三段速度的差別？", "Total Speed 是「基礎速度 + 符文速度」，不含圖騰與隊長技；下面的三段速度才是實際戰鬥中降速／一般／Buff 的數值。"],
-              ["三段速度後面的小數字是什麼？", "是「距離下一個 Tick 門檻還差多少速度」，也就是要再快多少才能早一個 Tick 出手。"],
+              ["三段速度後面的小數字是什麼？", "是「距離下一個 Tick 門檻還差多少速度」，也就是要再快多少才能早一個 Tick 出手。Buff 欄的小數字會先除以 Buff 倍率（1 + 30% ×（1 + 神器%）），換算成「還沒 Buff 時」的速度差，與 SWGT 相同。"],
               ["出手順序怎麼決定？", "每個 Tick 只有攻擊條最高（且 ≥ 100）的那一隻出手；同值時比 Priority，Priority 相同再比藍隊優先。出手後攻擊條歸 0，超出的部分不保留，所以每隻的出手間隔固定是 ceil(100 ÷ 每 Tick 攻條)。"],
-              ["拉條、速度增減、額外速度何時生效？", "拉條只在指定的那一個 Tick 生效一次；速度增減與額外速度會從指定 Tick 起持續生效。拉條角通常要設定在自己出手後的下一 Tick。"],
+              ["拉條、速度增減、額外速度何時生效？", "三種都只在「指定的那一個 Tick」生效（與 SWGT 相同）。要套用一整段請按該表格右上角的「範圍套用」，選 From～To 後會幫你逐格填入。速度增減是「速度 ×（1 + %）」，正向的部分會被神器「速度增加效果」放大；額外速度的固定值加在符文速度，% 則加進圖騰／隊長桶（乘基礎速度）。"],
               ["快速套用其他人的設定？", "目前可以直接把設定存到 Saves，之後讀取回來；資料只存在這台電腦的瀏覽器。"],
             ].map(([q, a]) => (
               <div key={q}>
@@ -1417,7 +1638,7 @@ export default function SpeedTickPage() {
                 key={m.id}
                 type="button"
                 className="mp-card"
-                disabled={units.length >= MAX_UNITS}
+                disabled={teamFull("blue")}
                 title={`${m.name} · ${ELEMENTS[m.el as 1].name} · ${m.nat}★ · 基礎速度 ${m.spd}`}
                 onClick={() => {
                   addMonster(m.id);
@@ -1439,8 +1660,8 @@ export default function SpeedTickPage() {
 
           <div className="row between" style={{ marginTop: 12, gap: 10 }}>
             <span className="tiny dim">
-              已加入 {pickedCount} 隻{lastPicked && `（最近：${lastPicked}）`} · 目前 {units.length}/{MAX_UNITS}
-              {units.length >= MAX_UNITS && " · 已達上限"}
+              已加入 {pickedCount} 隻{lastPicked && `（最近：${lastPicked}）`} · 藍隊 {teamCount("blue")}/{MAX_PER_TEAM}
+              {teamFull("blue") && " · 已達上限"}
             </span>
             <div className="row" style={{ gap: 8 }}>
               <button

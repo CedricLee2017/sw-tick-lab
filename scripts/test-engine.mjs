@@ -1210,19 +1210,62 @@ check("Speed Tick 計算器：速度、門檻與出手順序", () => {
   // Tick 表顯示「出手前」的攻擊條
   assert.equal(Math.round(adv.frames[7].cells.find((c) => c.unitId === "a").ab), 106);
 
-  // 速度增減：從 Tick 1 起 +30% 速度
+  // 速度增減：只在指定的那一個 Tick 生效（與 SWGT 相同）
   const modded = simulateAdvanced(
-    [
-      { id: "a", name: "A", spd: 100, team: "blue", priority: 1 },
-      { id: "b", name: "B", spd: 100, team: "red", priority: 2 },
-    ],
+    [{ id: "a", name: "A", spd: 100, team: "blue", priority: 1 }],
     7,
     { mods: [{ id: "m", unitId: "a", tick: 1, pct: 30 }] },
-    1,
-    20,
+    4,
+    3,
   );
-  assert.equal(modded.events[0].id, "a");
-  assert.equal(modded.events[0].tick, 11);
+  assert.equal(modded.frames[0].cells[0].ab.toFixed(3), "9.100"); // 130 × 7%
+  assert.equal(modded.frames[1].cells[0].ab.toFixed(3), "16.100"); // 回到 100 速
+  assert.equal(modded.frames[2].cells[0].ab.toFixed(3), "23.100");
+
+  // 正向的速度增減會被神器「速度增加效果」放大：30% × 1.1 = 33%
+  const modArt = simulateAdvanced(
+    [{ id: "a", name: "A", spd: 100, team: "blue", priority: 1, artifactPct: 10 }],
+    7,
+    { mods: [{ id: "m", unitId: "a", tick: 1, pct: 30 }] },
+    4,
+    2,
+  );
+  assert.equal(modArt.frames[0].cells[0].ab.toFixed(3), "9.310"); // 133 × 7%
+
+  // 負向的速度增減不吃神器
+  const modDown = simulateAdvanced(
+    [{ id: "a", name: "A", spd: 100, team: "blue", priority: 1, artifactPct: 10 }],
+    7,
+    { mods: [{ id: "m", unitId: "a", tick: 1, pct: -30 }] },
+    4,
+    2,
+  );
+  assert.equal(modDown.frames[0].cells[0].ab.toFixed(3), "4.900"); // 70 × 7%
+
+  // 額外速度：% 加進圖騰／隊長桶（乘基礎速度），固定值加進符文速度
+  const addBase = {
+    id: "a", name: "A", spd: 115, baseSpd: 100, runeSpd: 0, bonusPct: 15,
+    team: "blue", priority: 1,
+  };
+  const addPct = simulateAdvanced(
+    [addBase],
+    7,
+    { adds: [{ id: "x", unitId: "a", tick: 1, value: 30, mode: "pct" }] },
+    4,
+    2,
+  );
+  // 115 → ceil((1 + 0.45) × 100) = 145
+  assert.equal(addPct.frames[0].cells[0].ab.toFixed(3), "10.150");
+  assert.equal(addPct.frames[1].cells[0].ab.toFixed(3), "18.200");
+  const addFlat = simulateAdvanced(
+    [addBase],
+    7,
+    { adds: [{ id: "x", unitId: "a", tick: 1, value: 30, mode: "flat" }] },
+    4,
+    2,
+  );
+  assert.equal(addFlat.frames[0].cells[0].ab.toFixed(3), "10.150"); // ceil(115 + 30)
+  assert.equal(addFlat.frames[1].cells[0].ab.toFixed(3), "18.200");
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
