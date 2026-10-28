@@ -6,6 +6,15 @@ import { ElementTag, MonsterIcon } from "../components/ui";
 
 const PAGE_SIZES = [10, 25, 50];
 
+/** 屬性 ID → 顏色變數（與符文 / 魔靈頁一致） */
+const EL_VAR: Record<number, string> = {
+  1: "var(--water)",
+  2: "var(--fire)",
+  3: "var(--wind)",
+  4: "var(--light)",
+  5: "var(--dark)",
+};
+
 /**
  * 遊戲的 create_time 是伺服器時間（UTC+9），顯示時換算成瀏覽器本地時間，
  * 例如 2026-10-26 11:39:09（UTC+9）→ 香港時間 2026/10/26 10:39。
@@ -43,7 +52,8 @@ function pageWindow(current: number, pages: number): (number | "gap")[] {
 export default function SummonLogPage() {
   const account = useStore((s) => s.account);
   const [nat, setNat] = useState<0 | 4 | 5>(0);
-  const [el, setEl] = useState(0);
+  /** 可多選；空陣列 = 全部屬性 */
+  const [els, setEls] = useState<number[]>([]);
   const [q, setQ] = useState("");
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
@@ -67,20 +77,35 @@ export default function SummonLogPage() {
     return { five, four, total: records.length };
   }, [records]);
 
-  const filtered = useMemo(() => {
+  // 先套用「原生星數 + 名稱」條件；屬性按鈕上的數量才不會被屬性篩選自己影響。
+  const pool = useMemo(() => {
     const key = q.trim().toLowerCase();
-    const arr = records.filter(({ record, monster }) => {
+    return records.filter(({ record, monster }) => {
       if (nat && monster.nat !== nat) return false;
-      if (el && monster.el !== el) return false;
       if (key && !monster.name.toLowerCase().includes(key) && String(record.master) !== key) return false;
       return true;
     });
-    return arr.sort((a, b) =>
+  }, [records, nat, q]);
+
+  const elCounts = useMemo(() => {
+    const c: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const x of pool) c[x.monster.el] = (c[x.monster.el] ?? 0) + 1;
+    return c;
+  }, [pool]);
+
+  const filtered = useMemo(() => {
+    const arr = els.length === 0 ? pool : pool.filter(({ monster }) => els.includes(monster.el));
+    return [...arr].sort((a, b) =>
       newestFirst
         ? b.record.createdAt.localeCompare(a.record.createdAt)
         : a.record.createdAt.localeCompare(b.record.createdAt),
     );
-  }, [records, nat, el, q, newestFirst]);
+  }, [pool, els, newestFirst]);
+
+  const toggleEl = (n: number) => {
+    setEls((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)));
+    setPage(1);
+  };
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
@@ -137,17 +162,6 @@ export default function SummonLogPage() {
               onChange={(e) => { setQ(e.target.value); setPage(1); }}
             />
           </div>
-          <select
-            className="select"
-            style={{ width: 110 }}
-            value={el}
-            onChange={(e) => { setEl(Number(e.target.value)); setPage(1); }}
-          >
-            <option value={0}>全屬性</option>
-            {[1, 2, 3, 4, 5].map((n) => (
-              <option key={n} value={n}>{ELEMENTS[n as 1].name}</option>
-            ))}
-          </select>
           <button
             className="btn btn-sm"
             title={newestFirst ? "目前：最新在前" : "目前：最舊在前"}
@@ -156,6 +170,46 @@ export default function SummonLogPage() {
             {newestFirst ? "最新在前 ↓" : "最舊在前 ↑"}
           </button>
         </div>
+      </div>
+
+      <div className="row wrap" style={{ gap: 6, marginBottom: 14, alignItems: "center" }}>
+        <span className="tiny dim" style={{ marginRight: 2 }}>屬性</span>
+        <button
+          className={`chip ${els.length === 0 ? "gold" : "muted"}`}
+          style={{ cursor: "pointer", fontWeight: els.length === 0 ? 700 : 500 }}
+          onClick={() => { setEls([]); setPage(1); }}
+          title="顯示全部屬性"
+        >
+          全屬性 · {pool.length}
+        </button>
+        {[1, 2, 3, 4, 5].map((n) => {
+          const on = els.includes(n);
+          const dim = els.length > 0 && !on;
+          return (
+            <button
+              key={n}
+              className="chip"
+              onClick={() => toggleEl(n)}
+              title={`${ELEMENTS[n as 1].name}屬性 · 點擊${on ? "取消" : "加入"}篩選（可多選）`}
+              style={{
+                cursor: "pointer",
+                padding: "5px 11px",
+                color: dim ? "var(--muted-2)" : EL_VAR[n],
+                background: on ? "rgba(255, 255, 255, .06)" : "transparent",
+                borderColor: on ? EL_VAR[n] : "var(--line-soft)",
+                boxShadow: on ? `inset 0 0 0 1px ${EL_VAR[n]}` : "none",
+                fontWeight: on ? 700 : 500,
+              }}
+            >
+              {on ? "✓ " : ""}{ELEMENTS[n as 1].name} · {elCounts[n] ?? 0}
+            </button>
+          );
+        })}
+        {els.length > 1 && (
+          <span className="tiny dim" style={{ marginLeft: 4 }}>
+            已選 {els.length} 個屬性（符合任一個）
+          </span>
+        )}
       </div>
 
       <div className="card">
