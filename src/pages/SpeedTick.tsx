@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { RotateCcw, Save as SaveIcon, Timer, Trash2, Upload, X } from "lucide-react";
+import { RotateCcw, Save as SaveIcon, Timer, Trash2, Upload, X, Copy, ArrowRight } from "lucide-react";
 import { ELEMENTS } from "../lib/constants";
 import { MONSTERS, MONSTER_MAP } from "../store";
 import { MonsterIcon } from "../components/ui";
@@ -9,7 +9,6 @@ import {
   calcSpeedBlocks,
   simulateAdvanced,
   tickBrackets,
-  tickFor,
   type AbBoost,
   type ExtraSpeed,
   type SpeedModifier,
@@ -21,7 +20,7 @@ const SAVES_KEY = "swtick:speedcalc:saves";
 const TICKS = Array.from({ length: 16 }, (_, i) => i);
 const MAX_UNITS = 12;
 
-type Tab = "monsters" | "advanced" | "order" | "tickview" | "saves";
+type Tab = "monsters" | "advanced" | "order" | "tickview" | "saves" | "faq";
 type SortBy = "added" | "spd" | "spdBuff" | "spdDebuff";
 
 const TABS: { key: Tab; label: string }[] = [
@@ -30,6 +29,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "order", label: "Turn Order" },
   { key: "tickview", label: "Tick View" },
   { key: "saves", label: "Saves" },
+  { key: "faq", label: "FAQ" },
 ];
 
 interface CalcState {
@@ -196,6 +196,16 @@ export default function SpeedTickPage() {
   const brackets = useMemo(() => tickBrackets(rate, 12), [rate]);
   const activeRate = AB_RATES.find((r) => r.rate === rate);
 
+  /** 距離下一個 Tick 門檻還差多少速度（SWGT 的 To Next Tick） */
+  const gapToNextTick = (spd: number) => {
+    const above = brackets
+      .filter((b) => b.tick >= 3 && b.tick <= 11)
+      .map((b) => b.minSpeed)
+      .filter((v) => v > spd)
+      .sort((a, b) => a - b);
+    return above.length ? above[0] - spd : 0;
+  };
+
   const update = (id: string, patch: Partial<TickCalcUnit>) =>
     setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
 
@@ -235,6 +245,14 @@ export default function SpeedTickPage() {
         id: uid(), name: `魔靈 ${prev.length + 1}`, monsterId: 0, baseSpd: 100,
         runeSpd: 0, swift: false, buff: false, artifactPct: 0, team: "blue", priority: prev.length + 1,
       },
+    ]);
+  };
+
+  const copyUnit = (src: TickCalcUnit) => {
+    if (units.length >= MAX_UNITS) return;
+    setUnits((prev) => [
+      ...prev,
+      { ...src, id: uid(), priority: Math.max(0, ...prev.map((x) => x.priority)) + 1 },
     ]);
   };
 
@@ -308,6 +326,20 @@ export default function SpeedTickPage() {
   };
 
   const modsFor = (unitId: string, tick: number) => mods.filter((m) => m.unitId === unitId && m.tick <= tick);
+
+  /** 額外速度可以輸入「20」或「20%」 */
+  const setAddCell = (unitId: string, tick: number, raw: string) => {
+    const found = adds.find((a) => a.unitId === unitId && a.tick === tick);
+    if (raw.trim() === "") {
+      if (found) setAdds(adds.filter((a) => a !== found));
+      return;
+    }
+    const pct = raw.includes("%");
+    const n = Number(raw.replace("%", "").trim());
+    if (!Number.isFinite(n)) return;
+    if (found) setAdds(adds.map((a) => (a === found ? { ...a, value: n, mode: pct ? "pct" : "flat" } : a)));
+    else setAdds([...adds, { id: uid("a"), unitId, tick, value: n, mode: pct ? "pct" : "flat" }]);
+  };
 
   return (
     <>
@@ -423,14 +455,14 @@ export default function SpeedTickPage() {
               const lead = u.leadOverride ?? (u.team === "blue" ? leadBlue : leadRed);
               const monster = MONSTER_MAP.get(u.monsterId);
               return (
-                <div key={u.id} className="st-card">
+                <div key={u.id} className="st-card" style={{ borderColor: u.team === "blue" ? "rgba(110,168,255,.75)" : "rgba(255,122,122,.75)" }}>
                   <div className="row between" style={{ gap: 6 }}>
                     <div className="row" style={{ gap: 8, minWidth: 0 }}>
                       <MonsterIcon id={u.monsterId} size={46} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name || "—"}</div>
                         <div className="tiny dim">
-                          {monster ? ELEMENTS[monster.el as 1]?.name : "自訂"} · {monster ? `★${monster.nat}` : "手動"}
+                          {monster ? `${ELEMENTS[monster.el as 1]?.name} · ★${monster.nat}` : "自訂魔靈"}
                         </div>
                       </div>
                     </div>
@@ -442,7 +474,10 @@ export default function SpeedTickPage() {
                         title="切換隊伍"
                         onClick={() => update(u.id, { team: u.team === "blue" ? "red" : "blue" })}
                       >
-                        {u.team === "blue" ? "藍" : "紅"}
+                        {u.team === "blue" ? "✕" : "○"}
+                      </button>
+                      <button type="button" className="btn btn-sm btn-ghost btn-icon" title="複製這隻" onClick={() => copyUnit(u)}>
+                        <Copy size={12} />
                       </button>
                       <button type="button" className="btn btn-sm btn-ghost btn-icon" title="刪除" onClick={() => removeUnit(u.id)}>
                         <X size={13} />
@@ -454,25 +489,48 @@ export default function SpeedTickPage() {
                     <div className="field">
                       <label>Priority</label>
                       <select className="select" value={u.priority} onChange={(e) => update(u.id, { priority: Number(e.target.value) })}>
-                        {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                        {Array.from({ length: 24 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
                       </select>
                     </div>
                     <div className="field">
                       <label>Team</label>
-                      <select className="select" value={u.team} onChange={(e) => update(u.id, { team: e.target.value as "blue" | "red" })}>
-                        <option value="blue">藍隊</option>
-                        <option value="red">紅隊</option>
-                      </select>
+                      <div className="row" style={{ gap: 4 }}>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${u.team === "blue" ? "btn-primary" : ""}`}
+                          style={u.team === "blue" ? undefined : { color: TEAM.blue.color }}
+                          onClick={() => update(u.id, { team: "blue" })}
+                        >
+                          藍
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${u.team === "red" ? "btn-primary" : ""}`}
+                          style={u.team === "red" ? { background: "#b23b3b", borderColor: "#b23b3b" } : { color: TEAM.red.color }}
+                          onClick={() => update(u.id, { team: "red" })}
+                        >
+                          紅
+                        </button>
+                      </div>
                     </div>
                     <div className="field">
                       <label>Swift Set?</label>
-                      <button
-                        type="button"
-                        className={`btn btn-sm ${u.swift ? "btn-primary" : ""}`}
-                        onClick={() => update(u.id, { swift: !u.swift })}
-                      >
-                        {u.swift ? "Yes" : "No"}
-                      </button>
+                      <div className="row" style={{ gap: 4 }}>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${u.swift ? "btn-primary" : ""}`}
+                          onClick={() => update(u.id, { swift: true })}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${!u.swift ? "btn-primary" : ""}`}
+                          onClick={() => update(u.id, { swift: false })}
+                        >
+                          No
+                        </button>
+                      </div>
                     </div>
                     <div className="field">
                       <label>Base Speed</label>
@@ -512,23 +570,26 @@ export default function SpeedTickPage() {
 
                   <div className="st-blocks">
                     <div className="st-block" style={{ background: "rgba(255,122,122,.16)", borderColor: "rgba(255,122,122,.4)" }}>
-                      <div className="row" style={{ gap: 5 }}>
+                      <div className="row" style={{ gap: 4, justifyContent: "center" }}>
                         <b className="mono">{b.debuffed}</b>
-                        <span className="tiny dim">T{tickFor(b.debuffed, rate)}</span>
+                        <ArrowRight size={11} className="dim" />
+                        <span className="mono" style={{ fontSize: 12 }}>{gapToNextTick(b.debuffed)}</span>
                       </div>
                       <small>Atk Spd −</small>
                     </div>
                     <div className="st-block" style={{ background: "rgba(242,198,92,.14)", borderColor: "rgba(242,198,92,.4)" }}>
-                      <div className="row" style={{ gap: 5 }}>
+                      <div className="row" style={{ gap: 4, justifyContent: "center" }}>
                         <b className="mono">{b.normal}</b>
-                        <span className="tiny dim">T{tickFor(b.normal, rate)}</span>
+                        <ArrowRight size={11} className="dim" />
+                        <span className="mono" style={{ fontSize: 12 }}>{gapToNextTick(b.normal)}</span>
                       </div>
                       <small>Atk Spd</small>
                     </div>
                     <div className="st-block" style={{ background: "rgba(95,191,95,.14)", borderColor: "rgba(95,191,95,.4)" }}>
-                      <div className="row" style={{ gap: 5 }}>
+                      <div className="row" style={{ gap: 4, justifyContent: "center" }}>
                         <b className="mono">{b.buffed}</b>
-                        <span className="tiny dim">T{tickFor(b.buffed, rate)}</span>
+                        <ArrowRight size={11} className="dim" />
+                        <span className="mono" style={{ fontSize: 12 }}>{gapToNextTick(b.buffed)}</span>
                       </div>
                       <small>Atk Spd +</small>
                     </div>
@@ -579,7 +640,17 @@ export default function SpeedTickPage() {
                         <td className="num">
                           <input className="input mono st-cell" type="number" value={u.baseSpd} onChange={(e) => update(u.id, { baseSpd: numOr0(e.target.value) })} />
                         </td>
-                        <td>Default ({lead}%)</td>
+                        <td>
+                          <select
+                            className="select"
+                            style={{ width: 128, padding: "4px 8px" }}
+                            value={u.leadOverride ?? ""}
+                            onChange={(e) => update(u.id, { leadOverride: e.target.value === "" ? null : Number(e.target.value) })}
+                          >
+                            <option value="">Default ({lead}%)</option>
+                            {LEAD_PRESETS.map((v) => <option key={v} value={v}>{v}%</option>)}
+                          </select>
+                        </td>
                         <td className="num">
                           <span className="row" style={{ gap: 3, justifyContent: "flex-end" }}>
                             <button className="btn btn-sm btn-ghost btn-icon" onClick={() => update(u.id, { runeSpd: Math.max(0, u.runeSpd - 1) })}>−</button>
@@ -725,16 +796,19 @@ export default function SpeedTickPage() {
                   {ordered.map(({ u }) => (
                     <tr key={u.id}>
                       <td style={{ color: TEAM[u.team].color, whiteSpace: "nowrap" }}>{u.name}</td>
-                      {TICKS.map((t) => (
-                        <td key={t}>
-                          <input
-                            className="input mono st-cell"
-                            type="number"
-                            value={adds.find((a) => a.unitId === u.id && a.tick === t)?.value ?? ""}
-                            onChange={(e) => setCell(adds, setAdds, u.id, t, e.target.value, () => ({ id: uid("a"), unitId: u.id, tick: t, value: 0, mode: "flat" as const }), (item, v) => ({ ...item, value: v }))}
-                          />
-                        </td>
-                      ))}
+                      {TICKS.map((t) => {
+                        const a = adds.find((x) => x.unitId === u.id && x.tick === t);
+                        return (
+                          <td key={t}>
+                            <input
+                              className="input mono st-cell"
+                              type="text"
+                              value={a ? (a.mode === "pct" ? `${a.value}%` : `${a.value}`) : ""}
+                              onChange={(e) => setAddCell(u.id, t, e.target.value)}
+                            />
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -801,24 +875,27 @@ export default function SpeedTickPage() {
             <div className="card-title">TICK VIEW</div>
             <span className="tiny dim">每個 Tick 的攻擊條與出手</span>
           </div>
-          <div className="col" style={{ gap: 7 }}>
+          <div className="col" style={{ gap: 6 }}>
             {frames.map((f) => (
-              <div key={f.tick} className="row wrap" style={{ gap: 5 }}>
-                <span className="chip gold">T{f.tick}</span>
-                {[...f.cells].sort((a, b) => b.ab - a.ab).map((c) => {
-                  const u = units.find((x) => x.id === c.unitId);
-                  const team = u?.team ?? "blue";
-                  return (
-                    <span
-                      key={c.unitId}
-                      className="chip"
-                      style={{ ...TEAM[team], opacity: c.acted ? 1 : .62, fontWeight: c.acted ? 800 : 500 }}
-                      title={c.acted ? "這個 Tick 出手" : "尚未出手"}
-                    >
-                      {u?.name || "—"} {Math.round(c.ab)}%
-                    </span>
-                  );
-                })}
+              <div key={f.tick} className="st-tv-row">
+                <div className={`st-tv-tick ${f.cells.some((c) => c.acted) ? "hit" : ""}`}>
+                  <div className="tiny">Tick</div>
+                  <div style={{ fontSize: 17, fontWeight: 800 }}>{f.tick}</div>
+                </div>
+                <div className="row wrap" style={{ gap: 8 }}>
+                  {[...f.cells].sort((a, b) => b.ab - a.ab).map((c) => {
+                    const u = units.find((x) => x.id === c.unitId);
+                    const team = u?.team ?? "blue";
+                    const pct = Math.max(0, Math.min(100, c.ab));
+                    return (
+                      <div key={c.unitId} className={`st-tv-mon ${c.acted ? "acted" : ""}`} style={{ opacity: c.acted ? 1 : .72 }}>
+                        <MonsterIcon id={u?.monsterId ?? 0} size={38} />
+                        <div className="tiny mono" style={{ color: c.acted ? TEAM[team].color : "var(--muted)" }}>{c.ab.toFixed(3)}</div>
+                        <div className="st-tv-bar"><span style={{ width: `${pct}%`, background: TEAM[team].color }} /></div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
             {frames.length === 0 && <div className="tiny dim">沒有可模擬的魔靈</div>}
@@ -865,6 +942,28 @@ export default function SpeedTickPage() {
           </div>
         </div>
       )}
+      {tab === "faq" && (
+        <div className="card card-pad">
+          <div className="card-title" style={{ marginBottom: 10 }}>FAQ</div>
+          <div className="col" style={{ gap: 12 }}>
+            {[
+              ["什麼是 Tick？", "遊戲的出手順序由攻擊條決定。每經過一個 Tick，每隻魔靈會依「速度 × 每 Tick 攻擊條 %」增加攻擊條；達到 100% 就能出手，超出的部分會保留。一般為 7%、RTA 為 1.5%、討伐為 4.5%。"],
+              ["速度是怎麼算的？", "最終速度 = 基礎速度 + ceil(基礎速度 ×（天空圖騰 + 速度隊長技）%) + 迅速套裝（基礎速度 +25%）+ 符文速度。速度 Buff 為最終速度再 +30%，降速為 -30%。"],
+              ["Total Speed 與三段速度的差別？", "Total Speed 是「基礎速度 + 符文速度」，不含圖騰與隊長技；下面的三段速度才是實際戰鬥中降速／一般／Buff 的數值。"],
+              ["三段速度後面的小數字是什麼？", "是「距離下一個 Tick 門檻還差多少速度」，也就是要再快多少才能早一個 Tick 出手。"],
+              ["出手順序怎麼決定？", "同一個 Tick 內攻擊條高者先出手；攻擊條相同時比 Priority，Priority 相同再比藍隊優先。"],
+              ["拉條、速度增減、額外速度何時生效？", "拉條只在指定的那一個 Tick 生效一次；速度增減與額外速度會從指定 Tick 起持續生效。拉條角通常要設定在自己出手後的下一 Tick。"],
+              ["快速套用其他人的設定？", "目前可以直接把設定存到 Saves，之後讀取回來；資料只存在這台電腦的瀏覽器。"],
+            ].map(([q, a]) => (
+              <div key={q}>
+                <div style={{ fontWeight: 700, marginBottom: 3 }}>{q}</div>
+                <div className="tiny dim" style={{ lineHeight: 1.7 }}>{a}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
     </>
   );
 }

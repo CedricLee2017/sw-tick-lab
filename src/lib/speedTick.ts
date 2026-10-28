@@ -73,14 +73,14 @@ export interface SpeedBlocks {
 export function calcSpeedBlocks(u: TickCalcUnit, s: Pick<TickCalcSettings, "totem" | "lead">): SpeedBlocks {
   const pct = (s.totem ?? 0) + (s.lead ?? 0);
   const swift = u.swift ? Math.ceil((u.baseSpd * 25) / 100) : 0;
-  const total = u.baseSpd + swift + u.runeSpd;
-  const normal = total + Math.ceil((u.baseSpd * pct) / 100);
+  const total = Math.ceil(u.baseSpd + u.runeSpd);
+  const normal = u.baseSpd + Math.ceil((u.baseSpd * pct) / 100) + swift + u.runeSpd;
   const buffPct = 30 * (1 + (u.artifactPct ?? 0) / 100);
   return {
     total,
     normal,
-    buffed: Math.round(normal * (1 + buffPct / 100)),
-    debuffed: Math.round(normal * 0.7),
+    buffed: Math.ceil(normal * (1 + buffPct / 100)),
+    debuffed: Math.ceil(normal * 0.7),
   };
 }
 
