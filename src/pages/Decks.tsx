@@ -32,6 +32,8 @@ const DECK_TYPE_LABELS: Record<number, string> = {
 };
 
 const deckTypeLabel = (type: number) => DECK_TYPE_LABELS[type] ?? `類型 ${type}`;
+/** 遊戲 deck_type 1–27；尚無名稱的類型仍以編號列出 */
+const DECK_TYPE_NUMBERS = Array.from({ length: 27 }, (_, i) => i + 1);
 
 export default function DecksPage() {
   const account = useStore((s) => s.account);
@@ -62,9 +64,9 @@ export default function DecksPage() {
   }, [account]);
 
   const types = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const d of decks) m.set(d.type, (m.get(d.type) ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => a[0] - b[0]);
+    const counts = new Map<number, number>();
+    for (const d of decks) counts.set(d.type, (counts.get(d.type) ?? 0) + 1);
+    return DECK_TYPE_NUMBERS.map((t) => [t, counts.get(t) ?? 0] as [number, number]);
   }, [decks]);
 
   const filtered = useMemo(() => {
@@ -104,7 +106,7 @@ export default function DecksPage() {
             <Layers size={15} className="gold" /> 預設隊
           </div>
           <div className="card-sub">
-            遊戲內 deck_list 共 {fmt(decks.length)} 組；依遊戲類型分組顯示（存檔沒有自訂隊伍名稱）。
+            遊戲內 deck_list 共 {fmt(decks.length)} 組；已命名類型顯示名稱，尚未命名的類型（例如 9、18、19、20）以「類型 N」列出。
           </div>
         </div>
         <div className="row" style={{ gap: 8 }}>
@@ -112,10 +114,36 @@ export default function DecksPage() {
             <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
             <input className="input" style={{ width: 210, paddingLeft: 28 }} placeholder="搜尋魔靈 / 類型 / 序號" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <select className="select" style={{ width: 180 }} value={type} onChange={(e) => setType(Number(e.target.value))}>
+          <select className="select" style={{ width: 200 }} value={type} onChange={(e) => setType(Number(e.target.value))}>
             <option value={0}>全部類型（{decks.length}）</option>
-            {types.map(([t, n]) => <option key={t} value={t}>{deckTypeLabel(t)}（{n} 隊）</option>)}
+            {types.map(([t, n]) => (
+              <option key={t} value={t}>{deckTypeLabel(t)}{n > 0 ? `（${n} 隊）` : "（尚無預設隊）"}</option>
+            ))}
           </select>
+        </div>
+      </div>
+
+      <div className="card card-pad" style={{ marginBottom: 14 }}>
+        <div className="row between wrap" style={{ gap: 8 }}>
+          <div className="row" style={{ gap: 7 }}>
+            <span className="focus-title">類型總覽</span>
+            <span className="tiny dim">尚未命名的類型以編號列出</span>
+          </div>
+          <span className="tiny dim">類型 1–27</span>
+        </div>
+        <div className="row wrap" style={{ gap: 5, marginTop: 8 }}>
+          {types.map(([t, n]) => (
+            <button
+              key={t}
+              type="button"
+              className={`chip ${type === t ? "gold" : "muted"}`}
+              style={{ cursor: "pointer", opacity: n > 0 ? 1 : .55 }}
+              onClick={() => setType(type === t ? 0 : t)}
+              title={n > 0 ? `${n} 組預設隊` : "目前沒有預設隊"}
+            >
+              {deckTypeLabel(t)} · {n}
+            </button>
+          ))}
         </div>
       </div>
 
