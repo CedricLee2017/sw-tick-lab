@@ -1,7 +1,7 @@
 /** SWEX / SWOP JSON 解析（寬容格式） */
 import { runeEfficiency } from "./stats";
 import { RUNE_SETS, SET_BY_ID } from "./constants";
-import type { Account, Artifact, ArtifactSub, Rune, RtaData, RtaLoadout, Unit } from "./types";
+import type { Account, Artifact, ArtifactSub, Deck, DeckEquip, Rune, RtaData, RtaLoadout, Unit } from "./types";
 
 const num = (v: unknown, d = 0): number => {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -171,7 +171,7 @@ export interface ParseResult {
 }
 
 /** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值 */
-export const PARSE_VERSION = 5;
+export const PARSE_VERSION = 6;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -463,6 +463,25 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     if (rta.favorites.length > 0 && rtaRunes === 0) warnings.push("此存檔有最愛魔靈，但沒有 RTA 符文配置資料。");
   }
 
+  // 預設隊（deck_list）：遊戲內各內容的隊伍快照；equip 內含每隻魔靈的符文 / 神器配置。
+  const decks: Deck[] = list(body.deck_list)
+    .map((d: any): Deck => {
+      const equip: DeckEquip[] = list(d?.equip).map((e: any) => ({
+        unit: num(e?.unit_id),
+        runes: list(e?.rune_id_list).map((x: unknown) => num(x)).filter(Boolean),
+        artifacts: list(e?.artifact_id_list).map((x: unknown) => num(x)).filter(Boolean),
+      })).filter((e: DeckEquip) => e.unit > 0);
+      return {
+        type: num(d?.deck_type),
+        seq: num(d?.deck_seq),
+        units: list(d?.unit_id_list).map((x: unknown) => num(x)).filter(Boolean),
+        leader: num(d?.leader_unit_id),
+        equip,
+      };
+    })
+    .filter((d: Deck) => d.type > 0);
+  if (decks.length > 0) warnings.push(`預設隊：找到 ${decks.length} 組。`);
+
   return {
     account: {
       fileName,
@@ -475,6 +494,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       buildings,
       version,
       rta,
+      decks,
     },
     warnings,
   };
@@ -534,5 +554,16 @@ export function exportAccount(account: Account): string {
         )
       : [],
     world_arena_rune_equip_sync: account.rta?.runeSync ?? 0,
+    deck_list: (account.decks ?? []).map((d) => ({
+      deck_type: d.type,
+      deck_seq: d.seq,
+      unit_id_list: d.units,
+      leader_unit_id: d.leader,
+      equip: d.equip.map((e) => ({
+        unit_id: e.unit,
+        rune_id_list: e.runes,
+        artifact_id_list: e.artifacts,
+      })),
+    })),
   });
 }

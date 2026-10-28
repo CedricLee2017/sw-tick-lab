@@ -1008,4 +1008,31 @@ check("神器追傷計算器：三圍、段數與神器效果", () => {
   assert.deepEqual(addAdEffects({ hp: 1, atk: 2, def: 3, spd: 4 }, { hp: 1, atk: 1, def: 1, spd: 1 }), { hp: 2, atk: 3, def: 4, spd: 5 });
 });
 
+check("預設隊：解析 deck_list 與裝備快照", () => {
+  const raw = {
+    unit_list: [{
+      unit_id: 501, unit_master_id: 13413, class: 6, unit_level: 40,
+      runes: [{ rune_id: 9001, occupied_id: 501, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] }],
+    }],
+    runes: [{ rune_id: 9001, occupied_id: 501, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15, pri_eff: [2, 10], prefix_eff: [0, 0], sec_eff: [] }],
+    deck_list: [{
+      deck_type: 22, deck_seq: 3,
+      unit_id_list: [501, 0, 0],
+      leader_unit_id: 501,
+      equip: [{ unit_id: 501, rune_id_list: [9001], artifact_id_list: [7001] }],
+    }],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "decks.json");
+  assert.equal(p.error, undefined, p.error);
+  assert.equal(p.account.decks.length, 1);
+  const d = p.account.decks[0];
+  assert.equal(d.type, 22);
+  assert.equal(d.seq, 3);
+  assert.deepEqual(d.units, [501]);
+  assert.equal(d.leader, 501);
+  assert.deepEqual(d.equip[0].runes, [9001]);
+  assert.deepEqual(d.equip[0].artifacts, [7001]);
+  assert.ok(p.warnings.some((w) => w.includes("預設隊")));
+});
+
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

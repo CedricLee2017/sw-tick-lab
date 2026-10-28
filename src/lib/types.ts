@@ -108,6 +108,23 @@ export interface RtaData {
   runeSync: number;
 }
 
+/** 遊戲內的預設隊（deck_list） */
+export interface DeckEquip {
+  unit: number;
+  runes: number[];
+  artifacts: number[];
+}
+
+export interface Deck {
+  /** deck_type（遊戲內分類） */
+  type: number;
+  /** deck_seq（該分類中的第幾隊） */
+  seq: number;
+  units: number[];
+  leader: number;
+  equip: DeckEquip[];
+}
+
 export interface Account {
   fileName: string;
   importedAt: number;
@@ -121,6 +138,8 @@ export interface Account {
   version: string;
   /** RTA 獨立配裝與最愛魔靈（舊存檔可能沒有） */
   rta?: RtaData;
+  /** 預設隊（deck_list） */
+  decks?: Deck[];
 }
 
 export interface BonusConfig {

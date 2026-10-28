@@ -343,6 +343,17 @@ p { margin: 0; }
 }
 .saved-build-card:hover { border-color: var(--line); }
 .saved-build-card.on { border-color: rgba(242,198,92,.55); background: rgba(242,198,92,.07); }
+
+/* ── 預設隊 ─────────────────────────────────────── */
+.deck-card { text-align: left; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.deck-units { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.deck-unit { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 48px; min-width: 0; }
+.deck-unit .tiny { max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: var(--muted); }
+.deck-unit.leader .mon-icon { box-shadow: 0 0 0 2px rgba(242,198,92,.45); }
+.deck-detail {
+  border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px;
+  background: rgba(11,17,32,.35);
+}
 .rune-sub .gem { color: #5ee6d0; font-size: 10px; }
 .artifact {
   background: linear-gradient(150deg, rgba(232, 121, 249, .08), rgba(11, 17, 32, .78) 42%);
