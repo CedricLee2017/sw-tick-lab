@@ -1,7 +1,6 @@
-/** 第二階段：神器最佳化（符文組合已由第一階段篩選） */
+/** 神器最佳化（以固定的目前符文組合為基礎） */
 import {
   ARTIFACT_EFFECT_MAX,
-  artifactAdditionalDamage,
   artifactEligible,
   artifactSubValue,
 } from "./artifacts";
@@ -9,8 +8,6 @@ import { computeSkillDamage, type DamageOptions, type Skill } from "./damage";
 import type { Build } from "./optimizer";
 import { statsForRunes, type BaseStats } from "./stats";
 import type { Artifact, BonusConfig, Monster, Rune, Stats } from "./types";
-
-export type Stage2Mode = "skill" | "add";
 
 /** 神器副效果 Focus：符合 Min/Max 才納入候選；weight 用於契合度排序 */
 export interface Stage2Focus {
@@ -23,29 +20,22 @@ export interface Stage2Focus {
 
 export interface Stage2Pair {
   artifacts: [Artifact, Artifact];
-  /** 這對神器搭配的最佳符文組合（來自第一階段前 500 組） */
+  /** 使用的符文組合（目前裝備或收藏） */
   build: Build;
   stats: Stats;
-  /** 這個模式的排序分數（招式傷害或追傷） */
-  score: number;
   /** 招式傷害（單一技能，含段數） */
+  score: number;
   base: number;
-  /** 追傷（單一技能，含段數） */
-  ad: number;
-  /** 招式傷害 + 追傷 */
-  total: number;
   hits: number;
   /** 兩件神器各自的 Focus 契合度（0–100；未設定 Focus 時為 0） */
   focus: [number, number];
 }
 
 export interface Stage2Output {
-  mode: Stage2Mode;
   /** 實際參與運算的 10 件神器（屬性 5 + 類型 5，可能更少） */
   candidates: Artifact[];
   type1: Artifact[];
   type2: Artifact[];
-  /** 25 對神器（每對都已搭配前 500 組中最好的符文） */
   pairs: Stage2Pair[];
   builds: number;
   ms: number;
@@ -54,7 +44,7 @@ export interface Stage2Output {
 
 export interface Stage2Request {
   base: BaseStats;
-  /** 第一階段目前排序的前 500 組 */
+  /** 要套用神器的符文組合（配神器頁固定為目前 1 組） */
   builds: Build[];
   bonus: BonusConfig;
   rta: boolean;
@@ -62,7 +52,6 @@ export interface Stage2Request {
   artifacts: Artifact[];
   /** 傷害面板目前選的技能 */
   skill: Skill;
-  mode: Stage2Mode;
   /** 屬性神器主屬性：0 不限、100 HP、101 ATK、102 DEF */
   main1: number;
   /** 類型神器主屬性：0 不限、100 HP、101 ATK、102 DEF */
@@ -122,7 +111,6 @@ export function runStage2(req: Stage2Request): Stage2Output {
   const focus2 = cleanFocus(req.focus2);
 
   const output = (args: Partial<Stage2Output>): Stage2Output => ({
-    mode: req.mode,
     candidates: [],
     type1: [],
     type2: [],
@@ -134,11 +122,11 @@ export function runStage2(req: Stage2Request): Stage2Output {
   });
 
   if (builds.length === 0) {
-    warnings.push("第一階段沒有可用的符文組合，請先完成配符。");
+    warnings.push("沒有可用的符文組合，請先選擇魔靈或收藏配裝。");
     return output({});
   }
   if (!req.skill) {
-    warnings.push("請先在傷害面板選擇一招技能，第二階段才能計算傷害。");
+    warnings.push("請先在傷害面板選擇一招技能，才能計算神器效果。");
     return output({});
   }
 
@@ -153,12 +141,9 @@ export function runStage2(req: Stage2Request): Stage2Output {
   /** 用前、中、後三組代表符文，避免只針對單一配置挑神器 */
   const repBuilds = [...new Set([builds[0], builds[Math.floor(builds.length / 2)], builds[builds.length - 1]])];
   const repRunes = repBuilds.map(runesOf);
-  const hits = Math.max(1, req.skill.hits || 1);
 
-  const modeScore = (art: Artifact, stats: Stats): number => {
-    if (req.mode === "add") return artifactAdditionalDamage(stats, [art]) * hits;
-    return computeSkillDamage(stats, req.skill, opts, [art]).baseTotal;
-  };
+  const skillScore = (art: Artifact, stats: Stats): number =>
+    computeSkillDamage(stats, req.skill, opts, [art]).baseTotal;
 
   const rank = (list: Artifact[], focus: Stage2Focus[]): { art: Artifact; fit: number }[] => {
     const scored = list
@@ -168,7 +153,7 @@ export function runStage2(req: Stage2Request): Stage2Output {
         let score = 0;
         for (const runes of repRunes) {
           const stats = statsForRunes(req.base, runes, req.bonus, req.rta, true, [art]);
-          score += modeScore(art, stats);
+          score += skillScore(art, stats);
         }
         return { art, fit, score: score / repRunes.length };
       })
@@ -214,7 +199,7 @@ export function runStage2(req: Stage2Request): Stage2Output {
         const runes = runesOf(build);
         const stats = statsForRunes(req.base, runes, req.bonus, req.rta, true, [a1, a2]);
         const r = computeSkillDamage(stats, req.skill, opts, [a1, a2]);
-        const score = req.mode === "skill" ? r.baseTotal : r.adTotal;
+        const score = r.baseTotal;
         const focus: [number, number] = [focusOf.get(a1.id) ?? 0, focusOf.get(a2.id) ?? 0];
         if (!best || score > best.score) {
           best = {
@@ -223,8 +208,6 @@ export function runStage2(req: Stage2Request): Stage2Output {
             stats,
             score,
             base: r.baseTotal,
-            ad: r.adTotal,
-            total: r.total,
             hits: r.hits,
             focus,
           };
@@ -234,6 +217,6 @@ export function runStage2(req: Stage2Request): Stage2Output {
     }
   }
 
-  pairs.sort((a, b) => b.score - a.score || b.total - a.total);
+  pairs.sort((a, b) => b.score - a.score);
   return output({ candidates, type1, type2, pairs, warnings });
 }

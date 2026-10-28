@@ -37,6 +37,7 @@ const {
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels,
   rtaStats, rtaView,
+  calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
 } = engine;
 
 let passed = 0;
@@ -882,7 +883,7 @@ check("第二階段：主屬性 / Focus 篩選、10 件神器、25 對", () => {
   const s3 = skillsForMonster(skillData, 13413).find((s) => s.slot === 3);
   const opts = {
     base, builds: [build], bonus: defaultBonus(), rta: false, monster, artifacts: arts,
-    skill: s3, mode: "add", main1: 101, main2: 0,
+    skill: s3, main1: 101, main2: 0,
     focus1: [{ effect: 219, min: 5, max: 20, weight: 10 }], focus2: [],
     dmgOpts: { ...dmgBase, useArtifacts: true, enemyEl: 0 }, perType: 5,
   };
@@ -897,7 +898,7 @@ check("第二階段：主屬性 / Focus 篩選、10 件神器、25 對", () => {
   assert.ok(out.pairs[0].score >= out.pairs[1].score);
   assert.equal(out.pairs[0].artifacts.length, 2);
   assert.ok(out.pairs[0].build);
-  assert.ok(out.pairs[0].ad > 0);
+  assert.ok(out.pairs[0].base > 0);
   assert.ok(out.pairs[0].focus[0] > 0);
 
   // Min/Max 太嚴 → 沒有候選
@@ -983,6 +984,28 @@ check("配符 Include / Exclude / 鎖定符文", () => {
   const lockedSame2 = optimize({ ...common, includeRunes: [10021], lockedRunes: [10021], targetUnit: 555 });
   assert.equal(lockedSame2.count, inc.count, "鎖定在目標魔靈身上的符文仍可使用");
   assert.ok(lockedSame.count >= 0);
+});
+
+check("神器追傷計算器：三圍、段數與神器效果", () => {
+  const stats = { hp: 40000, atk: 3000, def: 2000, spd: 250 };
+  const effects = { hp: 0.3, atk: 4, def: 4, spd: 40 };
+  const r = calculateAd(stats, effects, 3);
+  assert.deepEqual(r.parts, { hp: 120, atk: 120, def: 80, spd: 100 });
+  assert.equal(r.perHit, 420);
+  assert.equal(r.total, 1260);
+  // 每個屬性分開無條件捨去
+  const f = calculateAd({ hp: 33333, atk: 0, def: 0, spd: 0 }, { hp: 0.3, atk: 0, def: 0, spd: 0 }, 1);
+  assert.equal(f.parts.hp, 99);
+
+  const art = {
+    id: 1, type: 1, attr: 3, style: 0, occupied: 0, main: { t: 100, v: 1500 },
+    subs: [{ t: 218, v: 0.3 }, { t: 219, v: 4 }], level: 15, rank: 5, stars: 5, locked: false,
+  };
+  assert.deepEqual(artifactAdEffects(art), { hp: 0.3, atk: 4, def: 0, spd: 0 });
+  const one = artifactAdResult(art, stats, 2);
+  assert.equal(one.perHit, 240);
+  assert.equal(one.total, 480);
+  assert.deepEqual(addAdEffects({ hp: 1, atk: 2, def: 3, spd: 4 }, { hp: 1, atk: 1, def: 1, spd: 1 }), { hp: 2, atk: 3, def: 4, spd: 5 });
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
