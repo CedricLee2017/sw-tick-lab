@@ -7,6 +7,32 @@ import type { Artifact, Deck, DeckEquip, Rune } from "../lib/types";
 
 type DeckWithEquip = Deck;
 
+const DECK_TYPE_LABELS: Record<number, string> = {
+  1: "競技場",
+  2: "公會戰（進攻）",
+  3: "B5",
+  4: "迷宮（一般）",
+  5: "救援",
+  6: "試練之塔",
+  7: "迷宮（限速）",
+  8: "迷宮（限時）",
+  10: "迷宮（炸彈）",
+  11: "迷宮（首領）",
+  12: "水之塔",
+  13: "火之塔",
+  14: "風之塔",
+  15: "光之塔",
+  16: "暗之塔",
+  17: "天空之塔",
+  22: "據點戰（進攻）",
+  23: "混沌",
+  24: "卡伊洛斯",
+  25: "異界",
+  26: "次元",
+};
+
+const deckTypeLabel = (type: number) => DECK_TYPE_LABELS[type] ?? `類型 ${type}`;
+
 export default function DecksPage() {
   const account = useStore((s) => s.account);
   const runeMap = useStore((s) => s.runeMap);
@@ -50,7 +76,7 @@ export default function DecksPage() {
         return d.units.some((id) => {
           const u = account?.units.find((x) => x.id === id);
           const name = u ? MONSTER_MAP.get(u.master)?.name ?? "" : "";
-          return `${name} ${d.type} ${d.seq} ${id}`.toLowerCase().includes(term);
+          return `${name} ${deckTypeLabel(d.type)} ${d.type} ${d.seq} ${id}`.toLowerCase().includes(term);
         });
       })
       .sort((a, b) => a.type - b.type || a.seq - b.seq);
@@ -78,7 +104,7 @@ export default function DecksPage() {
             <Layers size={15} className="gold" /> 預設隊
           </div>
           <div className="card-sub">
-            遊戲內 deck_list 共 {fmt(decks.length)} 組；以類型與序號顯示（存檔沒有隊伍名稱）。
+            遊戲內 deck_list 共 {fmt(decks.length)} 組；依遊戲類型分組顯示（存檔沒有自訂隊伍名稱）。
           </div>
         </div>
         <div className="row" style={{ gap: 8 }}>
@@ -86,9 +112,9 @@ export default function DecksPage() {
             <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
             <input className="input" style={{ width: 210, paddingLeft: 28 }} placeholder="搜尋魔靈 / 類型 / 序號" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <select className="select" style={{ width: 140 }} value={type} onChange={(e) => setType(Number(e.target.value))}>
+          <select className="select" style={{ width: 180 }} value={type} onChange={(e) => setType(Number(e.target.value))}>
             <option value={0}>全部類型（{decks.length}）</option>
-            {types.map(([t, n]) => <option key={t} value={t}>類型 {t}（{n} 隊）</option>)}
+            {types.map(([t, n]) => <option key={t} value={t}>{deckTypeLabel(t)}（{n} 隊）</option>)}
           </select>
         </div>
       </div>
@@ -104,7 +130,7 @@ export default function DecksPage() {
           {grouped.map(([t, list]) => (
             <div key={t}>
               <div className="row between" style={{ gap: 8, marginBottom: 7 }}>
-                <div className="card-title">類型 {t} <span className="dim tiny" style={{ fontWeight: 400 }}>{list.length} 隊</span></div>
+                <div className="card-title">{deckTypeLabel(t)} <span className="dim tiny" style={{ fontWeight: 400 }}>類型 {t} · {list.length} 隊</span></div>
                 <span className="tiny dim">{list[0]?.units.length ?? 0} 人隊</span>
               </div>
               <div className="grid g3" style={{ gap: 10 }}>
@@ -114,8 +140,8 @@ export default function DecksPage() {
                     <button key={`${d.type}-${d.seq}`} type="button" className="card card-pad deck-card" onClick={() => setOpen(d)}>
                       <div className="row between" style={{ gap: 6 }}>
                         <div className="row" style={{ gap: 6 }}>
-                          <span className="chip gold">類型 {d.type}</span>
-                          <span className="tiny dim">第 {d.seq} 隊</span>
+                          <span className="chip gold">{deckTypeLabel(d.type)}</span>
+                          <span className="tiny dim">類型 {d.type} · 第 {d.seq} 隊</span>
                         </div>
                         <span className="tiny dim">{d.units.length} 人</span>
                       </div>
@@ -145,7 +171,7 @@ export default function DecksPage() {
       )}
 
       {open && (
-        <Modal title={`類型 ${open.type} · 第 ${open.seq} 隊`} onClose={() => setOpen(null)} width={940}>
+        <Modal title={`${deckTypeLabel(open.type)} · 第 ${open.seq} 隊`} onClose={() => setOpen(null)} width={940}>
           <div className="row between wrap" style={{ gap: 8, marginBottom: 12 }}>
             <span className="tiny dim">共 {open.units.length} 隻 · 隊長 {open.leader ? unitName(open.leader) : "未設定"}</span>
             <span className="tiny dim">預設隊快照（符文 / 神器配置）</span>
