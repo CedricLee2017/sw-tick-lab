@@ -29,6 +29,27 @@ export interface Loadout {
   note?: string;
 }
 
+/** 預設隊儲存庫：整隊快照中的一隻魔靈 */
+export interface DeckFavUnit {
+  unitId: number;
+  master: number;
+  runeIds: number[];
+  artifactIds: number[];
+}
+
+/** 預設隊儲存庫：整隊快照 */
+export interface DeckFav {
+  id: string;
+  name: string;
+  /** 預設隊類型（含防守隊 100–102） */
+  type: number;
+  seq: number;
+  units: DeckFavUnit[];
+  battlePower?: number;
+  createdAt: number;
+  note?: string;
+}
+
 export interface Settings {
   bonus: BonusConfig;
   rta: boolean;
@@ -64,6 +85,7 @@ const DEFAULT_SETTINGS = (): Settings => ({
 const ACCOUNT_KEY = "swtick:account";
 const SETTINGS_KEY = "swtick:settings";
 const LOADOUT_KEY = "swtick:loadouts";
+const DECK_FAV_KEY = "swtick:deckfavorites";
 
 interface Toast {
   id: number;
@@ -77,6 +99,8 @@ interface Store {
   runeMap: Map<number, Rune>;
   settings: Settings;
   loadouts: Loadout[];
+  /** 預設隊儲存庫（整隊快照） */
+  deckFavs: DeckFav[];
   toasts: Toast[];
   hydrate: () => Promise<void>;
   importText: (text: string, fileName: string) => { ok: boolean; error?: string; warnings: string[] };
@@ -93,6 +117,9 @@ interface Store {
   equipRunes: (unitId: number, runeIds: number[]) => number;
   saveLoadout: (l: Omit<Loadout, "id" | "createdAt">) => void;
   removeLoadout: (id: string) => void;
+  /** 儲存整隊預設隊到預設隊儲存庫 */
+  saveDeckFav: (d: Omit<DeckFav, "id" | "createdAt">) => void;
+  removeDeckFav: (id: string) => void;
   notify: (msg: string, kind?: "ok" | "err") => void;
 }
 
@@ -104,14 +131,16 @@ export const useStore = create<Store>((setState, getState) => ({
   runeMap: new Map(),
   settings: DEFAULT_SETTINGS(),
   loadouts: [],
+  deckFavs: [],
   toasts: [],
 
   hydrate: async () => {
     try {
-      const [stored, settings, loadouts] = await Promise.all([
+      const [stored, settings, loadouts, deckFavs] = await Promise.all([
         get<Account>(ACCOUNT_KEY),
         get<Settings>(SETTINGS_KEY),
         get<Loadout[]>(LOADOUT_KEY),
+        get<DeckFav[]>(DECK_FAV_KEY),
       ]);
       // 舊版解析（stat/set ID 錯位、漏掉裝備符文）不可沿用，要求重新匯入
       const stale = !!stored && stored.parseVersion !== PARSE_VERSION;
@@ -146,6 +175,7 @@ export const useStore = create<Store>((setState, getState) => ({
         runeMap: new Map((acc?.runes ?? []).map((r) => [r.id, r])),
         settings: saved,
         loadouts: loadouts ?? [],
+        deckFavs: deckFavs ?? [],
       });
       if (stale) getState().notify("解析規則已更新，請重新匯入 SWEX 存檔");
     } catch {
@@ -284,10 +314,34 @@ export const useStore = create<Store>((setState, getState) => ({
     getState().notify("已儲存配裝");
   },
 
+  saveDeckFav: (d) => {
+    // 同類型、同序號且隊員完全相同視為同一組，直接覆蓋更新
+    const signature = (x: { type: number; seq: number; units: { unitId: number }[] }) =>
+      `${x.type}|${x.seq}|${x.units.map((u) => u.unitId).join(",")}`;
+    const sig = signature(d);
+    const prev = getState().deckFavs;
+    const existing = prev.find((x) => signature(x) === sig);
+    const fav: DeckFav = {
+      ...d,
+      id: existing?.id ?? `dk_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      createdAt: Date.now(),
+    };
+    const deckFavs = [fav, ...prev.filter((x) => x.id !== fav.id)].slice(0, 60);
+    setState({ deckFavs });
+    void set(DECK_FAV_KEY, deckFavs);
+    getState().notify(existing ? "已更新預設隊" : "已儲存預設隊");
+  },
+
   removeLoadout: (id) => {
     const loadouts = getState().loadouts.filter((x) => x.id !== id);
     setState({ loadouts });
     void set(LOADOUT_KEY, loadouts);
+  },
+
+  removeDeckFav: (id) => {
+    const deckFavs = getState().deckFavs.filter((x) => x.id !== id);
+    setState({ deckFavs });
+    void set(DECK_FAV_KEY, deckFavs);
   },
 
   notify: (msg, kind = "ok") => {

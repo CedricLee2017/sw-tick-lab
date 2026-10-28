@@ -1,50 +1,23 @@
 import { useMemo, useState } from "react";
-import { Layers, Search } from "lucide-react";
+import { Layers, Save, Search } from "lucide-react";
 import { MONSTER_MAP, monsterLabel, useStore } from "../store";
 import { ELEMENTS } from "../lib/constants";
+import { baseStats, statsForRunes } from "../lib/stats";
+import { DECK_TYPE_NUMBERS, deckTypeLabel } from "../lib/deckTypes";
 import { ArtifactCard, Modal, MonsterIcon, RuneCard, fmt } from "../components/ui";
 import type { Artifact, Deck, DeckEquip, Rune } from "../lib/types";
 
 type DeckWithEquip = Deck;
 
-const DECK_TYPE_LABELS: Record<number, string> = {
-  1: "競技場",
-  2: "公會戰（進攻）",
-  3: "異界（三頭）",
-  4: "迷宮（一般）",
-  5: "救援",
-  6: "試練之塔",
-  7: "迷宮（限速）",
-  8: "迷宮（限時）",
-  10: "迷宮（炸彈）",
-  11: "迷宮（首領）",
-  12: "水之塔",
-  13: "火之塔",
-  14: "風之塔",
-  15: "光之塔",
-  16: "暗之塔",
-  17: "天空之塔",
-  19: "次元團戰（1P）",
-  20: "次元團戰（2P）",
-  21: "次元團戰（3P）",
-  22: "據點戰（進攻）",
-  23: "混沌",
-  24: "卡伊洛斯",
-  25: "異界（單頭）",
-  26: "次元",
-  27: "討伐戰",
-  100: "競技場防守（本機）",
-  101: "競技場防守（伺服器）",
-  102: "據點戰防守",
-};
-
-const deckTypeLabel = (type: number) => DECK_TYPE_LABELS[type] ?? `類型 ${type}`;
-/** 遊戲 deck_type 1–27，加上內部使用的防守隊代碼 100–102 */
-const DECK_TYPE_NUMBERS = [...Array.from({ length: 27 }, (_, i) => i + 1), 100, 101, 102];
-
 export default function DecksPage() {
   const account = useStore((s) => s.account);
   const runeMap = useStore((s) => s.runeMap);
+  const bonus = useStore((s) => s.settings.bonus);
+  const rta = useStore((s) => s.settings.rta);
+  const saveDeckFav = useStore((s) => s.saveDeckFav);
+  const saveLoadout = useStore((s) => s.saveLoadout);
+  const notify = useStore((s) => s.notify);
+  const deckFavs = useStore((s) => s.deckFavs);
   const [q, setQ] = useState("");
   const [type, setType] = useState(0);
   const [open, setOpen] = useState<DeckWithEquip | null>(null);
@@ -58,6 +31,60 @@ export default function DecksPage() {
     return u ? monsterLabel(u.master) : `#${id}`;
   };
   const unitMaster = (id: number) => account?.units.find((x) => x.id === id)?.master ?? 0;
+
+  /** 是否已存過這一隊（同類型、同序號、同隊員） */
+  const isSaved = (d: Deck) =>
+    deckFavs.some(
+      (f) =>
+        f.type === d.type &&
+        f.seq === d.seq &&
+        f.units.length === d.units.length &&
+        f.units.every((u, i) => u.unitId === d.units[i]),
+    );
+
+  /** 儲存整隊到預設隊儲存庫 */
+  const saveWholeDeck = (d: Deck) => {
+    const eq = new Map(d.equip.map((e) => [e.unit, e]));
+    saveDeckFav({
+      name: `${deckTypeLabel(d.type)} · 第 ${d.seq} 隊`,
+      type: d.type,
+      seq: d.seq,
+      units: d.units.map((uid) => ({
+        unitId: uid,
+        master: unitMaster(uid),
+        runeIds: eq.get(uid)?.runes ?? [],
+        artifactIds: eq.get(uid)?.artifacts ?? [],
+      })),
+      battlePower: d.battlePower,
+    });
+  };
+
+  /** 只把預設隊中的一隻魔靈存進配裝儲存庫 */
+  const saveSingleUnit = (d: Deck, uid: number) => {
+    const u = account?.units.find((x) => x.id === uid);
+    const master = u?.master ?? unitMaster(uid);
+    const monster = MONSTER_MAP.get(master);
+    const eq = d.equip.find((e) => e.unit === uid);
+    const runeIds = eq?.runes ?? [];
+    if (runeIds.length === 0) {
+      notify("這隻魔靈在此預設隊沒有符文配置，無法儲存配裝", "err");
+      return;
+    }
+    if (!u || !monster) {
+      notify("找不到這隻魔靈的存檔資料", "err");
+      return;
+    }
+    const runes = runeIds.map((id) => runeMap.get(id)).filter((r): r is Rune => !!r);
+    const arts = (eq?.artifacts ?? []).map((id) => account?.artifacts.find((a) => a.id === id)).filter((a): a is Artifact => !!a);
+    const stats = statsForRunes(baseStats(monster, u.stars, u.level), runes, bonus, rta, false, arts);
+    saveLoadout({
+      name: `${monsterLabel(master)} · ${deckTypeLabel(d.type)} 第 ${d.seq} 隊`,
+      monsterId: master,
+      unitId: uid,
+      runeIds,
+      stats,
+    });
+  };
 
   const ownerOfRune = useMemo(() => {
     const m = new Map<number, string>();
@@ -178,7 +205,19 @@ export default function DecksPage() {
                 {list.map((d) => {
                   const leader = d.leader ? unitMaster(d.leader) : 0;
                   return (
-                    <button key={`${d.type}-${d.seq}`} type="button" className="card card-pad deck-card" onClick={() => setOpen(d)}>
+                    <div
+                      key={`${d.type}-${d.seq}`}
+                      className="card card-pad deck-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setOpen(d)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setOpen(d);
+                        }
+                      }}
+                    >
                       <div className="row between" style={{ gap: 6 }}>
                         <div className="row" style={{ gap: 6 }}>
                           <span className="chip gold">{deckTypeLabel(d.type)}</span>
@@ -202,7 +241,20 @@ export default function DecksPage() {
                         <span>{d.equip.reduce((s, e) => s + e.artifacts.length, 0)} 件神器</span>
                       </div>
                       {d.battlePower ? <div className="tiny dim">戰力 {fmt(d.battlePower)}</div> : null}
-                    </button>
+                      <div className="row" style={{ gap: 6, marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${isSaved(d) ? "" : "btn-ghost"}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            saveWholeDeck(d);
+                          }}
+                          title="把整隊存到預設隊儲存庫"
+                        >
+                          <Save size={12} /> {isSaved(d) ? "已儲存" : "儲存整隊"}
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -216,7 +268,12 @@ export default function DecksPage() {
         <Modal title={`${deckTypeLabel(open.type)} · 第 ${open.seq} 隊`} onClose={() => setOpen(null)} width={940}>
           <div className="row between wrap" style={{ gap: 8, marginBottom: 12 }}>
             <span className="tiny dim">共 {open.units.length} 隻{open.leader ? ` · 隊長 ${unitName(open.leader)}` : ""}{open.battlePower ? ` · 戰力 ${fmt(open.battlePower)}` : ""}</span>
-            <span className="tiny dim">預設隊快照（符文 / 神器配置）</span>
+            <div className="row" style={{ gap: 6 }}>
+              <span className="tiny dim">預設隊快照（符文 / 神器配置）</span>
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => saveWholeDeck(open)}>
+                <Save size={12} /> 儲存整隊
+              </button>
+            </div>
           </div>
           <div className="col" style={{ gap: 14 }}>
             {open.units.map((uid) => {
@@ -227,16 +284,26 @@ export default function DecksPage() {
               const artifacts = (eq?.artifacts ?? []).map((id: number) => account.artifacts.find((a) => a.id === id)).filter((a): a is Artifact => !!a);
               return (
                 <div key={uid} className="deck-detail">
-                  <div className="row" style={{ gap: 10 }}>
-                    <MonsterIcon id={master} size={46} />
-                    <div style={{ flex: 1 }}>
-                      <div className="row wrap" style={{ gap: 6 }}>
-                        <b>{unitName(uid)}</b>
-                        {monster && <span className={`el-${monster.el}`} style={{ fontSize: 11 }}>{ELEMENTS[monster.el as 1]?.name}</span>}
-                        {uid === open.leader && <span className="chip gold">隊長</span>}
-                        <span className="tiny dim">{runes.length}/6 符文 · {artifacts.length}/2 神器</span>
+                  <div className="row between" style={{ gap: 10 }}>
+                    <div className="row" style={{ gap: 10, minWidth: 0 }}>
+                      <MonsterIcon id={master} size={46} />
+                      <div style={{ flex: 1 }}>
+                        <div className="row wrap" style={{ gap: 6 }}>
+                          <b>{unitName(uid)}</b>
+                          {monster && <span className={`el-${monster.el}`} style={{ fontSize: 11 }}>{ELEMENTS[monster.el as 1]?.name}</span>}
+                          {uid === open.leader && <span className="chip gold">隊長</span>}
+                          <span className="tiny dim">{runes.length}/6 符文 · {artifacts.length}/2 神器</span>
+                        </div>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => saveSingleUnit(open, uid)}
+                      title="只把這隻魔靈存到配裝儲存庫"
+                    >
+                      <Save size={12} /> 儲存這隻
+                    </button>
                   </div>
                   {runes.length === 0 && artifacts.length === 0 ? (
                     <div className="tiny dim" style={{ padding: "6px 0 0 56px" }}>此預設隊沒有這隻魔靈的符文 / 神器配置。</div>

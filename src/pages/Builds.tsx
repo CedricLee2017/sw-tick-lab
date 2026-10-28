@@ -1,16 +1,20 @@
 import { useMemo, useState } from "react";
-import { Bookmark, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
+import { Bookmark, Layers, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
 import { MONSTER_MAP, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary } from "../lib/stats";
-import { Modal, MonsterIcon, RuneCard, StatGrid, TickBadge, fmt, setColor } from "../components/ui";
-import type { Loadout } from "../store";
+import { deckTypeLabel } from "../lib/deckTypes";
+import { ArtifactCard, Modal, MonsterIcon, RuneCard, StatGrid, TickBadge, fmt, setColor } from "../components/ui";
+import type { Artifact, Rune } from "../lib/types";
+import type { DeckFav, Loadout } from "../store";
 
 export default function BuildsPage() {
   const account = useStore((s) => s.account);
   const runeMap = useStore((s) => s.runeMap);
   const loadouts = useStore((s) => s.loadouts);
   const removeLoadout = useStore((s) => s.removeLoadout);
+  const deckFavs = useStore((s) => s.deckFavs);
+  const removeDeckFav = useStore((s) => s.removeDeckFav);
   const notify = useStore((s) => s.notify);
   const setRuneFlag = useStore((s) => s.setRuneFlag);
   const equipRunes = useStore((s) => s.equipRunes);
@@ -18,6 +22,9 @@ export default function BuildsPage() {
   const excludedRunes = useStore((s) => s.settings.excludedRunes);
   const includedRunes = useStore((s) => s.settings.includedRunes);
   const [open, setOpen] = useState<Loadout | null>(null);
+  const [openDeck, setOpenDeck] = useState<DeckFav | null>(null);
+
+  const sortedDecks = useMemo(() => [...deckFavs].sort((a, b) => b.createdAt - a.createdAt), [deckFavs]);
 
   const sorted = useMemo(() => [...loadouts].sort((a, b) => b.createdAt - a.createdAt), [loadouts]);
   const owner = useMemo(() => {
@@ -26,6 +33,17 @@ export default function BuildsPage() {
     for (const u of account.units) for (const rid of u.runes) m.set(rid, monsterLabel(u.master));
     return m;
   }, [account]);
+  const artifactMap = useMemo(() => new Map((account?.artifacts ?? []).map((a) => [a.id, a])), [account]);
+
+  /** 把預設隊儲存庫中某一隻魔靈的符文帶到配符頁（設為包括） */
+  const applyDeckUnit = (master: number, runeIds: number[]) => {
+    sessionStorage.setItem(
+      "swtick:draft",
+      JSON.stringify({ monsterId: master, includeRunes: runeIds, mode: "speed", speed: 0 }),
+    );
+    window.location.hash = "#/optimizer";
+    notify("已把這隻魔靈的符文帶入配符頁（符文設為包括）");
+  };
 
   const apply = (l: Loadout) => {
     sessionStorage.setItem(
@@ -72,10 +90,72 @@ export default function BuildsPage() {
     <>
       <div className="row between wrap" style={{ gap: 10, marginBottom: 14 }}>
         <div>
-          <div className="card-title">配裝儲存庫</div>
-          <div className="card-sub">儲存有興趣的符文組合；隨時查看，或一鍵帶回配符頁</div>
+          <div className="card-title">儲存庫</div>
+          <div className="card-sub">整隊存到預設隊儲存庫，單隻魔靈存到配裝儲存庫；隨時查看或帶回配符頁</div>
         </div>
-        <span className="chip gold">{loadouts.length} 組</span>
+        <div className="row" style={{ gap: 6 }}>
+          <span className="chip gold">預設隊 {deckFavs.length} 組</span>
+          <span className="chip gold">配裝 {loadouts.length} 組</span>
+        </div>
+      </div>
+
+      <div className="row between wrap" style={{ gap: 8, marginBottom: 8 }}>
+        <div className="card-title row" style={{ gap: 7 }}>
+          <Layers size={15} className="gold" /> 預設隊儲存庫
+        </div>
+        <span className="tiny dim">在「預設隊」頁按「儲存整隊」加入</span>
+      </div>
+
+      {sortedDecks.length === 0 ? (
+        <div className="empty" style={{ padding: "30px 20px", marginBottom: 20 }}>
+          <Layers size={34} style={{ opacity: .3, marginBottom: 8 }} />
+          <div style={{ fontWeight: 600, color: "var(--text)" }}>還沒有儲存的預設隊</div>
+          <div className="tiny" style={{ marginTop: 4 }}>到「預設隊」頁對任何一隊按「儲存整隊」就會出現在這裡。</div>
+        </div>
+      ) : (
+        <div className="grid g3" style={{ marginBottom: 22 }}>
+          {sortedDecks.map((d) => {
+            const runeCount = d.units.reduce((s, u) => s + u.runeIds.length, 0);
+            const artifactCount = d.units.reduce((s, u) => s + u.artifactIds.length, 0);
+            return (
+              <div key={d.id} className="card card-pad build-fav">
+                <div className="row between" style={{ gap: 8 }}>
+                  <div className="row" style={{ gap: 6, minWidth: 0 }}>
+                    <span className="chip gold">{deckTypeLabel(d.type)}</span>
+                    <span className="tiny dim">第 {d.seq} 隊 · {d.units.length} 人</span>
+                  </div>
+                  <span className="tiny dim">{new Date(d.createdAt).toLocaleDateString("zh-TW")}</span>
+                </div>
+                <div className="deck-units" style={{ marginTop: 8 }}>
+                  {d.units.map((u) => (
+                    <span key={u.unitId} className="deck-unit" title={monsterLabel(u.master)}>
+                      <MonsterIcon id={u.master} size={34} />
+                      <span className="tiny">{monsterLabel(u.master)}</span>
+                    </span>
+                  ))}
+                </div>
+                <div className="row wrap tiny dim" style={{ gap: 8, marginTop: 8 }}>
+                  <span>{runeCount} 顆符文</span>
+                  <span>{artifactCount} 件神器</span>
+                  {d.battlePower ? <span>戰力 {fmt(d.battlePower)}</span> : null}
+                </div>
+                <div className="row" style={{ gap: 6, marginTop: 10 }}>
+                  <button className="btn btn-sm btn-primary" onClick={() => setOpenDeck(d)}>查看</button>
+                  <button className="btn btn-sm btn-ghost btn-icon" title="刪除" style={{ marginLeft: "auto" }} onClick={() => removeDeckFav(d.id)}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="row between wrap" style={{ gap: 8, marginBottom: 8 }}>
+        <div className="card-title row" style={{ gap: 7 }}>
+          <Bookmark size={15} className="gold" /> 配裝儲存庫
+        </div>
+        <span className="tiny dim">在「預設隊」頁按單隻魔靈的「儲存這隻」，或配符結果的「儲存為配裝」加入</span>
       </div>
 
       {sorted.length === 0 ? (
@@ -158,6 +238,70 @@ export default function BuildsPage() {
               const r = open.runeIds.map((id) => runeMap.get(id)).find((x) => x?.slot === slot);
               return r ? <RuneCard key={slot} rune={r} owner={owner.get(r.id)} compact /> : (
                 <div key={slot} className="rune rune-empty"><span className="tiny dim">位置 {slot} 無符文</span></div>
+              );
+            })}
+          </div>
+        </Modal>
+      )}
+
+      {openDeck && (
+        <Modal title={`${deckTypeLabel(openDeck.type)} · 第 ${openDeck.seq} 隊`} onClose={() => setOpenDeck(null)} width={940}>
+          <div className="row between wrap" style={{ gap: 8, marginBottom: 12 }}>
+            <span className="tiny dim">
+              共 {openDeck.units.length} 隻
+              {openDeck.battlePower ? ` · 戰力 ${fmt(openDeck.battlePower)}` : ""} · 儲存於 {new Date(openDeck.createdAt).toLocaleString("zh-TW")}
+            </span>
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => {
+                removeDeckFav(openDeck.id);
+                setOpenDeck(null);
+              }}
+            >
+              <Trash2 size={12} /> 刪除這一隊
+            </button>
+          </div>
+          <div className="col" style={{ gap: 14 }}>
+            {openDeck.units.map((u) => {
+              const runes = u.runeIds.map((id) => runeMap.get(id)).filter((r): r is Rune => !!r);
+              const artifacts = u.artifactIds.map((id) => artifactMap.get(id)).filter((a): a is Artifact => !!a);
+              return (
+                <div key={u.unitId} className="deck-detail">
+                  <div className="row between" style={{ gap: 10 }}>
+                    <div className="row" style={{ gap: 10, minWidth: 0 }}>
+                      <MonsterIcon id={u.master} size={46} />
+                      <div style={{ flex: 1 }}>
+                        <div className="row wrap" style={{ gap: 6 }}>
+                          <b>{monsterLabel(u.master)}</b>
+                          <span className="tiny dim">{runes.length}/6 符文 · {artifacts.length}/2 神器</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      title="把這隻魔靈的符文帶到配符頁"
+                      onClick={() => applyDeckUnit(u.master, u.runeIds)}
+                    >
+                      <Wand2 size={12} /> 帶入配符
+                    </button>
+                  </div>
+                  {runes.length === 0 && artifacts.length === 0 ? (
+                    <div className="tiny dim" style={{ padding: "6px 0 0 56px" }}>這隻魔靈在儲存時沒有符文 / 神器配置。</div>
+                  ) : (
+                    <>
+                      {runes.length > 0 && (
+                        <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginTop: 8 }}>
+                          {runes.map((r) => <RuneCard key={r.id} rune={r} compact owner={owner.get(r.id)} />)}
+                        </div>
+                      )}
+                      {artifacts.length > 0 && (
+                        <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8, marginTop: 8 }}>
+                          {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} owner={owner.get(a.id)} />)}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               );
             })}
           </div>
