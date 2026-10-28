@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { RotateCcw, Save as SaveIcon, Timer, Trash2, Upload, X, Copy, ArrowRight } from "lucide-react";
+import { RotateCcw, Save as SaveIcon, Timer, Trash2, Upload, X, Copy, ArrowRight, Plus } from "lucide-react";
 import { ELEMENTS } from "../lib/constants";
-import { MONSTERS, MONSTER_MAP } from "../store";
+import { deckTypeLabel } from "../lib/deckTypes";
+import { MONSTERS, MONSTER_MAP, useStore } from "../store";
 import { MonsterIcon, Modal } from "../components/ui";
+import type { DeckFav, Loadout } from "../store";
 import {
   AB_RATES,
   LEAD_PRESETS,
@@ -66,10 +68,7 @@ const BRACKET_COLORS: Record<number, string> = {
 };
 
 function defaultUnits(): TickCalcUnit[] {
-  return [
-    { id: uid(), name: "藍隊 1", monsterId: 0, baseSpd: 106, runeSpd: 100, swift: true, buff: false, artifactPct: 0, team: "blue", priority: 1 },
-    { id: uid(), name: "紅隊 1", monsterId: 0, baseSpd: 100, runeSpd: 0, swift: false, buff: false, artifactPct: 0, team: "red", priority: 2 },
-  ];
+  return [];
 }
 
 function emptyState(): CalcState {
@@ -116,6 +115,10 @@ const numOr0 = (v: string) => Number(v) || 0;
 const clampTick = (v: number) => Math.max(0, Math.min(TICKS[TICKS.length - 1], Math.round(v)));
 
 export default function SpeedTickPage() {
+  const runeMap = useStore((s) => s.runeMap);
+  const loadouts = useStore((s) => s.loadouts);
+  const deckFavs = useStore((s) => s.deckFavs);
+  const notify = useStore((s) => s.notify);
   const [init] = useState<CalcState>(loadState);
   const [rate, setRate] = useState(init.rate);
   const [totemBlue, setTotemBlue] = useState(init.totemBlue);
@@ -132,6 +135,7 @@ export default function SpeedTickPage() {
   const [saveName, setSaveName] = useState("");
   const [saveNote, setSaveNote] = useState("");
   const [q, setQ] = useState("");
+  const [loadOpen, setLoadOpen] = useState(false);
   const [boostModal, setBoostModal] = useState<{
     team: "blue" | "red";
     from: number;
@@ -262,6 +266,56 @@ export default function SpeedTickPage() {
       ...prev,
       { ...src, id: uid(), priority: Math.max(0, ...prev.map((x) => x.priority)) + 1 },
     ]);
+  };
+
+  /** 由符文計算固定速度與迅速套裝 */
+  const makeUnit = (master: number, runeIds: number[], team: "blue" | "red"): Omit<TickCalcUnit, "id" | "priority"> => {
+    const m = MONSTER_MAP.get(master);
+    let runeSpd = 0;
+    let swiftCount = 0;
+    for (const rid of runeIds) {
+      const r = runeMap.get(rid);
+      if (!r) continue;
+      if (r.set === 3) swiftCount++;
+      if (r.main?.t === 8) runeSpd += r.main.v;
+      if (r.prefix?.t === 8) runeSpd += r.prefix.v;
+      for (const s of r.subs) if (s.t === 8) runeSpd += s.v + (s.g ?? 0);
+    }
+    return {
+      name: m?.name ?? "魔靈",
+      monsterId: master,
+      baseSpd: m?.spd ?? 100,
+      runeSpd,
+      swift: swiftCount >= 4,
+      buff: false,
+      artifactPct: 0,
+      leadOverride: null,
+      team,
+    };
+  };
+
+  const appendUnits = (list: Omit<TickCalcUnit, "id" | "priority">[]) => {
+    const room = MAX_UNITS - units.length;
+    const take = list.slice(0, Math.max(0, room));
+    if (!take.length) return 0;
+    setUnits((prev) => {
+      const start = Math.max(0, ...prev.map((p) => p.priority));
+      return [...prev, ...take.map((u, i) => ({ ...u, id: uid(), priority: start + i + 1 }))];
+    });
+    return take.length;
+  };
+
+  const addLoadout = (l: Loadout) => {
+    const n = appendUnits([makeUnit(l.monsterId, l.runeIds, "blue")]);
+    if (n === 0) notify(`最多 ${MAX_UNITS} 隻魔靈`, "err");
+    else notify(`已加入 ${MONSTER_MAP.get(l.monsterId)?.name ?? "魔靈"}（攻擊方）`);
+  };
+
+  const addDeckFav = (d: DeckFav) => {
+    const team: "blue" | "red" = d.type >= 100 ? "red" : "blue";
+    const n = appendUnits(d.units.map((u) => makeUnit(u.master, u.runeIds, team)));
+    if (n === 0) notify(`最多 ${MAX_UNITS} 隻魔靈`, "err");
+    else notify(`已加入 ${n} 隻（${team === "blue" ? "攻擊方" : "防守方"}）`);
   };
 
   const resetAll = () => {
@@ -399,14 +453,19 @@ export default function SpeedTickPage() {
           <div className="card-title row" style={{ gap: 7 }}>
             <Timer size={15} className="gold" /> Speed Tick Bracket 計算器
           </div>
-          <div className="card-sub">Monsters → Advanced → Turn Order；參考 SWGT 的 Speed Tick Bracket Calculator</div>
+          <div className="card-sub">Monsters → Advanced → Turn Order；藍隊＝攻擊方、紅隊＝防守方（參考 SWGT 的 Speed Tick Bracket Calculator）</div>
         </div>
-        <button className="btn btn-sm" onClick={resetAll}><RotateCcw size={13} /> 清除全部</button>
+        <div className="row" style={{ gap: 6 }}>
+          <button className="btn btn-sm btn-primary" onClick={() => setLoadOpen(true)}>
+            <Upload size={13} /> 從儲存庫載入
+          </button>
+          <button className="btn btn-sm" onClick={resetAll}><RotateCcw size={13} /> 清除全部</button>
+        </div>
       </div>
 
       <div className="row wrap" style={{ gap: 10, marginBottom: 10 }}>
         <div className="st-setting">
-          <div className="tiny" style={{ color: TEAM.blue.color }}>天空圖騰（藍隊）</div>
+          <div className="tiny" style={{ color: TEAM.blue.color }}>天空圖騰（藍隊・攻擊）</div>
           <select className="select" value={totemBlue} onChange={(e) => setTotemBlue(Number(e.target.value))}>
             {[0, 1, 2, 2.5, 3, 4, 5, 5.5, 6, 7, 8, 8.5, 9, 10, 11, 11.5, 12, 13, 14, 14.5, 15].map((v) => (
               <option key={v} value={v}>Spd +{v}%</option>
@@ -414,13 +473,13 @@ export default function SpeedTickPage() {
           </select>
         </div>
         <div className="st-setting">
-          <div className="tiny" style={{ color: TEAM.blue.color }}>速度隊長技（藍隊）</div>
+          <div className="tiny" style={{ color: TEAM.blue.color }}>速度隊長技（藍隊・攻擊）</div>
           <select className="select" value={leadBlue} onChange={(e) => setLeadBlue(Number(e.target.value))}>
             {LEAD_PRESETS.map((v) => <option key={v} value={v}>{v === 0 ? "None" : `${v}%`}</option>)}
           </select>
         </div>
         <div className="st-setting">
-          <div className="tiny" style={{ color: TEAM.red.color }}>天空圖騰（紅隊）</div>
+          <div className="tiny" style={{ color: TEAM.red.color }}>天空圖騰（紅隊・防守）</div>
           <select className="select" value={totemRed} onChange={(e) => setTotemRed(Number(e.target.value))}>
             {[0, 1, 2, 2.5, 3, 4, 5, 5.5, 6, 7, 8, 8.5, 9, 10, 11, 11.5, 12, 13, 14, 14.5, 15].map((v) => (
               <option key={v} value={v}>Spd +{v}%</option>
@@ -428,7 +487,7 @@ export default function SpeedTickPage() {
           </select>
         </div>
         <div className="st-setting">
-          <div className="tiny" style={{ color: TEAM.red.color }}>速度隊長技（紅隊）</div>
+          <div className="tiny" style={{ color: TEAM.red.color }}>速度隊長技（紅隊・防守）</div>
           <select className="select" value={leadRed} onChange={(e) => setLeadRed(Number(e.target.value))}>
             {LEAD_PRESETS.map((v) => <option key={v} value={v}>{v === 0 ? "None" : `${v}%`}</option>)}
           </select>
@@ -522,7 +581,7 @@ export default function SpeedTickPage() {
                         type="button"
                         className="chip"
                         style={{ ...TEAM[u.team], cursor: "pointer" }}
-                        title="切換隊伍"
+                        title="切換隊伍（藍＝攻擊方 / 紅＝防守方）"
                         onClick={() => update(u.id, { team: u.team === "blue" ? "red" : "blue" })}
                       >
                         {u.team === "blue" ? "✕" : "○"}
@@ -550,17 +609,19 @@ export default function SpeedTickPage() {
                           type="button"
                           className={`btn btn-sm ${u.team === "blue" ? "btn-primary" : ""}`}
                           style={u.team === "blue" ? undefined : { color: TEAM.blue.color }}
+                          title="藍隊（攻擊方）"
                           onClick={() => update(u.id, { team: "blue" })}
                         >
-                          藍
+                          藍 攻
                         </button>
                         <button
                           type="button"
                           className={`btn btn-sm ${u.team === "red" ? "btn-primary" : ""}`}
                           style={u.team === "red" ? { background: "#b23b3b", borderColor: "#b23b3b" } : { color: TEAM.red.color }}
+                          title="紅隊（防守方）"
                           onClick={() => update(u.id, { team: "red" })}
                         >
-                          紅
+                          紅 守
                         </button>
                       </div>
                     </div>
@@ -651,9 +712,16 @@ export default function SpeedTickPage() {
           </div>
 
           {units.length === 0 && (
-            <div className="empty" style={{ padding: "30px 10px" }}>
-              <Timer size={30} style={{ opacity: .3, marginBottom: 8 }} />
-              <div className="tiny dim">用上面的搜尋列加入魔靈（最多 12 隻）</div>
+            <div className="empty" style={{ padding: "36px 16px" }}>
+              <Timer size={32} style={{ opacity: .3, marginBottom: 8 }} />
+              <div style={{ fontWeight: 600, color: "var(--text)" }}>還沒有加入魔靈</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>可以從儲存庫的配裝或預設隊一鍵載入（最多 12 隻）</div>
+              <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "center" }}>
+                <button className="btn btn-primary" onClick={() => setLoadOpen(true)}>
+                  <Upload size={13} /> 從儲存庫載入
+                </button>
+                <button className="btn" onClick={addBlank}><Plus size={13} /> 手動新增</button>
+              </div>
             </div>
           )}
         </>
@@ -1018,6 +1086,89 @@ export default function SpeedTickPage() {
           </div>
         </div>
       )}
+      {loadOpen && (
+        <Modal title="從儲存庫載入" onClose={() => setLoadOpen(false)} width={780}>
+          <div className="st-modal-sec">
+            <div className="row between" style={{ gap: 8 }}>
+              <div>
+                <div className="st-modal-label">配裝儲存庫</div>
+                <div className="tiny dim">單隻魔靈的符文組合；加入後預設為藍隊（攻擊方）</div>
+              </div>
+              <span className="chip gold">{loadouts.length} 組</span>
+            </div>
+            {loadouts.length === 0 ? (
+              <div className="tiny dim" style={{ marginTop: 8 }}>
+                儲存庫還沒有配裝。可以到「配符」結果按「儲存為配裝」，或在「預設隊」的隊伍詳情按「儲存這隻」。
+              </div>
+            ) : (
+              <div className="col" style={{ gap: 6, marginTop: 8 }}>
+                {[...loadouts]
+                  .sort((a, b) => b.createdAt - a.createdAt)
+                  .map((l) => (
+                    <div key={l.id} className="row between" style={{ gap: 8 }}>
+                      <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                        <MonsterIcon id={l.monsterId} size={30} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600 }}>{MONSTER_MAP.get(l.monsterId)?.name ?? l.name}</div>
+                          <div className="tiny dim">
+                            {l.runeIds.length}/6 符文 · {l.stats?.spd ?? 0} 速 · {new Date(l.createdAt).toLocaleDateString("zh-TW")}
+                          </div>
+                        </div>
+                      </div>
+                      <button className="btn btn-sm" disabled={units.length >= MAX_UNITS} onClick={() => addLoadout(l)}>
+                        加入
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+
+          <div className="st-modal-sec">
+            <div className="row between" style={{ gap: 8 }}>
+              <div>
+                <div className="st-modal-label">預設隊儲存庫</div>
+                <div className="tiny dim">整隊加入；進攻隊預設藍隊（攻擊）、防守隊預設紅隊（防守）</div>
+              </div>
+              <span className="chip gold">{deckFavs.length} 組</span>
+            </div>
+            {deckFavs.length === 0 ? (
+              <div className="tiny dim" style={{ marginTop: 8 }}>
+                還沒有儲存的預設隊。可以到「預設隊」頁對任何一隊按「儲存整隊」。
+              </div>
+            ) : (
+              <div className="col" style={{ gap: 6, marginTop: 8 }}>
+                {[...deckFavs]
+                  .sort((a, b) => b.createdAt - a.createdAt)
+                  .map((d) => (
+                    <div key={d.id} className="row between" style={{ gap: 8 }}>
+                      <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                        <div className="row" style={{ gap: 2 }}>
+                          {d.units.map((u) => <MonsterIcon key={u.unitId} id={u.master} size={24} />)}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600 }}>{deckTypeLabel(d.type)} · 第 {d.seq} 隊</div>
+                          <div className="tiny dim">
+                            {d.units.length} 隻 · {d.type >= 100 ? "防守方（紅隊）" : "攻擊方（藍隊）"}
+                            {d.battlePower ? ` · 戰力 ${d.battlePower}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                      <button className="btn btn-sm" disabled={units.length >= MAX_UNITS} onClick={() => addDeckFav(d)}>
+                        加入整隊
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+
+          <div className="tiny dim" style={{ lineHeight: 1.6 }}>
+            加入後可回到 Monsters 調整隊伍、基礎速度或拉條；最多 12 隻，超過時只會加入剩下的名額。
+          </div>
+        </Modal>
+      )}
+
       {boostModal && (
         <Modal
           title={`ATTACK BAR BOOST - ${boostModal.team === "blue" ? "藍隊" : "紅隊"}`}
