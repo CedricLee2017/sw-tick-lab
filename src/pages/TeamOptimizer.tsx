@@ -14,7 +14,7 @@ import {
 } from "../lib/deckSpeed";
 import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
-import { computeFollowPlan, panelExtraFor } from "../lib/teamSpeed";
+import { computeFollowPlan, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
 import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply,
   type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
@@ -145,6 +145,8 @@ export default function TeamOptimizerPage() {
   const [pickerIndex, setPickerIndex] = useState(-1);
   const [deckOpen, setDeckOpen] = useState(false);
   const [pinDeckRunes, setPinDeckRunes] = useState(false);
+  /** 鏡像對手（防守提條角）速度；0 = 自動使用起手速度 */
+  const [oppSpd, setOppSpd] = useState(0);
 
   const workerRef = useRef<Worker | null>(null);
   const runIdRef = useRef(0);
@@ -267,17 +269,8 @@ export default function TeamOptimizerPage() {
     notify(`已將 ${monsterLabel(v.monster.id)} 的面板速度設為接速下限 ${r.minSpeed}`);
   };
 
-  /** 把某一隻的面板速度設成「還能停在目標 Tick」的最高速度 */
-  const applyFollowCeil = (index: number) => {
-    const r = followPlan[index];
-    const m = members[index];
-    const v = m ? viewOf(m.unitId) : undefined;
-    if (!r || !v || !Number.isFinite(r.maxSpeed) || r.maxSpeed <= 0) return;
-    updateMember(index, { panelExtra: panelExtraFor(v.base.spd, r.maxSpeed), speedMode: "panel" });
-    notify(`已將 ${monsterLabel(v.monster.id)} 的面板速度設為接速上限 ${r.maxSpeed}`);
-  };
-
-  /** 一次把整隊的面板速度設成接速下限 */  const applyAllFollow = () => {
+  /** 一次把整隊的面板速度設成接速下限 */
+  const applyAllFollow = () => {
     let count = 0;
     const next = members.map((m, i) => {
       const r = followPlan[i];
@@ -337,7 +330,7 @@ export default function TeamOptimizerPage() {
   const selected = members.filter((m) => m.unitId > 0);
   const teamIds = selected.map((m) => m.unitId);
 
-  /** 即時接速試算：依攻擊順序串接每一隻的出手 Tick */
+  /** 即時接速試算：依攻擊順序串接，並以鏡像對手在該 Tick 的攻擊條當門檻 */
   const followPlan = useMemo(() => {
     const rate = rta ? 1.5 : 7;
     return computeFollowPlan(
@@ -357,8 +350,41 @@ export default function TeamOptimizerPage() {
         };
       }),
       rate,
+      { opponentSpeed: oppSpd },
     );
-  }, [members, summary, rta]);
+  }, [members, summary, rta, oppSpd]);
+
+  /** 鏡像對戰的實際出手順序：只顯示到「對手第一次出手」為止，最多一個循環 */
+  const mirrorSteps = useMemo(() => {
+    const all = mirrorTimeline(followPlan, rta ? 1.5 : 7, 16);
+    const firstOpp = all.findIndex((s) => s.team === "opponent");
+    return firstOpp >= 0 ? all.slice(0, firstOpp + 1) : all.slice(0, 6);
+  }, [followPlan, rta]);
+
+  const openerFollow = followPlan.find((r) => r.position === 0);
+  const autoOppSpd = openerFollow?.panelSpd ?? openerFollow?.currentSpd ?? 0;
+
+  /** 最後一隻接速成員預計出手的 Tick */
+  const lastFollowTick = useMemo(() => {
+    const ticks = followPlan
+      .filter((r) => r.position > 0 && r.targetTick != null)
+      .map((r) => r.targetTick as number);
+    return ticks.length ? Math.max(...ticks) : null;
+  }, [followPlan]);
+
+  /** 鏡像檢查結論：有沒有接速成員在目標 Tick 輸給對手 */
+  const mirrorVerdict = useMemo(() => {
+    const failing = followPlan.filter((r) => r.position > 0 && r.met === false);
+    const firstOpp = mirrorSteps.find((s) => s.team === "opponent") ?? null;
+    if (!followPlan.some((r) => r.position > 0)) {
+      return { status: "idle" as const, firstOpp: null, failing };
+    }
+    if (failing.length) return { status: "cut" as const, firstOpp, failing };
+    if (firstOpp && lastFollowTick != null && firstOpp.tick <= lastFollowTick) {
+      return { status: "cut" as const, firstOpp, failing };
+    }
+    return { status: "safe" as const, firstOpp, failing };
+  }, [followPlan, mirrorSteps, lastFollowTick]);
 
   /** 全域「包括」符文：分配給目前裝備它的隊員（不在隊上的忽略） */
   const globalIncludes = useMemo(() => {
@@ -796,7 +822,7 @@ export default function TeamOptimizerPage() {
                 )}
                 <label>
                   <span>攻擊順序</span>
-                  <input className="input mono" type="number" min={1} max={10} value={m.order} onChange={(e) => updateMember(i, { order: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} title="1 = 最先出手；接速以下一個 Tick 為目標" />
+                  <input className="input mono" type="number" min={1} max={10} value={m.order} onChange={(e) => updateMember(i, { order: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} title="1 = 最先出手；接速以鏡像對手的攻擊條為門檻" />
                 </label>
                 <label>
                   <span>提條 %</span>
@@ -898,17 +924,31 @@ export default function TeamOptimizerPage() {
       </div>
 
       {/* 即時接速 */}
+      {/* 即時接速：鏡像防守 */}
       <div className="card card-pad" style={{ marginTop: 12 }}>
         <div className="row between wrap" style={{ gap: 8 }}>
           <div>
             <div className="card-title row" style={{ gap: 7 }}>
-              <Gauge size={14} className="gold" /> 接速最低要求
+              <Gauge size={14} className="gold" /> 接速：鏡像防守檢查
             </div>
-            <div className="tiny dim" style={{ marginTop: 3, maxWidth: 760 }}>
-              依攻擊順序串接：第一隻視為起手，沒有接速下限；後續每隻要在前一隻出手後的下一個 Tick 出手。已扣除提條，速度強化視為第一隻出手後才生效（提條角通常在最前面），神器「速度增加效果」會再放大 Buff。最低＝不能更慢，最高＝再快就會提早一個 Tick。
+            <div className="tiny dim" style={{ marginTop: 3, maxWidth: 780 }}>
+              提條角先出手後，對手的防守提條角仍會繼續累積攻擊條（可以溢出 100%）。只要接速成員在輪到它的 Tick 攻擊條高過對手，就不會被插隊；攻擊條相同時進攻方先動。預設對手＝和你起手同速的鏡像防守。提條與速度強化都在起手之後才生效。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
+            <label className="row" style={{ gap: 5 }}>
+              <span className="tiny dim">鏡像對手速度</span>
+              <input
+                className="input mono"
+                style={{ width: 88 }}
+                type="number"
+                min={0}
+                value={oppSpd || ""}
+                placeholder={autoOppSpd ? String(autoOppSpd) : "同起手"}
+                onChange={(e) => setOppSpd(Math.max(0, Number(e.target.value) || 0))}
+                title="0 / 留空 = 使用起手提條角的同速鏡像"
+              />
+            </label>
             <span className="chip muted">每 Tick {rta ? "1.5%" : "7%"}</span>
             <button type="button" className="btn btn-sm" onClick={applyAllFollow}>
               <Gauge size={12} /> 全部套用接速
@@ -916,76 +956,123 @@ export default function TeamOptimizerPage() {
           </div>
         </div>
 
+        {mirrorSteps.length > 0 && (
+          <div className="row wrap" style={{ gap: 6, marginTop: 10 }}>
+            <span className="tiny dim">鏡像預測：</span>
+            {mirrorSteps.map((s, i) => {
+              const v = viewOf(members[s.index]?.unitId ?? 0);
+              const name = v ? monsterLabel(v.monster.id) : `#${s.index + 1}`;
+              return (
+                <span
+                  key={`${s.tick}-${s.team}-${s.index}-${i}`}
+                  className={`chip ${s.team === "ally" ? "green" : "red"}`}
+                  title={`T${s.tick} 出手時攻擊條 ${s.ab}%`}
+                >
+                  T{s.tick} {s.team === "ally" ? "你" : "對手"} {name}
+                </span>
+              );
+            })}
+            {mirrorVerdict.status === "safe" && <span className="chip green">✓ 對手插不進來</span>}
+            {mirrorVerdict.status === "cut" &&
+              (mirrorVerdict.failing.length > 0 ? (
+                <span className="chip red">
+                  ✗{" "}
+                  {mirrorVerdict.failing
+                    .map((f) => {
+                      const v = viewOf(members[f.index]?.unitId ?? 0);
+                      return `${v ? monsterLabel(v.monster.id) : `#${f.index + 1}`}（T${f.targetTick}）`;
+                    })
+                    .join("、")}{" "}
+                  會被插隊
+                </span>
+              ) : (
+                <span className="chip red">✗ 對手會在 T{mirrorVerdict.firstOpp?.tick} 插隊</span>
+              ))}
+          </div>
+        )}
+
         <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(235px, 1fr))", gap: 8, marginTop: 10 }}>
           {orderedFollow.map((r) => {
             const v = viewOf(members[r.index]?.unitId ?? 0);
+            const isOpener = r.position === 0;
             const hasTarget = r.targetTick != null;
-            const shownTick = r.panelSpd != null ? r.panelTick : r.currentTick;
-            const exactTick = hasTarget && shownTick != null && shownTick === r.targetTick;
             const hasSpeed = r.panelSpd != null || r.currentSpd != null;
-            const statusClass = !hasSpeed ? "muted" : !hasTarget ? "green" : exactTick ? "green" : "red";
+            const statusClass = isOpener
+              ? "green"
+              : !hasTarget
+                ? "muted"
+                : r.met == null
+                  ? "muted"
+                  : r.met
+                    ? "green"
+                    : "red";
+            const statusText = isOpener
+              ? "起手"
+              : !hasTarget
+                ? "無接速下限"
+                : r.met == null
+                  ? "未設速度"
+                  : r.met
+                    ? "安全"
+                    : "會被插隊";
             return (
               <div key={r.index} className="team-result-member" style={{ padding: 9 }}>
                 <div className="row between" style={{ gap: 6 }}>
                   <span className="chip gold">順序 {r.position + 1}</span>
-                  <span className="tiny dim">{r.anchorTick != null ? `接 T${r.anchorTick}` : "起手"}</span>
+                  <span className={`chip ${statusClass}`}>{statusText}</span>
                 </div>
                 <div style={{ fontWeight: 700, fontSize: 12.5, marginTop: 6 }}>
                   {v ? monsterLabel(v.monster.id) : "尚未選擇"}
                 </div>
                 <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 4 }}>
-                  <span>{hasTarget ? `目標 T${r.targetTick}` : "無接速下限"}</span>
-                  <span>提條 {r.boostPct}%</span>
+                  <span>{isOpener ? `起手 T${r.effectiveTick ?? "—"}` : `對齊 T${r.targetTick}`}</span>
+                  {!isOpener && <span>提條 {r.boostPct}%</span>}
                   {r.buffPct > 0 && <span className="gold">強化 +{Math.round(r.buffPct * 10) / 10}%</span>}
                 </div>
-                <div className="row between" style={{ gap: 6, marginTop: 6 }}>
-                  <span className="tiny dim">
-                    最低{" "}
-                    <b className={hasTarget ? "gold mono" : "muted mono"}>
-                      {hasTarget && Number.isFinite(r.minSpeed) ? r.minSpeed : "—"}
-                    </b>
-                    {hasTarget && Number.isFinite(r.maxSpeed) && (
-                      <>
-                        {" "}· 最高 <b className="gold mono">{r.maxSpeed}</b>
-                      </>
-                    )}
-                  </span>
-                  <span className={`chip ${statusClass}`} title={shownTick != null ? `實際出手 T${shownTick}` : ""}>
-                    {r.panelSpd != null ? `面板 ${r.panelSpd}` : r.currentSpd != null ? `目前 ${r.currentSpd}` : "未選"}
-                    {shownTick != null ? ` · T${shownTick}${hasTarget ? (exactTick ? " ✓" : " ✗") : ""}` : ""}
-                  </span>
-                </div>
-                <div className="row between" style={{ gap: 6, marginTop: 6 }}>
-                  <span className="tiny dim">
-                    {r.panelTick != null
-                      ? `面板出手 T${r.panelTick}`
-                      : r.currentTick != null
-                        ? `目前出手 T${r.currentTick}`
-                        : r.effectiveTick != null
-                          ? `預計出手 T${r.effectiveTick}`
+
+                {isOpener ? (
+                  <div className="row between" style={{ gap: 6, marginTop: 8 }}>
+                    <span className="tiny dim">沒有接速下限</span>
+                    <span className="chip muted">
+                      {r.panelSpd != null
+                        ? `面板 ${r.panelSpd} → T${r.panelTick ?? "—"}`
+                        : r.currentSpd != null
+                          ? `目前 ${r.currentSpd} → T${r.currentTick ?? "—"}`
                           : "尚未設定速度"}
-                  </span>
-                  <div className="row" style={{ gap: 4 }}>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-ghost"
-                      disabled={!hasTarget || !v || !Number.isFinite(r.minSpeed)}
-                      onClick={() => applyFollowFloor(r.index)}
-                      title="把面板速度設成最低要求"
-                    >
-                      套用下限
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-ghost"
-                      disabled={!hasTarget || !v || !Number.isFinite(r.maxSpeed)}
-                      onClick={() => applyFollowCeil(r.index)}
-                      title="把面板速度設成不會提早出手的最高值"
-                    >
-                      套用上限
-                    </button>
+                    </span>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="row between" style={{ gap: 6, marginTop: 7 }}>
+                      <span className="tiny dim">
+                        最低速度{" "}
+                        <b className={hasTarget ? "gold mono" : "muted mono"}>
+                          {hasTarget && Number.isFinite(r.minSpeed) ? r.minSpeed : "—"}
+                        </b>
+                      </span>
+                      <span className="tiny dim">
+                        對手攻擊條 <b className="mono">{r.opponentAb ? `${r.opponentAb.toFixed(1)}%` : "—"}</b>
+                      </span>
+                    </div>
+                    <div className="row between" style={{ gap: 6, marginTop: 6 }}>
+                      <span className="tiny dim">
+                        我方 T{r.targetTick}{" "}
+                        <b className={r.met ? "green mono" : hasSpeed ? "red mono" : "muted mono"}>
+                          {r.myAb != null ? `${r.myAb.toFixed(1)}%` : "—"}
+                        </b>
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        disabled={!hasTarget || !v || !Number.isFinite(r.minSpeed)}
+                        onClick={() => applyFollowFloor(r.index)}
+                        title="把面板速度設成不被鏡像對手插隊的最低值"
+                      >
+                        套用下限
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             );
           })}

@@ -40,7 +40,8 @@ const {
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
-  computeFollowPlan, followSpeedRequirement, followSpeedCeiling, panelSpeed, panelExtraFor, speedBuffPct, tickWithBoost, tickForSpeed,
+  computeFollowPlan, mirrorTimeline, followSpeedAgainstOpponent, opponentAttackBar,
+  panelSpeed, panelExtraFor, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
 } = engine;
@@ -1530,73 +1531,101 @@ check("接速：面板速度與速度強化倍率", () => {
   assert.equal(speedBuffPct(true, 20), 36);
   assert.equal(tickWithBoost(286, 7), 5);
   assert.equal(tickWithBoost(167, 7, 30), 6);
+  assert.equal(opponentAttackBar({ tick: 6, ratePct: 7, opponentSpeed: 391 }), 164.22);
+  // 提條角出手後才吃到提條：391 風格（T4）之後，291 的風武士是 T5 而不是 T4
+  assert.equal(tickAfterBoost({ speed: 291, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 4 }), 5);
+  // 288 雖然 T5 就滿 100%，但攻擊條仍低於同速鏡像風格（136.85%）→ 會被插隊
+  assert.equal(tickAfterBoost({ speed: 288, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 4 }), 5);
+  assert.ok(288 * 0.07 * 5.3 + 30 < opponentAttackBar({ tick: 5, ratePct: 7, opponentSpeed: 391 }));
 });
 
-check("接速：提條與速度強化會降低最低面板速度", () => {
-  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7 }), 239);
-  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30 }), 167);
-  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, buffPct: 30 }), 184);
-  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30 }), 129);
-  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 36 }), 123);
-  // 速度強化若從第 5 個 Tick 才生效，只有後面的 Tick 吃得到
-  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 159);
-  assert.equal(followSpeedRequirement({ targetTick: 7, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 132);
-  assert.equal(followSpeedCeiling({ targetTick: 6, ratePct: 7 }), 285);
-  assert.equal(followSpeedCeiling({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30 }), 153);
-  assert.equal(followSpeedCeiling({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 199);
-  assert.equal(followSpeedCeiling({ targetTick: 7, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 158);
-  assert.equal(followSpeedCeiling({ targetTick: 7, ratePct: 7, boostPct: 30, buffPct: 30 }), 128);
-  assert.equal(followSpeedCeiling({ targetTick: 1, ratePct: 7 }), Infinity);
+check("接速：鏡像對手的攻擊條就是門檻", () => {
+  // 風格 391 → T4；提條 30%、速度強化 30%
+  assert.equal(followSpeedAgainstOpponent({ targetTick: 5, ratePct: 7, opponentSpeed: 391, boostPct: 30, buffPct: 30, buffStartTick: 4 }), 289);
+  assert.equal(followSpeedAgainstOpponent({ targetTick: 6, ratePct: 7, opponentSpeed: 391, boostPct: 30, buffPct: 30, buffStartTick: 4 }), 291);
+  // 風格 341 → T5 的情況
+  assert.equal(followSpeedAgainstOpponent({ targetTick: 6, ratePct: 7, opponentSpeed: 341, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 257);
+  assert.equal(followSpeedAgainstOpponent({ targetTick: 7, ratePct: 7, opponentSpeed: 341, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 258);
+  // 沒有提條 / 速度強化：同速度只能打平，門檻就是對手速度
+  assert.equal(followSpeedAgainstOpponent({ targetTick: 6, ratePct: 7, opponentSpeed: 341 }), 341);
+  // 神器放大 Buff → 門檻下降
+  assert.equal(followSpeedAgainstOpponent({ targetTick: 5, ratePct: 7, opponentSpeed: 391, boostPct: 30, buffPct: 36, buffStartTick: 4 }), 285);
 });
 
-check("接速：依攻擊順序串接前後 Tick", () => {
+check("接速：起手沒有下限，之後每隻都要贏過鏡像對手", () => {
   const plan = computeFollowPlan([
-    { order: 3, mode: "tick", baseSpd: 111, panelExtra: 0, tick: 6, boostPct: 30, speedBuff: false },
-    { order: 1, mode: "tick", baseSpd: 111, panelExtra: 0, tick: 5, boostPct: 0, speedBuff: false },
-    { order: 2, mode: "tick", baseSpd: 111, panelExtra: 0, tick: 0, boostPct: 30, speedBuff: true, artifactPct: 0 },
+    { order: 1, baseSpd: 111, panelExtra: 280 }, // 391 → T4
+    { order: 2, baseSpd: 103, panelExtra: 188, boostPct: 30, speedBuff: true }, // 291
+    { order: 3, baseSpd: 107, panelExtra: 184, boostPct: 30, speedBuff: true }, // 291
   ], 7);
 
-  // 回傳順序與輸入相同；position 才是攻擊順序
-  assert.deepEqual(plan.map((r) => r.position), [2, 0, 1]);
+  assert.equal(plan[0].position, 0);
+  assert.equal(plan[0].panelTick, 4);
+  assert.equal(plan[0].targetTick, null);
+  assert.equal(plan[0].minSpeed, Infinity);
+  assert.equal(plan[0].met, null);
 
-  const booster = plan[1];
-  assert.equal(booster.anchorTick, null);
-  assert.equal(booster.targetTick, null);
-  assert.equal(booster.minSpeed, Infinity);
-  assert.equal(booster.maxSpeed, Infinity);
-  assert.equal(booster.effectiveTick, 5);
+  assert.equal(plan[1].anchorTick, 4);
+  assert.equal(plan[1].targetTick, 5);
+  assert.equal(plan[1].opponentSpeed, 391);
+  assert.equal(Math.round(plan[1].opponentAb * 100) / 100, 136.85);
+  assert.equal(plan[1].minSpeed, 289);
+  assert.equal(Math.round(plan[1].myAb * 10) / 10, 138);
+  assert.equal(plan[1].met, true);
+  assert.equal(plan[1].panelTick, 5);
 
-  const dps = plan[2];
-  assert.equal(dps.anchorTick, 5);
-  assert.equal(dps.targetTick, 6);
-  assert.equal(dps.buffPct, 30);
-  assert.equal(dps.minSpeed, 159);
-  assert.equal(dps.maxSpeed, 199);
+  assert.equal(plan[2].anchorTick, 5);
+  assert.equal(plan[2].targetTick, 6);
+  assert.equal(plan[2].opponentAb.toFixed(2), "164.22");
+  assert.equal(plan[2].minSpeed, 291);
+  assert.equal(plan[2].myAb.toFixed(3), "164.442");
+  assert.equal(plan[2].met, true);
+  // 兩隻都夠快，第一時間都是 T5；實際誰先出手由攻擊條 / 順序決定（見鏡像順序測試）
+  assert.equal(plan[2].panelTick, 5);
+  assert.equal(plan[2].effectiveTick, 5);
+});
 
-  const speedUnit = plan[0];
-  assert.equal(speedUnit.anchorTick, 6);
-  assert.equal(speedUnit.targetTick, 7);
-  assert.equal(speedUnit.minSpeed, 143);
-  assert.equal(speedUnit.maxSpeed, 166);
+check("接速：目標 Tick 依攻擊順序串接，不是用最早滿 100% 的 Tick", () => {
+  // 風格 341 → T5；兩隻 291 都「最早」在 T5 滿 100%，但實際要接 T6、T7
+  const plan = computeFollowPlan([
+    { order: 1, baseSpd: 111, panelExtra: 230 },
+    { order: 2, baseSpd: 103, panelExtra: 188, boostPct: 30, speedBuff: true },
+    { order: 3, baseSpd: 107, panelExtra: 184, boostPct: 30, speedBuff: true },
+  ], 7);
+  assert.equal(plan[0].panelTick, 5);
+  assert.equal(plan[1].targetTick, 6);
+  assert.equal(plan[1].panelTick, 5);
+  assert.equal(plan[2].targetTick, 7);
+  assert.equal(plan[1].minSpeed, 257);
+  assert.equal(plan[2].minSpeed, 258);
+  assert.equal(plan[1].met, true);
+  assert.equal(plan[2].met, true);
+
+  const steps = mirrorTimeline(plan, 7, 10);
+  assert.deepEqual(steps.slice(0, 4).map((s) => [s.tick, s.team, s.index]), [
+    [5, "ally", 0],
+    [6, "ally", 1],
+    [7, "ally", 2],
+    [8, "opponent", 0],
+  ]);
 });
 
 check("接速：面板速度、提條與實際出手 Tick", () => {
   const plan = computeFollowPlan([
     { order: 1, baseSpd: 111, panelExtra: 130, tick: 0 }, // 241 → T6
-    { order: 2, baseSpd: 111, panelExtra: 32, tick: 0, boostPct: 30 }, // 143 → T7（含提條）
+    { order: 2, baseSpd: 111, panelExtra: 60, tick: 0, boostPct: 30, speedBuff: true, artifactPct: 20 }, // 171
   ], 7);
   assert.equal(plan[0].panelSpd, 241);
   assert.equal(plan[0].panelTick, 6);
   assert.equal(plan[0].targetTick, null);
   assert.equal(plan[0].minSpeed, Infinity);
-  assert.equal(plan[0].maxSpeed, Infinity);
   assert.equal(plan[0].effectiveTick, 6);
   assert.equal(plan[1].anchorTick, 6);
   assert.equal(plan[1].targetTick, 7);
-  assert.equal(plan[1].panelSpd, 143);
+  assert.equal(plan[1].panelSpd, 171);
+  assert.equal(plan[1].opponentAb.toFixed(2), "118.09");
+  assert.equal(plan[1].minSpeed, 171);
   assert.equal(plan[1].panelTick, 7);
-  assert.equal(plan[1].minSpeed, 143);
-  assert.equal(plan[1].maxSpeed, 166);
   assert.equal(plan[1].met, true);
 });
 
@@ -1609,22 +1638,52 @@ check("接速：第一隻沒有下限，面板速度與目標 Tick 二選一", (
   assert.equal(panelFirst[0].panelSpd, 341);
   assert.equal(panelFirst[0].targetTick, null);
   assert.equal(panelFirst[0].minSpeed, Infinity);
-  assert.equal(panelFirst[0].maxSpeed, Infinity);
   assert.equal(panelFirst[0].effectiveTick, 5);
   assert.equal(panelFirst[1].targetTick, 6);
-  assert.equal(panelFirst[1].minSpeed, 159);
-  assert.equal(panelFirst[1].maxSpeed, 199);
+  assert.equal(panelFirst[1].opponentSpeed, 341);
+  assert.equal(panelFirst[1].minSpeed, 257);
+  assert.equal(panelFirst[1].panelSpd, null);
+  assert.equal(panelFirst[1].myAb, null);
+  assert.equal(panelFirst[1].met, null);
 
-  // Tick 模式：忽略面板速度，改用目標 Tick
+  // Tick 模式：忽略面板速度，改用目標 Tick；鏡像對手速度可另外指定
   const tickFirst = computeFollowPlan([
     { order: 1, mode: "tick", baseSpd: 111, panelExtra: 230, tick: 4 },
     { order: 2, mode: "tick", baseSpd: 111, panelExtra: 130, tick: 0 },
-  ], 7);
+  ], 7, { opponentSpeed: 300 });
   assert.equal(tickFirst[0].panelSpd, null);
   assert.equal(tickFirst[0].effectiveTick, 4);
   assert.equal(tickFirst[1].targetTick, 5);
+  assert.equal(tickFirst[1].opponentSpeed, 300);
+  assert.equal(tickFirst[1].minSpeed, 300);
   assert.equal(tickFirst[1].panelSpd, null);
   assert.equal(tickFirst[1].effectiveTick, 5);
+});
+
+check("接速：鏡像出手順序，對手插不進來", () => {
+  const plan = computeFollowPlan([
+    { order: 1, baseSpd: 111, panelExtra: 280 },
+    { order: 2, baseSpd: 103, panelExtra: 188, boostPct: 30, speedBuff: true },
+    { order: 3, baseSpd: 107, panelExtra: 184, boostPct: 30, speedBuff: true },
+  ], 7);
+  const steps = mirrorTimeline(plan, 7, 8);
+  assert.deepEqual(steps.slice(0, 4).map((s) => [s.tick, s.team, s.index]), [
+    [4, "ally", 0],
+    [5, "ally", 1],
+    [6, "ally", 2],
+    [7, "opponent", 0],
+  ]);
+
+  // 不夠快：對手風格 T5 就會插隊
+  const slow = computeFollowPlan([
+    { order: 1, baseSpd: 111, panelExtra: 280 },
+    { order: 2, baseSpd: 103, panelExtra: 155, boostPct: 30, speedBuff: true }, // 258
+    { order: 3, baseSpd: 107, panelExtra: 151, boostPct: 30, speedBuff: true }, // 258
+  ], 7);
+  const slowSteps = mirrorTimeline(slow, 7, 6);
+  const firstOpp = slowSteps.find((s) => s.team === "opponent");
+  assert.deepEqual([firstOpp.tick, firstOpp.team, firstOpp.index], [5, "opponent", 0]);
+  assert.equal(slow[1].met, false);
 });
 
 check("接速：速度強化與神器「速度增加效果」", () => {
@@ -1636,45 +1695,54 @@ check("接速：速度強化與神器「速度增加效果」", () => {
   assert.equal(artifactSpeedBuffPct([]), 0);
 
   const plan = computeFollowPlan([
-    { order: 1, baseSpd: 111, panelExtra: 130, speedBuff: true, artifactPct: 20 },
-    { order: 2, baseSpd: 111, panelExtra: 47, speedBuff: true, artifactPct: 20, boostPct: 30 },
+    { order: 1, baseSpd: 111, panelExtra: 280, speedBuff: true, artifactPct: 20 }, // 391 → T4（起手不吃自己的 Buff）
+    { order: 2, baseSpd: 107, panelExtra: 184, speedBuff: true, artifactPct: 20, boostPct: 30 }, // 291
   ], 7);
-  // 241 × 1.36 = 327.76 → T5
-  assert.equal(plan[0].panelTick, 5);
-  assert.equal(plan[1].targetTick, 6);
-  assert.equal(plan[1].minSpeed, 158); // 70 / (7% × 6.36 個 Tick)
-  assert.equal(plan[1].panelSpd, 158);
-  assert.equal(plan[1].panelTick, 6);
+  assert.equal(plan[0].panelTick, 4);
+  assert.equal(plan[0].buffPct, 0, "起手不會吃到自己的速度強化");
+  assert.equal(plan[1].targetTick, 5);
+  assert.equal(plan[1].buffPct, 36);
+  assert.equal(plan[1].minSpeed, 285);
+  assert.equal(plan[1].panelSpd, 291);
+  assert.equal(plan[1].panelTick, 5);
   assert.equal(plan[1].met, true);
 });
 
-check("接速：與 Tick 模擬的連續出手一致（提條＋速度強化）", () => {
+check("接速：鏡像模擬與 Tick 模擬一致（同速防守風格）", () => {
   const rate = 7;
   const mods = [];
-  for (let tick = 6; tick <= 20; tick++) {
+  for (let tick = 5; tick <= 14; tick++) {
     mods.push({ id: `k-${tick}`, unitId: "kaito", tick, pct: 30 });
     mods.push({ id: `o-${tick}`, unitId: "orochi", tick, pct: 30 });
   }
-  const boosts = [
-    { id: "kb", unitId: "kaito", tick: 5, pct: 30 },
-    { id: "ob", unitId: "orochi", tick: 5, pct: 30 },
+  const units = [
+    { id: "bernard", name: "BernardA", team: "blue", priority: 1, spd: 391 },
+    { id: "kaito", name: "KaitoA", team: "blue", priority: 2, spd: 291 },
+    { id: "orochi", name: "OrochiA", team: "blue", priority: 3, spd: 291 },
+    { id: "dbernard", name: "BernardD", team: "red", priority: 1, spd: 391 },
+    { id: "dkaito", name: "KaitoD", team: "red", priority: 2, spd: 291 },
+    { id: "dorochi", name: "OrochiD", team: "red", priority: 3, spd: 291 },
   ];
-  const sim = simulateAdvanced([
-    { id: "bernard", name: "Bernard", team: "blue", priority: 1, spd: 341 },
-    { id: "kaito", name: "Kaito", team: "blue", priority: 2, spd: 159 },
-    { id: "orochi", name: "Orochi", team: "blue", priority: 3, spd: 132 },
-  ], rate, { boosts, mods }, 3, 10);
-
-  // 模擬每個 Tick 只有一隻出手：Bernard T5 → Kaito T6 → Orochi T7
+  const sim = simulateAdvanced(
+    units,
+    rate,
+    {
+      boosts: [
+        { id: "kb", unitId: "kaito", tick: 5, pct: 30 },
+        { id: "ob", unitId: "orochi", tick: 5, pct: 30 },
+      ],
+      mods,
+    },
+    4,
+    10,
+  );
+  // 同速時進攻方先動；之後風武士、風忍都在防守風格之前出手
   assert.deepEqual(sim.events.map((e) => [e.name, e.tick]), [
-    ["Bernard", 5], ["Kaito", 6], ["Orochi", 7],
+    ["BernardA", 4],
+    ["KaitoA", 5],
+    ["OrochiA", 6],
+    ["BernardD", 7],
   ]);
-
-  // 159 / 132 是剛好接在後面的最低速度
-  assert.equal(tickForSpeed({ speed: 159, ratePct: rate, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 6);
-  assert.equal(tickForSpeed({ speed: 158, ratePct: rate, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 7);
-  assert.equal(tickForSpeed({ speed: 132, ratePct: rate, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 7);
-  assert.equal(tickForSpeed({ speed: 131, ratePct: rate, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 8);
 });
 
 check("runeSupply 依位置計算可用符文與鎖定", () => {
