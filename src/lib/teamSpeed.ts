@@ -4,16 +4,17 @@
  * 這裡只處理頁面上的即時試算，不會改變配符引擎的搜尋條件：
  * - 面板速度與目標 Tick 二選一（預設面板速度）。
  * - 面板速度：使用者輸入的是「基礎速度以外的額外速度」，總速度 = 基礎 + 額外。
- * - 速度強化：實戰速度 × (1 + 30% × 神器放大)。
+ * - 速度強化：實戰速度 × (1 + 30% × 神器放大)，視為第一個出手的成員之後才生效。
  * - 提條：前一隻出手時帶來的攻擊條 %，會降低下一隻要湊到的攻擊條。
  * - 接速最低速度：以前一隻實際出手的 Tick 為基準，下一隻要在下一個 Tick 出手，
  *   回推「未 Buff 的面板速度」需要多少。第一隻視為起手，沒有接速下限。
  *
  * 公式（ratePct 為每 Tick 攻擊條 %，一般 7、RTA 1.5）：
- *   buffedSpeed × ratePct/100 × targetTick + boostPct >= 100
- *   requiredPanel = (100 - boostPct) / (targetTick × ratePct/100) / (1 + buffPct/100)
+ *   effectiveTicks(n) = n + buff% × max(0, n − buffStartTick)
+ *   panelSpeed × ratePct/100 × effectiveTicks(targetTick) + boostPct >= 100
+ *   requiredPanel = (100 − boostPct) / (ratePct/100) / effectiveTicks(targetTick)
  * 最高速度（再快就會提早一個 Tick 出手）：
- *   maxPanel = (100 - boostPct) / ((targetTick - 1) × ratePct/100) / (1 + buffPct/100) - 1
+ *   maxPanel = (100 − boostPct) / (ratePct/100) / effectiveTicks(targetTick − 1) − 1
  */
 
 export const SPEED_BUFF_BASE_PCT = 30;
@@ -41,16 +42,48 @@ export function panelExtraFor(baseSpd: number, totalSpd: number): number {
 }
 
 /**
- * 已知實戰速度、提條 %，第一次出手的 Tick。
- * 提條會直接把攻擊條加上去，所以等價於把「需要的 100%」扣掉提條。
+ * 依 Buff 起始 Tick 計算第 n 個 Tick 的等效攻擊條進度（未乘上每 Tick %）。
+ * 起始 Tick 之前的 Tick 不受速度強化影響；之後每 Tick 多 buff%。
+ * 例如 buffStart=5、buff=30%、n=6 → 6 + 0.3 × 1 = 6.3 個 Tick 的進度。
  */
-export function tickWithBoost(speed: number, ratePct: number, boostPct = 0): number {
+function weightedTicks(n: number, buffPct: number, buffStartTick: number): number {
+  const buff = Math.max(0, finite(buffPct)) / 100;
+  const start = Math.max(0, Math.floor(finite(buffStartTick)));
+  const buffedTicks = Math.max(0, n - start);
+  return n + buff * buffedTicks;
+}
+
+/** 已知實戰速度、提條 %、Buff 起始 Tick，第一次出手的 Tick */
+export function tickForSpeed(o: {
+  speed: number;
+  ratePct: number;
+  boostPct?: number;
+  /** 速度強化 %（0 = 沒有 Buff） */
+  buffPct?: number;
+  /** 速度強化從第幾個 Tick 開始生效（0 = 一開始就有） */
+  buffStartTick?: number;
+}): number {
+  const { speed, ratePct } = o;
   if (!Number.isFinite(speed) || speed <= 0 || !Number.isFinite(ratePct) || ratePct <= 0) {
     return Infinity;
   }
-  const need = 100 - clamp(finite(boostPct), 0, 100);
-  if (need <= 0) return 1;
-  return Math.max(1, Math.ceil(need / (speed * (ratePct / 100)) - 1e-9));
+  const boost = clamp(finite(o.boostPct), 0, 100);
+  const buff = Math.max(0, finite(o.buffPct));
+  const start = Math.max(0, Math.floor(finite(o.buffStartTick)));
+  for (let n = 1; n <= 200; n++) {
+    if (speed * (ratePct / 100) * weightedTicks(n, buff, start) + boost >= 100 - 1e-9) {
+      return n;
+    }
+  }
+  return Infinity;
+}
+
+/**
+ * 已知實戰速度、提條 %，第一次出手的 Tick（速度強化視為一開始就有）。
+ * 保留給舊呼叫端與單元測試；需要指定 Buff 起始 Tick 請用 tickForSpeed。
+ */
+export function tickWithBoost(speed: number, ratePct: number, boostPct = 0): number {
+  return tickForSpeed({ speed, ratePct, boostPct });
 }
 
 /** 要在指定 Tick 出手所需的最低「未 Buff」面板速度 */
@@ -61,6 +94,8 @@ export function followSpeedRequirement(o: {
   boostPct?: number;
   /** 速度強化後的 Buff %（請用 speedBuffPct 計算） */
   buffPct?: number;
+  /** 速度強化從第幾個 Tick 開始生效（0 = 一開始就有） */
+  buffStartTick?: number;
 }): number {
   const { targetTick, ratePct } = o;
   if (!Number.isFinite(targetTick) || targetTick <= 0 || !Number.isFinite(ratePct) || ratePct <= 0) {
@@ -68,9 +103,11 @@ export function followSpeedRequirement(o: {
   }
   const boost = clamp(finite(o.boostPct), 0, 100);
   const buff = Math.max(0, finite(o.buffPct));
-  const needBuffed = (100 - boost) / (targetTick * (ratePct / 100));
-  if (needBuffed <= 0) return 1;
-  return Math.max(1, Math.ceil(needBuffed / (1 + buff / 100) - 1e-9));
+  const weight = weightedTicks(targetTick, buff, finite(o.buffStartTick));
+  if (weight <= 0) return Infinity;
+  const need = (100 - boost) / (ratePct / 100) / weight;
+  if (need <= 0) return 1;
+  return Math.max(1, Math.ceil(need - 1e-9));
 }
 
 /**
@@ -83,6 +120,7 @@ export function followSpeedCeiling(o: {
   ratePct: number;
   boostPct?: number;
   buffPct?: number;
+  buffStartTick?: number;
 }): number {
   const { targetTick, ratePct } = o;
   if (!Number.isFinite(targetTick) || targetTick <= 1 || !Number.isFinite(ratePct) || ratePct <= 0) {
@@ -90,9 +128,11 @@ export function followSpeedCeiling(o: {
   }
   const boost = clamp(finite(o.boostPct), 0, 100);
   const buff = Math.max(0, finite(o.buffPct));
-  const needBuffed = (100 - boost) / ((targetTick - 1) * (ratePct / 100));
-  if (needBuffed <= 0) return 0;
-  return Math.max(0, Math.ceil(needBuffed / (1 + buff / 100) - 1e-9) - 1);
+  const weight = weightedTicks(targetTick - 1, buff, finite(o.buffStartTick));
+  if (weight <= 0) return Infinity;
+  const need = (100 - boost) / (ratePct / 100) / weight;
+  if (need <= 0) return 0;
+  return Math.max(0, Math.ceil(need - 1e-9) - 1);
 }
 
 export type SpeedMode = "panel" | "tick";
@@ -152,6 +192,7 @@ export interface FollowMemberResult<T extends FollowMemberInput = FollowMemberIn
  *
  * 第一隻視為起手，只決定自己的出手 Tick，沒有接速下限；
  * 之後每一隻都要求在前一隻出手後的下一個 Tick 出手。
+ * 速度強化視為第一個出手的成員之後才生效（提條角通常在最前面）。
  * 面板速度與目標 Tick 是二選一：面板模式只看面板速度，Tick 模式只看目標 Tick。
  * 回傳陣列與輸入順序相同，方便頁面用索引對應。
  */
@@ -168,19 +209,24 @@ export function computeFollowPlan<T extends FollowMemberInput>(
 
   const out: FollowMemberResult<T>[] = new Array(members.length);
   let prevTick: number | null = null;
+  /** 速度強化從第一個實際出手的成員之後開始生效（提條角通常在最前面） */
+  let buffStartTick: number | null = null;
 
   ordered.forEach(({ member, index }, position) => {
     const mode: SpeedMode = member.mode ?? "panel";
     const boostPct = clamp(finite(member.boostPct), 0, 100);
     const buffPct = speedBuffPct(!!member.speedBuff, member.artifactPct);
+    const buffStart = buffStartTick ?? 0;
     const panelSpd = mode === "panel" ? panelSpeed(member.baseSpd, member.panelExtra ?? 0) : null;
-    const buffedPanel = panelSpd != null ? Math.ceil(panelSpd * (1 + buffPct / 100)) : null;
-    const panelTick = buffedPanel != null ? tickWithBoost(buffedPanel, ratePct, boostPct) : null;
+    const panelTick =
+      panelSpd != null
+        ? tickForSpeed({ speed: panelSpd, ratePct, boostPct, buffPct, buffStartTick: buffStart })
+        : null;
 
     const current = Math.max(0, finite(member.currentSpd));
     const currentTick =
       current > 0
-        ? tickWithBoost(Math.ceil(current * (1 + buffPct / 100)), ratePct, boostPct)
+        ? tickForSpeed({ speed: current, ratePct, boostPct, buffPct, buffStartTick: buffStart })
         : null;
 
     // 這一隻自己指定的出手 Tick（只有 Tick 模式才算數）
@@ -191,11 +237,11 @@ export function computeFollowPlan<T extends FollowMemberInput>(
     const targetTick = anchorTick != null ? anchorTick + 1 : null;
     const minSpeed =
       targetTick != null
-        ? followSpeedRequirement({ targetTick, ratePct, boostPct, buffPct })
+        ? followSpeedRequirement({ targetTick, ratePct, boostPct, buffPct, buffStartTick: buffStart })
         : Infinity;
     const maxSpeed =
       targetTick != null
-        ? followSpeedCeiling({ targetTick, ratePct, boostPct, buffPct })
+        ? followSpeedCeiling({ targetTick, ratePct, boostPct, buffPct, buffStartTick: buffStart })
         : Infinity;
 
     // 實際用來串下一隻的 Tick：面板 / 目標 Tick 優先，其次目前裝備速度
@@ -225,6 +271,7 @@ export function computeFollowPlan<T extends FollowMemberInput>(
       met,
     };
 
+    if (buffStartTick == null && Number.isFinite(effectiveTick)) buffStartTick = effectiveTick;
     prevTick = Number.isFinite(effectiveTick) ? effectiveTick : null;
   });
 

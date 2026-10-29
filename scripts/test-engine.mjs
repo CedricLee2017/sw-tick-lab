@@ -40,7 +40,7 @@ const {
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
-  computeFollowPlan, followSpeedRequirement, followSpeedCeiling, panelSpeed, panelExtraFor, speedBuffPct, tickWithBoost,
+  computeFollowPlan, followSpeedRequirement, followSpeedCeiling, panelSpeed, panelExtraFor, speedBuffPct, tickWithBoost, tickForSpeed,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
 } = engine;
@@ -1538,8 +1538,13 @@ check("接速：提條與速度強化會降低最低面板速度", () => {
   assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, buffPct: 30 }), 184);
   assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30 }), 129);
   assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 36 }), 123);
+  // 速度強化若從第 5 個 Tick 才生效，只有後面的 Tick 吃得到
+  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 159);
+  assert.equal(followSpeedRequirement({ targetTick: 7, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 132);
   assert.equal(followSpeedCeiling({ targetTick: 6, ratePct: 7 }), 285);
   assert.equal(followSpeedCeiling({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30 }), 153);
+  assert.equal(followSpeedCeiling({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 199);
+  assert.equal(followSpeedCeiling({ targetTick: 7, ratePct: 7, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 158);
   assert.equal(followSpeedCeiling({ targetTick: 7, ratePct: 7, boostPct: 30, buffPct: 30 }), 128);
   assert.equal(followSpeedCeiling({ targetTick: 1, ratePct: 7 }), Infinity);
 });
@@ -1565,8 +1570,8 @@ check("接速：依攻擊順序串接前後 Tick", () => {
   assert.equal(dps.anchorTick, 5);
   assert.equal(dps.targetTick, 6);
   assert.equal(dps.buffPct, 30);
-  assert.equal(dps.minSpeed, 129);
-  assert.equal(dps.maxSpeed, 153);
+  assert.equal(dps.minSpeed, 159);
+  assert.equal(dps.maxSpeed, 199);
 
   const speedUnit = plan[0];
   assert.equal(speedUnit.anchorTick, 6);
@@ -1607,8 +1612,8 @@ check("接速：第一隻沒有下限，面板速度與目標 Tick 二選一", (
   assert.equal(panelFirst[0].maxSpeed, Infinity);
   assert.equal(panelFirst[0].effectiveTick, 5);
   assert.equal(panelFirst[1].targetTick, 6);
-  assert.equal(panelFirst[1].minSpeed, 129);
-  assert.equal(panelFirst[1].maxSpeed, 153);
+  assert.equal(panelFirst[1].minSpeed, 159);
+  assert.equal(panelFirst[1].maxSpeed, 199);
 
   // Tick 模式：忽略面板速度，改用目標 Tick
   const tickFirst = computeFollowPlan([
@@ -1632,15 +1637,44 @@ check("接速：速度強化與神器「速度增加效果」", () => {
 
   const plan = computeFollowPlan([
     { order: 1, baseSpd: 111, panelExtra: 130, speedBuff: true, artifactPct: 20 },
-    { order: 2, baseSpd: 111, panelExtra: 12, speedBuff: true, artifactPct: 20, boostPct: 30 },
+    { order: 2, baseSpd: 111, panelExtra: 47, speedBuff: true, artifactPct: 20, boostPct: 30 },
   ], 7);
   // 241 × 1.36 = 327.76 → T5
   assert.equal(plan[0].panelTick, 5);
   assert.equal(plan[1].targetTick, 6);
-  assert.equal(plan[1].minSpeed, 123); // 166.67 / 1.36
-  assert.equal(plan[1].panelSpd, 123);
+  assert.equal(plan[1].minSpeed, 158); // 70 / (7% × 6.36 個 Tick)
+  assert.equal(plan[1].panelSpd, 158);
   assert.equal(plan[1].panelTick, 6);
   assert.equal(plan[1].met, true);
+});
+
+check("接速：與 Tick 模擬的連續出手一致（提條＋速度強化）", () => {
+  const rate = 7;
+  const mods = [];
+  for (let tick = 6; tick <= 20; tick++) {
+    mods.push({ id: `k-${tick}`, unitId: "kaito", tick, pct: 30 });
+    mods.push({ id: `o-${tick}`, unitId: "orochi", tick, pct: 30 });
+  }
+  const boosts = [
+    { id: "kb", unitId: "kaito", tick: 5, pct: 30 },
+    { id: "ob", unitId: "orochi", tick: 5, pct: 30 },
+  ];
+  const sim = simulateAdvanced([
+    { id: "bernard", name: "Bernard", team: "blue", priority: 1, spd: 341 },
+    { id: "kaito", name: "Kaito", team: "blue", priority: 2, spd: 159 },
+    { id: "orochi", name: "Orochi", team: "blue", priority: 3, spd: 132 },
+  ], rate, { boosts, mods }, 3, 10);
+
+  // 模擬每個 Tick 只有一隻出手：Bernard T5 → Kaito T6 → Orochi T7
+  assert.deepEqual(sim.events.map((e) => [e.name, e.tick]), [
+    ["Bernard", 5], ["Kaito", 6], ["Orochi", 7],
+  ]);
+
+  // 159 / 132 是剛好接在後面的最低速度
+  assert.equal(tickForSpeed({ speed: 159, ratePct: rate, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 6);
+  assert.equal(tickForSpeed({ speed: 158, ratePct: rate, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 7);
+  assert.equal(tickForSpeed({ speed: 132, ratePct: rate, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 7);
+  assert.equal(tickForSpeed({ speed: 131, ratePct: rate, boostPct: 30, buffPct: 30, buffStartTick: 5 }), 8);
 });
 
 check("runeSupply 依位置計算可用符文與鎖定", () => {

@@ -905,7 +905,7 @@ export default function TeamOptimizerPage() {
               <Gauge size={14} className="gold" /> 接速最低要求
             </div>
             <div className="tiny dim" style={{ marginTop: 3, maxWidth: 760 }}>
-              依攻擊順序串接：第一隻視為起手，沒有接速下限；後續每隻要在前一隻出手後的下一個 Tick 出手。已扣除提條，並在啟用速度強化時除以 Buff 倍率（神器「速度增加效果」會再放大 Buff）。最低＝不能更慢，最高＝再快就會提早一個 Tick。
+              依攻擊順序串接：第一隻視為起手，沒有接速下限；後續每隻要在前一隻出手後的下一個 Tick 出手。已扣除提條，速度強化視為第一隻出手後才生效（提條角通常在最前面），神器「速度增加效果」會再放大 Buff。最低＝不能更慢，最高＝再快就會提早一個 Tick。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
