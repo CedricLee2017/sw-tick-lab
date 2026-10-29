@@ -40,7 +40,7 @@ const {
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
-  computeFollowPlan, followSpeedRequirement, panelSpeed, panelExtraFor, speedBuffPct, tickWithBoost,
+  computeFollowPlan, followSpeedRequirement, followSpeedCeiling, panelSpeed, panelExtraFor, speedBuffPct, tickWithBoost,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
 } = engine;
@@ -1538,13 +1538,17 @@ check("接速：提條與速度強化會降低最低面板速度", () => {
   assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, buffPct: 30 }), 184);
   assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30 }), 129);
   assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 36 }), 123);
+  assert.equal(followSpeedCeiling({ targetTick: 6, ratePct: 7 }), 285);
+  assert.equal(followSpeedCeiling({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30 }), 153);
+  assert.equal(followSpeedCeiling({ targetTick: 7, ratePct: 7, boostPct: 30, buffPct: 30 }), 128);
+  assert.equal(followSpeedCeiling({ targetTick: 1, ratePct: 7 }), Infinity);
 });
 
 check("接速：依攻擊順序串接前後 Tick", () => {
   const plan = computeFollowPlan([
-    { order: 3, baseSpd: 111, panelExtra: 0, tick: 6, boostPct: 30, speedBuff: false },
-    { order: 1, baseSpd: 111, panelExtra: 0, tick: 5, boostPct: 0, speedBuff: false },
-    { order: 2, baseSpd: 111, panelExtra: 0, tick: 0, boostPct: 30, speedBuff: true, artifactPct: 0 },
+    { order: 3, mode: "tick", baseSpd: 111, panelExtra: 0, tick: 6, boostPct: 30, speedBuff: false },
+    { order: 1, mode: "tick", baseSpd: 111, panelExtra: 0, tick: 5, boostPct: 0, speedBuff: false },
+    { order: 2, mode: "tick", baseSpd: 111, panelExtra: 0, tick: 0, boostPct: 30, speedBuff: true, artifactPct: 0 },
   ], 7);
 
   // 回傳順序與輸入相同；position 才是攻擊順序
@@ -1552,19 +1556,23 @@ check("接速：依攻擊順序串接前後 Tick", () => {
 
   const booster = plan[1];
   assert.equal(booster.anchorTick, null);
-  assert.equal(booster.targetTick, 5);
-  assert.equal(booster.minSpeed, 286);
+  assert.equal(booster.targetTick, null);
+  assert.equal(booster.minSpeed, Infinity);
+  assert.equal(booster.maxSpeed, Infinity);
+  assert.equal(booster.effectiveTick, 5);
 
   const dps = plan[2];
   assert.equal(dps.anchorTick, 5);
   assert.equal(dps.targetTick, 6);
   assert.equal(dps.buffPct, 30);
   assert.equal(dps.minSpeed, 129);
+  assert.equal(dps.maxSpeed, 153);
 
   const speedUnit = plan[0];
   assert.equal(speedUnit.anchorTick, 6);
   assert.equal(speedUnit.targetTick, 7);
   assert.equal(speedUnit.minSpeed, 143);
+  assert.equal(speedUnit.maxSpeed, 166);
 });
 
 check("接速：面板速度、提條與實際出手 Tick", () => {
@@ -1574,13 +1582,44 @@ check("接速：面板速度、提條與實際出手 Tick", () => {
   ], 7);
   assert.equal(plan[0].panelSpd, 241);
   assert.equal(plan[0].panelTick, 6);
-  assert.equal(plan[0].targetTick, 6);
+  assert.equal(plan[0].targetTick, null);
+  assert.equal(plan[0].minSpeed, Infinity);
+  assert.equal(plan[0].maxSpeed, Infinity);
+  assert.equal(plan[0].effectiveTick, 6);
   assert.equal(plan[1].anchorTick, 6);
   assert.equal(plan[1].targetTick, 7);
   assert.equal(plan[1].panelSpd, 143);
   assert.equal(plan[1].panelTick, 7);
   assert.equal(plan[1].minSpeed, 143);
+  assert.equal(plan[1].maxSpeed, 166);
   assert.equal(plan[1].met, true);
+});
+
+check("接速：第一隻沒有下限，面板速度與目標 Tick 二選一", () => {
+  // 面板模式：即使有目標 Tick 也不採用；第一隻只決定起手 Tick
+  const panelFirst = computeFollowPlan([
+    { order: 1, mode: "panel", baseSpd: 111, panelExtra: 230, tick: 4 },
+    { order: 2, mode: "panel", baseSpd: 111, panelExtra: 0, tick: 6, boostPct: 30, speedBuff: true },
+  ], 7);
+  assert.equal(panelFirst[0].panelSpd, 341);
+  assert.equal(panelFirst[0].targetTick, null);
+  assert.equal(panelFirst[0].minSpeed, Infinity);
+  assert.equal(panelFirst[0].maxSpeed, Infinity);
+  assert.equal(panelFirst[0].effectiveTick, 5);
+  assert.equal(panelFirst[1].targetTick, 6);
+  assert.equal(panelFirst[1].minSpeed, 129);
+  assert.equal(panelFirst[1].maxSpeed, 153);
+
+  // Tick 模式：忽略面板速度，改用目標 Tick
+  const tickFirst = computeFollowPlan([
+    { order: 1, mode: "tick", baseSpd: 111, panelExtra: 230, tick: 4 },
+    { order: 2, mode: "tick", baseSpd: 111, panelExtra: 130, tick: 0 },
+  ], 7);
+  assert.equal(tickFirst[0].panelSpd, null);
+  assert.equal(tickFirst[0].effectiveTick, 4);
+  assert.equal(tickFirst[1].targetTick, 5);
+  assert.equal(tickFirst[1].panelSpd, null);
+  assert.equal(tickFirst[1].effectiveTick, 5);
 });
 
 check("接速：速度強化與神器「速度增加效果」", () => {

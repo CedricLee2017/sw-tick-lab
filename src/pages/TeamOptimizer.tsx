@@ -34,8 +34,10 @@ interface MemberDraft {
   set2: number;
   mains: Partial<Record<number, number>>;
   min: Partial<Record<StatKey, number>>;
-  /** 目標 Tick；0 = 不限 */
+  /** 目標 Tick；0 = 不限（只在「目標 Tick」模式生效） */
   tick: number;
+  /** 速度條件：面板速度或目標 Tick（二選一，預設面板速度） */
+  speedMode: "panel" | "tick";
   /** 面板額外速度（基礎速度以外）；0 = 不指定，面板速度會覆寫目標 Tick */
   panelExtra: number;
   /** 攻擊順序；1 = 最先 */
@@ -98,6 +100,8 @@ function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
     mains: { ...t.mains },
     min: { ...t.min },
     tick: t.tick,
+    // 面板速度與目標 Tick 二選一，預設面板速度（模板的 Tick 保留在欄位裡，切換後即可使用）
+    speedMode: "panel",
     panelExtra: 0,
     order: t.order ?? 1,
     boostPct: t.boostPct ?? 0,
@@ -259,12 +263,21 @@ export default function TeamOptimizerPage() {
     const m = members[index];
     const v = m ? viewOf(m.unitId) : undefined;
     if (!r || !v || !Number.isFinite(r.minSpeed)) return;
-    updateMember(index, { panelExtra: panelExtraFor(v.base.spd, r.minSpeed) });
+    updateMember(index, { panelExtra: panelExtraFor(v.base.spd, r.minSpeed), speedMode: "panel" });
     notify(`已將 ${monsterLabel(v.monster.id)} 的面板速度設為接速下限 ${r.minSpeed}`);
   };
 
-  /** 一次把整隊的面板速度設成接速下限 */
-  const applyAllFollow = () => {
+  /** 把某一隻的面板速度設成「還能停在目標 Tick」的最高速度 */
+  const applyFollowCeil = (index: number) => {
+    const r = followPlan[index];
+    const m = members[index];
+    const v = m ? viewOf(m.unitId) : undefined;
+    if (!r || !v || !Number.isFinite(r.maxSpeed) || r.maxSpeed <= 0) return;
+    updateMember(index, { panelExtra: panelExtraFor(v.base.spd, r.maxSpeed), speedMode: "panel" });
+    notify(`已將 ${monsterLabel(v.monster.id)} 的面板速度設為接速上限 ${r.maxSpeed}`);
+  };
+
+  /** 一次把整隊的面板速度設成接速下限 */  const applyAllFollow = () => {
     let count = 0;
     const next = members.map((m, i) => {
       const r = followPlan[i];
@@ -272,7 +285,7 @@ export default function TeamOptimizerPage() {
       if (!r || !v || !Number.isFinite(r.minSpeed)) return m;
       count++;
       const panelExtra = panelExtraFor(v.base.spd, r.minSpeed);
-      return m.panelExtra === panelExtra ? m : { ...m, panelExtra };
+      return m.panelExtra === panelExtra && m.speedMode === "panel" ? m : { ...m, panelExtra, speedMode: "panel" as const };
     });
     setMembers(next);
     setPlan(null);
@@ -285,6 +298,27 @@ export default function TeamOptimizerPage() {
   const updateMember = (i: number, patch: Partial<MemberDraft>) => {
     setMembers((prev) => prev.map((m, j) => (j === i ? { ...m, ...patch } : m)));
     setPlan(null);
+  };
+
+  /** 把這一隻提供的提條 % 與速度強化帶入後面出手的成員（來源自己不套用） */
+  const propagateBoost = (index: number) => {
+    const src = members[index];
+    if (!src) return;
+    const later = members.map((m, j) => j !== index && m.order > src.order);
+    const count = later.filter(Boolean).length;
+    if (count === 0) return notify("後面沒有其他出手成員", "err");
+    setMembers((prev) =>
+      prev.map((m, j) => {
+        if (j === index) return { ...m, boostPct: 0, speedBuff: false };
+        return later[j] ? { ...m, boostPct: src.boostPct, speedBuff: src.speedBuff } : m;
+      }),
+    );
+    setPlan(null);
+    notify(
+      src.boostPct > 0 || src.speedBuff
+        ? `已把提條 ${src.boostPct}%${src.speedBuff ? " 與速度強化" : ""} 帶入後面 ${count} 隻（來源自身不套用）`
+        : `已清除後面 ${count} 隻的提條與速度強化`,
+    );
   };
 
   const patchMin = (i: number, key: StatKey, value: number) => {
@@ -312,6 +346,7 @@ export default function TeamOptimizerPage() {
         return {
           index,
           order: m.order,
+          mode: m.speedMode === "tick" ? "tick" : "panel",
           baseSpd: v?.base.spd ?? 0,
           panelExtra: m.panelExtra,
           tick: m.tick,
@@ -385,10 +420,10 @@ export default function TeamOptimizerPage() {
       if (m.set2 && m.set2 !== m.set4) sets.push({ set: m.set2, count: 2 });
 
       const min: Partial<Record<StatKey, number>> = { ...m.min };
-      // 面板速度優先於目標 Tick：使用者輸入的是「基礎速度以外的額外速度」
-      const panelSpd = m.panelExtra > 0 ? v.base.spd + m.panelExtra : 0;
+      // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度以外的額外速度」
+      const panelSpd = m.speedMode !== "tick" && m.panelExtra > 0 ? v.base.spd + m.panelExtra : 0;
       if (panelSpd > 0) min.spd = panelSpd;
-      else if (m.tick > 0) min.spd = speedForTick(m.tick, rta);
+      else if (m.speedMode === "tick" && m.tick > 0) min.spd = speedForTick(m.tick, rta);
       else delete min.spd;
 
       const bySlot = new Map<number, number>();
@@ -671,6 +706,7 @@ export default function TeamOptimizerPage() {
         {members.map((m, i) => {
           const v = viewOf(m.unitId);
           const pinned = m.includeRunes.length > 0;
+          const laterCount = members.filter((x, j) => j !== i && x.order > m.order).length;
           return (
             <div key={i} className={`card card-pad team-member ${pinned ? "pinned" : ""}`}>
               <div className="row between" style={{ gap: 8 }}>
@@ -692,6 +728,12 @@ export default function TeamOptimizerPage() {
                 <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 6 }}>
                   <span>目前 SPD <b className="gold">{v.stats.spd}</b></span>
                   <span>基礎 {v.base.spd}</span>
+                  {m.speedMode !== "tick" && m.panelExtra > 0 && (
+                    <span>面板 <b className="gold">{v.base.spd + m.panelExtra}</b></span>
+                  )}
+                  {m.speedMode !== "tick" && m.panelExtra === 0 && m.tick > 0 && (
+                    <span className="chip muted" title="目前是面板速度模式，目標 Tick 不會套用；切換成「目標 Tick」才會使用">Tick T{m.tick} 未套用</span>
+                  )}
                   <span>T{v.stats.tick}</span>
                   <span>{v.runes.length}/6 符文</span>
                   {m.unitId === leaderUnitId && <span className="chip gold">隊長</span>}
@@ -710,22 +752,48 @@ export default function TeamOptimizerPage() {
                   <span>權重</span>
                   <input className="input mono" type="number" min={1} max={10} value={m.weight} onChange={(e) => updateMember(i, { weight: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
                 </label>
-                <label>
-                  <span>目標 Tick</span>
-                  <input className="input mono" type="number" min={0} max={20} value={m.tick} onChange={(e) => updateMember(i, { tick: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} title="0 = 不限；有填面板速度時以面板速度為準" />
-                </label>
-                <label>
-                  <span>面板速度（額外）</span>
-                  <input
-                    className="input mono"
-                    type="number"
-                    min={0}
-                    value={m.panelExtra || ""}
-                    placeholder={v ? `基礎 ${v.base.spd}` : "基礎 ?"}
-                    onChange={(e) => updateMember(i, { panelExtra: Math.max(0, Number(e.target.value) || 0) })}
-                    title={v ? `基礎速度 ${v.base.spd}；例如要 211 就輸入 ${Math.max(0, 211 - v.base.spd)}` : "輸入基礎速度以外的額外速度"}
-                  />
-                </label>
+                <div className="team-mode">
+                  <span>速度條件</span>
+                  <div className="seg" role="radiogroup" aria-label={`第 ${i + 1} 隻速度條件`}>
+                    <label className={`seg-item ${m.speedMode !== "tick" ? "on" : ""}`}>
+                      <input
+                        type="radio"
+                        name={`speed-mode-${i}`}
+                        checked={m.speedMode !== "tick"}
+                        onChange={() => updateMember(i, { speedMode: "panel" })}
+                      />
+                      面板速度
+                    </label>
+                    <label className={`seg-item ${m.speedMode === "tick" ? "on" : ""}`}>
+                      <input
+                        type="radio"
+                        name={`speed-mode-${i}`}
+                        checked={m.speedMode === "tick"}
+                        onChange={() => updateMember(i, { speedMode: "tick" })}
+                      />
+                      目標 Tick
+                    </label>
+                  </div>
+                </div>
+                {m.speedMode !== "tick" ? (
+                  <label>
+                    <span>面板速度（額外）</span>
+                    <input
+                      className="input mono"
+                      type="number"
+                      min={0}
+                      value={m.panelExtra || ""}
+                      placeholder={v ? `基礎 ${v.base.spd}` : "基礎 ?"}
+                      onChange={(e) => updateMember(i, { panelExtra: Math.max(0, Number(e.target.value) || 0) })}
+                      title={v ? `基礎速度 ${v.base.spd}；例如要 211 就輸入 ${Math.max(0, 211 - v.base.spd)}` : "輸入基礎速度以外的額外速度"}
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    <span>目標 Tick</span>
+                    <input className="input mono" type="number" min={0} max={20} value={m.tick} onChange={(e) => updateMember(i, { tick: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} title="0 = 不限；此模式不採用面板速度" />
+                  </label>
+                )}
                 <label>
                   <span>攻擊順序</span>
                   <input className="input mono" type="number" min={1} max={10} value={m.order} onChange={(e) => updateMember(i, { order: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} title="1 = 最先出手；接速以下一個 Tick 為目標" />
@@ -762,6 +830,17 @@ export default function TeamOptimizerPage() {
                   <input className="input mono" type="number" min={0} max={100} value={m.min.cr ?? 0} onChange={(e) => patchMin(i, "cr", Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
                 </label>
               </div>
+
+              {laterCount > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => propagateBoost(i)}
+                  title="把這隻當成提條來源：數值複製到後面出手的成員，這隻自己不會套用"
+                >
+                  <Zap size={12} /> 提條／強化帶入後續 {laterCount} 隻
+                </button>
+              )}
 
               <details className="team-advanced">
                 <summary>套裝 / 主屬性</summary>
@@ -826,7 +905,7 @@ export default function TeamOptimizerPage() {
               <Gauge size={14} className="gold" /> 接速最低要求
             </div>
             <div className="tiny dim" style={{ marginTop: 3, maxWidth: 760 }}>
-              依攻擊順序串接：後一隻要在前一隻出手後的下一個 Tick 出手。已扣除提條，並在啟用速度強化時除以 Buff 倍率（神器「速度增加效果」會再放大 Buff）。
+              依攻擊順序串接：第一隻視為起手，沒有接速下限；後續每隻要在前一隻出手後的下一個 Tick 出手。已扣除提條，並在啟用速度強化時除以 Buff 倍率（神器「速度增加效果」會再放大 Buff）。最低＝不能更慢，最高＝再快就會提早一個 Tick。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
@@ -840,10 +919,11 @@ export default function TeamOptimizerPage() {
         <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(235px, 1fr))", gap: 8, marginTop: 10 }}>
           {orderedFollow.map((r) => {
             const v = viewOf(members[r.index]?.unitId ?? 0);
+            const hasTarget = r.targetTick != null;
             const shownTick = r.panelSpd != null ? r.panelTick : r.currentTick;
-            const exactTick = shownTick != null && r.targetTick != null && shownTick === r.targetTick;
+            const exactTick = hasTarget && shownTick != null && shownTick === r.targetTick;
             const hasSpeed = r.panelSpd != null || r.currentSpd != null;
-            const statusClass = !hasSpeed ? "muted" : exactTick ? "green" : "red";
+            const statusClass = !hasSpeed ? "muted" : !hasTarget ? "green" : exactTick ? "green" : "red";
             return (
               <div key={r.index} className="team-result-member" style={{ padding: 9 }}>
                 <div className="row between" style={{ gap: 6 }}>
@@ -854,31 +934,57 @@ export default function TeamOptimizerPage() {
                   {v ? monsterLabel(v.monster.id) : "尚未選擇"}
                 </div>
                 <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 4 }}>
-                  <span>目標 T{r.targetTick ?? "—"}</span>
+                  <span>{hasTarget ? `目標 T${r.targetTick}` : "無接速下限"}</span>
                   <span>提條 {r.boostPct}%</span>
                   {r.buffPct > 0 && <span className="gold">強化 +{Math.round(r.buffPct * 10) / 10}%</span>}
                 </div>
                 <div className="row between" style={{ gap: 6, marginTop: 6 }}>
                   <span className="tiny dim">
-                    最低 <b className="gold mono">{Number.isFinite(r.minSpeed) ? r.minSpeed : "—"}</b>
+                    最低{" "}
+                    <b className={hasTarget ? "gold mono" : "muted mono"}>
+                      {hasTarget && Number.isFinite(r.minSpeed) ? r.minSpeed : "—"}
+                    </b>
+                    {hasTarget && Number.isFinite(r.maxSpeed) && (
+                      <>
+                        {" "}· 最高 <b className="gold mono">{r.maxSpeed}</b>
+                      </>
+                    )}
                   </span>
                   <span className={`chip ${statusClass}`} title={shownTick != null ? `實際出手 T${shownTick}` : ""}>
                     {r.panelSpd != null ? `面板 ${r.panelSpd}` : r.currentSpd != null ? `目前 ${r.currentSpd}` : "未選"}
-                    {shownTick != null ? ` · T${shownTick} ${exactTick ? "✓" : "✗"}` : ""}
+                    {shownTick != null ? ` · T${shownTick}${hasTarget ? (exactTick ? " ✓" : " ✗") : ""}` : ""}
                   </span>
                 </div>
                 <div className="row between" style={{ gap: 6, marginTop: 6 }}>
                   <span className="tiny dim">
-                    {r.panelTick != null ? `面板出手 T${r.panelTick}` : r.currentTick != null ? `目前出手 T${r.currentTick}` : "面板速度未設定"}
+                    {r.panelTick != null
+                      ? `面板出手 T${r.panelTick}`
+                      : r.currentTick != null
+                        ? `目前出手 T${r.currentTick}`
+                        : r.effectiveTick != null
+                          ? `預計出手 T${r.effectiveTick}`
+                          : "尚未設定速度"}
                   </span>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    disabled={!v || !Number.isFinite(r.minSpeed)}
-                    onClick={() => applyFollowFloor(r.index)}
-                  >
-                    套用下限
-                  </button>
+                  <div className="row" style={{ gap: 4 }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      disabled={!hasTarget || !v || !Number.isFinite(r.minSpeed)}
+                      onClick={() => applyFollowFloor(r.index)}
+                      title="把面板速度設成最低要求"
+                    >
+                      套用下限
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      disabled={!hasTarget || !v || !Number.isFinite(r.maxSpeed)}
+                      onClick={() => applyFollowCeil(r.index)}
+                      title="把面板速度設成不會提早出手的最高值"
+                    >
+                      套用上限
+                    </button>
+                  </div>
                 </div>
               </div>
             );

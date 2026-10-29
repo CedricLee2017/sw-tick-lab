@@ -739,6 +739,30 @@ p { margin: 0; }
 }
 .team-fields > label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .team-fields > label > span { font-size: 10.5px; color: var(--muted); font-weight: 600; }
+.team-mode { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+.team-mode > span { font-size: 10.5px; color: var(--muted); font-weight: 600; }
+.seg {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.seg-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.seg-item.on { background: rgba(242, 198, 92, .14); color: var(--gold); font-weight: 700; }
+.seg-item input { position: absolute; opacity: 0; pointer-events: none; }
 .team-fields .input,
 .team-fields .select { padding: 5px 8px; font-size: 12px; }
 .team-fields .select { padding-right: 24px; }
