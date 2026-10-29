@@ -144,7 +144,7 @@ npm run dev        # http://localhost:5173
 npm run typecheck  # TypeScript 檢查
 npm run build      # 產出 dist/
 npm run preview    # 預覽 production build
-npm test           # Tick、配符、符文限制、技能傷害、神器、追傷、預設隊／防守隊、Speed Tick、接速、RTA 與一鍵配隊測試（99 項）
+npm test           # Tick、配符、符文限制、技能傷害、神器、追傷、預設隊／防守隊、Speed Tick、接速、RTA 與一鍵配隊測試（100 項）
 ```
 
 其他指令：
