@@ -151,12 +151,34 @@ npm run demo   # 重新產生 public/demo-account.json 示範存檔
 
 ## 部署（Cloudflare Pages）
 
+線上網址：<https://sw-tick-lab.pages.dev>
+
+**自動部署（主要方式）**：Cloudflare Pages 專案 `sw-tick-lab` 接到 GitHub `CedricLee2017/sw-tick-lab` 後，`main` 分支一 push 就會自動建置與上線，不需要手動執行任何指令。（一次性設定見下方「連接 Git 步驟」）
+
+| 設定 | 值 |
+| --- | --- |
+| Production branch | `main` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Node 版本 | `.nvmrc`（22） |
+
+**手動部署（備援）**：Git 整合失效時才用，會直接覆蓋線上版本。
+
 ```bash
 npm run deploy
 # 或
 npm run build
 npx wrangler pages deploy dist --project-name sw-tick-lab
 ```
+
+### 連接 Git 步驟（一次性）
+
+1. 開啟 <https://dash.cloudflare.com> → **Workers & Pages** → 專案 `sw-tick-lab`。
+2. **Settings → Build configuration / Connect Git**，選擇 GitHub，授權並選 `CedricLee2017/sw-tick-lab`。
+3. 填入 Production branch `main`、Build command `npm run build`、Build output directory `dist`，存檔。
+4. 之後 `git push origin main` 就會自動建置；在 **Deployments** 分頁可看建置狀態與失敗 log。
+
+> 若該專案（Direct Upload 類型）沒有出現 Connect Git 選項，改為 **Create application → Pages → Connect to Git** 新建一個連 Git 的專案，再把自訂網域指到新專案即可；`npm run deploy` 這種手動上傳與 Git 建置請擇一使用，避免互相覆蓋。
 
 `vite.config.ts` 已設定 `base: "./"`，可直接部署到任何靜態託管（GitHub Pages、Netlify、Cloudflare Pages）。
 
