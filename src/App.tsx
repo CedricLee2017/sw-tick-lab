@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap,
 } from "lucide-react";
 import { useStore } from "./store";
 import ImportPage from "./pages/Import";
@@ -15,12 +15,13 @@ import AdCalculatorPage from "./pages/AdCalculator";
 import DecksPage from "./pages/Decks";
 import SpeedTickPage from "./pages/SpeedTick";
 import OptimizerPage from "./pages/Optimizer";
+import TeamOptimizerPage from "./pages/TeamOptimizer";
 import RunesPage from "./pages/Runes";
 import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 
-type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "settings";
+type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -29,6 +30,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "speedtick", label: "Speed Tick", icon: <Timer size={17} />, title: "Speed Tick 計算器", sub: "攻擊條、速度、出手順序與 Tick 門檻" },
   { key: "rta", label: "RTA", icon: <Swords size={17} />, title: "RTA 世界競技場", sub: "最愛魔靈的 RTA 獨立配裝與速度排行" },
   { key: "optimizer", label: "配符", icon: <Wand2 size={17} />, title: "一鍵配符", sub: "以 Tick 為條件的符文最佳化" },
+  { key: "team-opt", label: "一鍵配隊", icon: <Zap size={17} />, title: "配置預設隊", sub: "3／4／5 隻魔靈一次配好，符文不重複" },
   { key: "artifact-opt", label: "配神器", icon: <Sparkles size={17} />, title: "配神器", sub: "使用目前魔靈的裝備符文，直接最佳化神器" },
   { key: "artifact-ad", label: "神器追傷", icon: <Calculator size={17} />, title: "神器追傷計算器", sub: "依三圍與段數計算神器追加傷害" },
   { key: "builds", label: "儲存庫", icon: <Bookmark size={17} />, title: "儲存庫", sub: "預設隊與配裝收藏，隨時查看或帶回配符" },
@@ -80,6 +82,7 @@ export default function App() {
       case "speedtick": return <SpeedTickPage />;
       case "rta": return <RtaPage />;
       case "optimizer": return <OptimizerPage />;
+      case "team-opt": return <TeamOptimizerPage />;
       case "artifact-opt": return <ArtifactOptimizerPage />;
       case "artifact-ad": return <AdCalculatorPage />;
       case "builds": return <BuildsPage />;
@@ -112,14 +115,14 @@ export default function App() {
             </button>
           ))}
           <div className="nav-label">分析</div>
-          {ROUTES.slice(1, 14).map((r) => (
+          {ROUTES.slice(1, -1).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
               {!account && <span className="dim" style={{ marginLeft: "auto", fontSize: 10 }}>—</span>}
             </button>
           ))}
           <div className="nav-label">系統</div>
-          {ROUTES.slice(14).map((r) => (
+          {ROUTES.slice(-1).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
             </button>
@@ -178,7 +181,7 @@ export default function App() {
       </div>
 
       <nav className="mobile-nav">
-        {ROUTES.filter((r) => ["import", "overview", "speed", "speedtick", "rta", "optimizer", "artifact-opt", "artifact-ad", "builds", "decks", "summonlog", "runes", "artifacts"].includes(r.key)).map((r) => (
+        {ROUTES.filter((r) => ["import", "overview", "speed", "speedtick", "rta", "optimizer", "team-opt", "artifact-opt", "artifact-ad", "builds", "decks", "summonlog", "runes", "artifacts"].includes(r.key)).map((r) => (
           <button key={r.key} className={route === r.key ? "active" : ""} onClick={() => go(r.key)}>
             {r.icon}
             <span>{r.label}</span>

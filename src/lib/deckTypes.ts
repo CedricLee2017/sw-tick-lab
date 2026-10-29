@@ -1,6 +1,8 @@
 /** 遊戲 deck_type 與本工具防守隊代碼的名稱對照 */
 
 export const DECK_TYPE_LABELS: Record<number, string> = {
+  // 本工具「一鍵配隊」儲存的自訂隊伍（不屬於遊戲 deck_type）
+  0: "自訂配隊",
   1: "競技場",
   2: "公會戰（進攻）",
   3: "異界（三頭）",

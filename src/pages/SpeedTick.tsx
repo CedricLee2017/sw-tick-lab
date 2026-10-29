@@ -1314,7 +1314,7 @@ export default function SpeedTickPage() {
             </div>
             {deckFavs.length === 0 ? (
               <div className="tiny dim" style={{ marginTop: 8 }}>
-                還沒有儲存的預設隊。可以到「預設隊」頁對任何一隊按「儲存整隊」。
+                還沒有儲存的預設隊。可以到「預設隊」頁按「儲存整隊」，或在「一鍵配隊」頁按「儲存到儲存庫」。
               </div>
             ) : (
               <div className="col" style={{ gap: 6, marginTop: 8 }}>

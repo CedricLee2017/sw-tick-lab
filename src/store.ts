@@ -115,6 +115,8 @@ interface Store {
   setRuneFlag: (kind: RuneFlag, ids: number[], on: boolean) => void;
   /** 將收藏配裝的符文「上符」到指定魔靈（只修改本工具的本機資料） */
   equipRunes: (unitId: number, runeIds: number[]) => number;
+  /** 一次將整隊符文上符；同一顆符文只會分配給一隻魔靈 */
+  equipTeam: (assignments: { unitId: number; runeIds: number[] }[]) => number;
   saveLoadout: (l: Omit<Loadout, "id" | "createdAt">) => void;
   removeLoadout: (id: string) => void;
   /** 儲存整隊預設隊到預設隊儲存庫 */
@@ -304,6 +306,59 @@ export const useStore = create<Store>((setState, getState) => ({
     setState({ account: next, runeMap: new Map(next.runes.map((r) => [r.id, r])) });
     void set(ACCOUNT_KEY, next);
     return chosen.length;
+  },
+
+  equipTeam: (assignments) => {
+    const account = getState().account;
+    if (!account) return 0;
+    const runeById = new Map(account.runes.map((r) => [r.id, { ...r }]));
+    const unitById = new Map(account.units.map((u) => [u.id, u]));
+    const chosen = new Set<number>();
+    const byUnit = new Map<number, number[]>();
+    const owner = new Map<number, number>();
+
+    for (const a of assignments) {
+      if (!unitById.has(a.unitId)) continue;
+      const slots = new Set<number>();
+      const ids: number[] = [];
+      for (const id of a.runeIds) {
+        const r = runeById.get(id);
+        if (!r || !r.slot) continue;
+        // 同一顆符文只能給一隻魔靈；同一位置也只能有一顆
+        if (chosen.has(id) || slots.has(r.slot)) continue;
+        chosen.add(id);
+        slots.add(r.slot);
+        ids.push(id);
+        owner.set(id, a.unitId);
+      }
+      ids.sort((x, y) => (runeById.get(x)?.slot ?? 9) - (runeById.get(y)?.slot ?? 9));
+      byUnit.set(a.unitId, ids);
+    }
+    if (chosen.size === 0) return 0;
+
+    // 先釋放目標魔靈原本穿著、但不在新組合裡的符文
+    for (const uid of byUnit.keys()) {
+      for (const id of unitById.get(uid)?.runes ?? []) {
+        if (chosen.has(id)) continue;
+        const r = runeById.get(id);
+        if (r) r.occupied = 0;
+      }
+    }
+
+    const units = account.units.map((u) => {
+      const ids = byUnit.get(u.id);
+      if (ids) return { ...u, runes: ids };
+      return { ...u, runes: u.runes.filter((id) => !chosen.has(id)) };
+    });
+    for (const [id, uid] of owner) {
+      const r = runeById.get(id);
+      if (r) r.occupied = uid;
+    }
+
+    const next: Account = { ...account, units, runes: [...runeById.values()] };
+    setState({ account: next, runeMap: new Map(next.runes.map((r) => [r.id, r])) });
+    void set(ACCOUNT_KEY, next);
+    return chosen.size;
   },
 
   saveLoadout: (l) => {

@@ -40,6 +40,8 @@ const {
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
+  optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
+  TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
 } = engine;
 
 let passed = 0;
@@ -1289,6 +1291,256 @@ check("Speed Tick 計算器：速度、門檻與出手順序", () => {
   );
   assert.equal(addFlat.frames[0].cells[0].ab.toFixed(3), "10.150"); // ceil(115 + 30)
   assert.equal(addFlat.frames[1].cells[0].ab.toFixed(3), "18.200");
+});
+
+/* ── 13. 一鍵配隊 ─────────────────────────────── */
+console.log("\n[13] 一鍵配隊（整隊符文不重複）");
+
+// 每個位置 8 顆；1–4 號迅速（3）、5–6 號意志（15），確保套裝需求一定配得出來。
+const teamRunes = [];
+for (let slot = 1; slot <= 6; slot++) {
+  for (let k = 0; k < 8; k++) {
+    const set = slot <= 4 ? 3 : 15;
+    const mainT = slot === 2 ? 8 : slot === 6 ? 2 : slot === 4 ? 4 : slot === 1 || slot === 5 ? 3 : 5;
+    const mainV = slot === 2 ? 30 + k : slot === 6 ? 55 : slot === 4 ? 50 : 140;
+    const sec = [[8, 5 + k * 2, 0, 0]];
+    if (slot === 2) sec.push([9, 4 + k, 0, 0]);
+    teamRunes.push({
+      rune_id: 700000 + slot * 100 + k,
+      slot_no: slot, set_id: set, class: 6, rank: 5, upgrade_curr: 15,
+      pri_eff: [mainT, mainV], prefix_eff: [0, 0], sec_eff: sec,
+    });
+  }
+}
+const teamAccount = parseAccountJSON(
+  JSON.stringify({ unit_list: [], runes: teamRunes, building_list: [] }),
+  "team.json",
+);
+assert.equal(teamAccount.error, undefined, teamAccount.error);
+const teamRuneList = teamAccount.account.runes;
+const teamBonus = {
+  towerSpd: 0, towerAtk: 0, towerHp: 0, towerDef: 0,
+  guildAtk: 0, guildHp: 0, guildDef: 0, guildCd: 0,
+  leadSpd: 0, buffSpd: 0, useGuild: false, useElementTower: false, grind: true,
+};
+
+const mkTeamMember = (unitId, over = {}) => ({
+  unitId,
+  master: 1000 + unitId,
+  label: `測試魔靈 ${unitId}`,
+  base: { hp: 12000, atk: 700, def: 600, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 },
+  role: "dps",
+  weight: 10,
+  sets: [{ set: 3, count: 4 }, { set: 15, count: 2 }],
+  mains: {},
+  min: {},
+  focus: [],
+  leadSpd: 0,
+  ...over,
+});
+
+const teamReq = (size, over = {}) => ({
+  members: Array.from({ length: size }, (_, i) => mkTeamMember(900 + i)),
+  runes: teamRuneList,
+  bonus: teamBonus,
+  rta: false,
+  pool: 7,
+  topK: 20,
+  beamWidth: 24,
+  allowEquipped: true,
+  relaxSub: false,
+  intangible: false,
+  excludeRunes: [],
+  lockedRunes: [],
+  maxNodesPerSearch: 400_000,
+  diversify: true,
+  alternatives: 3,
+  ...over,
+});
+
+const planOf = (out) => {
+  assert.equal(out.ok, true, out.ok ? "" : out.error);
+  return out.plan;
+};
+
+check("3 人：每人 6 顆，整隊符文不重複", () => {
+  const plan = planOf(optimizeTeam(teamReq(3)));
+  assert.equal(plan.members.length, 3);
+  const ids = plan.members.flatMap((m) => m.runeIds);
+  assert.equal(ids.length, 18);
+  assert.equal(new Set(ids).size, 18, "整隊符文不可重複");
+  for (const m of plan.members) {
+    assert.equal(new Set(m.runeIds).size, 6, "每人 6 顆");
+    assert.equal(m.sets[3], 4, "迅速 ×4");
+    assert.equal(m.sets[15], 2, "意志 ×2");
+  }
+  assert.ok(plan.teamScore > 0, "隊伍分數應大於 0");
+});
+
+check("4 人 / 5 人：整隊符文仍不重複", () => {
+  for (const size of [4, 5]) {
+    const plan = planOf(optimizeTeam(teamReq(size)));
+    const ids = plan.members.flatMap((m) => m.runeIds);
+    assert.equal(plan.members.length, size);
+    assert.equal(ids.length, size * 6);
+    assert.equal(new Set(ids).size, size * 6, `${size} 人隊伍符文不可重複`);
+  }
+});
+
+check("同一輸入可重現相同結果", () => {
+  const a = planOf(optimizeTeam(teamReq(3)));
+  const b = planOf(optimizeTeam(teamReq(3)));
+  assert.deepEqual(
+    a.members.map((m) => m.runeIds),
+    b.members.map((m) => m.runeIds),
+  );
+});
+
+check("固定符文（includeRunes）一定會入選", () => {
+  const pinned = teamRuneList.find((r) => r.slot === 2);
+  const plan = planOf(
+    optimizeTeam(
+      teamReq(3, {
+        members: [
+          mkTeamMember(900, { includeRunes: [pinned.id] }),
+          mkTeamMember(901),
+          mkTeamMember(902),
+        ],
+      }),
+    ),
+  );
+  const ids = plan.members.flatMap((m) => m.runeIds);
+  assert.ok(ids.includes(pinned.id), "固定符文沒有被使用");
+  assert.equal(new Set(ids).size, ids.length, "固定後仍不可重複");
+});
+
+check("數值下限不可能時回傳錯誤，而不是丟例外", () => {
+  const out = optimizeTeam(
+    teamReq(3, {
+      members: [mkTeamMember(900, { min: { spd: 9999 } }), mkTeamMember(901), mkTeamMember(902)],
+    }),
+  );
+  assert.equal(out.ok, false);
+  assert.match(out.error, /無法為/);
+  assert.equal(out.unitId, 900);
+});
+
+check("符文數量不足時回傳錯誤", () => {
+  const out = optimizeTeam(teamReq(3, { runes: teamRuneList.filter((r) => r.slot !== 3) }));
+  assert.equal(out.ok, false);
+  assert.match(out.error, /無法為|衝突/);
+});
+
+check("主屬性不可能時會自動放寬並在結果標示", () => {
+  const out = optimizeTeam(
+    teamReq(3, {
+      members: [
+        mkTeamMember(900, { mains: { 2: 11 } }),
+        mkTeamMember(901),
+        mkTeamMember(902),
+      ],
+    }),
+  );
+  const plan = planOf(out);
+  assert.equal(plan.members.length, 3);
+  assert.ok(plan.notes.some((n) => n.includes("不限主屬性")), "應標示放寬主屬性");
+});
+
+check("topK 模式只回傳前 K 組，且依目標分數排序", () => {
+  const res = optimize({
+    base: { hp: 12000, atk: 700, def: 600, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 },
+    runes: teamRuneList,
+    required: [],
+    min: {},
+    max: {},
+    bonus: teamBonus,
+    pool: 7,
+    allowEquipped: true,
+    targetUnit: 0,
+    rta: false,
+    maxNodes: 400_000,
+    topK: 5,
+    objective: "spd",
+  });
+  assert.ok(res.topBuilds, "topK 模式應回傳 topBuilds");
+  assert.equal(res.topBuilds.length, 5);
+  for (let i = 1; i < res.topBuilds.length; i++) {
+    assert.ok(
+      res.topBuilds[i - 1].objective >= res.topBuilds[i].objective,
+      "topBuilds 應依目標分數由高到低",
+    );
+  }
+  assert.ok(res.topBuilds.every((b) => b.runeIds.length === 6), "每組應有 6 顆符文");
+  assert.equal(objectiveOf(res.topBuilds[0].stats, "spd"), res.topBuilds[0].stats.spd);
+});
+
+check("隊長技只影響速度目標（leadSpd 逐隻帶入）", () => {
+  const noLead = planOf(optimizeTeam(teamReq(1, { members: [mkTeamMember(900, { role: "speed" })] })));
+  const withLead = planOf(
+    optimizeTeam(
+      teamReq(1, { members: [mkTeamMember(900, { role: "speed", leadSpd: 30 })] }),
+    ),
+  );
+  assert.ok(
+    withLead.members[0].stats.spd > noLead.members[0].stats.spd,
+    "速度隊長技應提高面板速度",
+  );
+  assert.equal(roleObjective("speed"), "spd");
+  assert.equal(roleObjective("dps"), "dps");
+  assert.equal(roleObjective("tank"), "tank");
+  assert.equal(roleObjective("support"), "support");
+});
+
+check("隊型預設涵蓋 3 / 4 / 5 人與角色", () => {
+  assert.ok(TEAM_TEMPLATES.length >= 4);
+  assert.ok(TEAM_TEMPLATES.every((t) => [3, 4, 5].includes(t.size)));
+  assert.ok(TEAM_TEMPLATES.some((t) => t.size === 4));
+  assert.ok(TEAM_TEMPLATES.some((t) => t.size === 5));
+
+  const speed = teamTemplateOf("guild-speed");
+  const m3 = templateMembers(speed, 3);
+  assert.deepEqual(m3.map((m) => m.role), ["speed", "booster", "dps"]);
+
+  const m5 = templateMembers(speed, 5);
+  assert.equal(m5.length, 5);
+  assert.deepEqual(m5.slice(3).map((m) => m.title), ["自訂 4", "自訂 5"]);
+  // 回傳的是複本，修改不應污染原始隊型
+  m5[0].sets[0].count = 2;
+  assert.equal(templateMembers(speed, 3)[0].sets[0].count, 4);
+  assert.equal(teamTemplateOf("no-such-id").id, "custom");
+
+  const used = new Set(TEAM_TEMPLATES.flatMap((t) => t.members.map((m) => m.role)));
+  for (const role of ["speed", "booster", "dps", "tank", "support"]) {
+    assert.ok(used.has(role), `隊型應包含 ${role} 角色`);
+  }
+  assert.ok(TEAM_ROLE_LABELS.tank.includes("坦克"));
+});
+
+check("runeSupply 依位置計算可用符文與鎖定", () => {
+  const supply = runeSupply(teamRuneList, [900, 901, 902], [], []);
+  assert.equal(supply.length, 6);
+  assert.ok(supply.every((s) => s.slot >= 1 && s.slot <= 6));
+  assert.ok(supply.every((s) => s.count === 8 && s.need === 3));
+
+  const firstSlot1 = teamRuneList.find((r) => r.slot === 1);
+  const locked = runeSupply(teamRuneList, [900, 901, 902], [], [firstSlot1.id]);
+  const s1 = locked.find((s) => s.slot === 1);
+  assert.equal(s1.count, 7, "鎖定且不屬於隊員的符文應被排除");
+});
+
+check("teamSetsOf / scoreTeam 與候選配裝一致", () => {
+  const swift = teamRuneList.filter((r) => r.set === 3).slice(0, 4);
+  const will = teamRuneList.filter((r) => r.set === 15).slice(0, 2);
+  const byId = new Map(teamRuneList.map((r) => [r.id, r]));
+  const sets = teamSetsOf([...swift, ...will].map((r) => r.id), byId, [{ set: 3, count: 4 }], false);
+  assert.equal(sets[3], 4);
+  assert.equal(sets[15], 2);
+
+  const members = [mkTeamMember(900, { role: "speed", weight: 2 })];
+  const score = scoreTeam(members, [
+    { unitId: 900, runeIds: [], stats: { spd: 250, atk: 0, hp: 0, def: 0, cr: 0, cd: 0, res: 0, acc: 0 } },
+  ]);
+  assert.equal(score, 500, "scoreTeam = 權重 × 角色目標值");
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

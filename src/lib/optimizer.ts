@@ -66,6 +66,30 @@ export function focusFitOf(stats: Stats, focus: FocusEntry[] | undefined): numbe
   return total > 0 ? (sum / total) * 100 : 0;
 }
 
+/** 隊伍配符使用的搜尋目標（必須可序列化，才能傳進 Worker） */
+export type OptObjective = "score" | "spd" | "dps" | "tank" | "support";
+
+/**
+ * 依面板 / 實戰數值計算搜尋目標分數。
+ * 只用來排序候選與剪枝；最後隊伍分數會再依每隻魔靈的正規化值加權。
+ */
+export function objectiveOf(stats: Stats, objective: OptObjective = "score"): number {
+  switch (objective) {
+    case "spd":
+      return stats.spd;
+    case "dps":
+      // 期望傷害代理值：ATK × (1 + 暴率 × 暴傷)
+      return stats.atk * (1 + (Math.min(100, stats.cr) * stats.cd) / 10000);
+    case "tank":
+      return stats.ehp || (stats.hp * (1140 + 3.5 * stats.def)) / 1000;
+    case "support":
+      // 速度、有效體力與命中 / 抵抗的綜合值（僅用於同一隻魔靈之間的排序）
+      return stats.spd * 2 + (stats.hp + stats.def * 4) / 1000 + (stats.acc + stats.res) * 1.5;
+    default:
+      return scoreOf(stats);
+  }
+}
+
 export interface OptRequest {
   base: BaseStats;
   runes: Rune[];
@@ -94,6 +118,13 @@ export interface OptRequest {
   includeRunes?: number[];
   /** 已鎖定的符文 id（只能留在目前裝備的魔靈） */
   lockedRunes?: number[];
+  /**
+   * 只保留前 N 組（隊伍配符用）。設定後改用有界收集器，
+   * 不會建立完整結果池；結果放在 `OptResult.topBuilds`。
+   */
+  topK?: number;
+  /** topK 模式的排序目標（預設 score） */
+  objective?: OptObjective;
 }
 
 export interface Build {
@@ -144,6 +175,22 @@ export interface OptResult {
   /** 候選符文的完整組合空間（各位置候選數相乘），用來判斷「算完」需要多少節點 */
   space: number;
   ms: number;
+  /** topK 模式的精簡結果（只保留前 K 組，不含原始 typed array 明細） */
+  topBuilds?: TopBuild[];
+}
+
+/** topK 模式的一組配裝（runeIds 依位置 1..6 排列） */
+export interface TopBuild {
+  runeIds: number[];
+  /** 面板數值（不含召喚師技能） */
+  stats: Stats;
+  /** 實戰 EHP（含一般召喚師技能） */
+  ehp: number;
+  /** 實戰搜尋目標分數 */
+  objective: number;
+  score: number;
+  eff: number;
+  focusFit: number;
 }
 
 /** 面板數值在 statValues 裡的順序 */
@@ -345,6 +392,8 @@ export function optimize(req: OptRequest): OptResult {
     excludeRunes = [],
     includeRunes = [],
     lockedRunes = [],
+    topK = 0,
+    objective = "score",
   } = req;
 
   const INTANGIBLE_ID = 25;
@@ -587,6 +636,40 @@ export function optimize(req: OptRequest): OptResult {
     count++;
   };
 
+  // ── topK 模式：只保留目標分數最好的 K 組（有界插入排序） ──
+  // 隊伍配符每隻魔靈只需要幾十組候選，沒必要把上百萬組全部存起來。
+  type TopEntry = {
+    idx: number[];
+    stats: Stats;
+    ehp: number;
+    objective: number;
+    score: number;
+    eff: number;
+    fit: number;
+  };
+  const top: TopEntry[] = [];
+  const topLimit = Math.max(0, Math.floor(topK));
+  const isBetter = (a: TopEntry, b: TopEntry) =>
+    a.objective > b.objective ||
+    (a.objective === b.objective &&
+      (a.score > b.score ||
+        (a.score === b.score &&
+          (a.stats.spd > b.stats.spd || (a.stats.spd === b.stats.spd && a.eff > b.eff)))));
+  const topInsert = (e: TopEntry) => {
+    if (topLimit <= 0) return;
+    // top 依「由好到差」排序，top[0] 最佳、top[length-1] 目前最差
+    if (top.length >= topLimit && !isBetter(e, top[top.length - 1])) return;
+    let lo = 0;
+    let hi = top.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (isBetter(top[mid], e)) lo = mid + 1;
+      else hi = mid;
+    }
+    top.splice(lo, 0, e);
+    if (top.length > topLimit) top.pop();
+  };
+
   const optimistic = (depth: number): Stats => {
     const remain = 6 - depth;
     let extraSetSpd = 0;
@@ -640,15 +723,21 @@ export function optimize(req: OptRequest): OptResult {
       const ehpGuild = bonus.useGuild ? ehp : ehpWithSkills(base, a, bonus, true);
       const eff = accEff / 6;
       const fit = focusFitOf(stats, focusList);
-      push(
-        chosenIdx,
-        stats,
-        ehp,
-        ehpGuild,
-        scoreOf(stats) + (focusList.length ? (fit / 100) * FOCUS_BONUS : 0),
-        eff,
-        fit,
-      );
+      const score = scoreOf(stats) + (focusList.length ? (fit / 100) * FOCUS_BONUS : 0);
+      if (topLimit > 0) {
+        count++;
+        topInsert({
+          idx: [...chosenIdx],
+          stats,
+          ehp,
+          objective: objectiveOf(battleStats, objective),
+          score,
+          eff,
+          fit,
+        });
+      } else {
+        push(chosenIdx, stats, ehp, ehpGuild, score, eff, fit);
+      }
       return;
     }
 
@@ -668,7 +757,15 @@ export function optimize(req: OptRequest): OptResult {
       const lowStats = finalizeStats(base, acc, bonus, rta, true);
       for (const [k, v] of maxEntries) if (lowStats[k] > v) return;
     }
-    // 保留所有可行組合，不做分數上界剪枝。
+    // topK 模式：樂觀上界仍達不到目前第 K 名（最差的一組）就直接剪掉
+    if (
+      topLimit > 0 &&
+      top.length >= topLimit &&
+      objectiveOf(optStats, objective) < top[top.length - 1].objective
+    ) {
+      return;
+    }
+    // 一般模式保留所有可行組合，不做分數上界剪枝。
 
     for (const cand of seq[depth].list) {
       nodes++;
@@ -716,6 +813,30 @@ export function optimize(req: OptRequest): OptResult {
   };
 
   dfs(0);
+
+  // topK 模式：直接回傳精簡結果，不建立完整 typed array
+  if (topLimit > 0) {
+    const ordered = top;
+    return {
+      ...EMPTY_RESULT(requiredSets, intangible),
+      count,
+      nodes,
+      truncated,
+      overflow: false,
+      candidates,
+      space,
+      ms: Date.now() - t0,
+      topBuilds: ordered.map((e) => ({
+        runeIds: e.idx.slice(1).map((i) => runeTable[i] ?? 0),
+        stats: e.stats,
+        ehp: e.ehp,
+        objective: e.objective,
+        score: e.score,
+        eff: e.eff,
+        focusFit: e.fit,
+      })),
+    };
+  }
 
   // 合併分塊，排序留到最後一次做（UI 每頁只還原 30 組）
   const runeIdx = new Int32Array(count * 6);

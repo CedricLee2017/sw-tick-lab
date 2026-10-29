@@ -1,0 +1,868 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle, Check, Copy, Gauge, Layers, Loader2, Lock, Pin, Save, Search,
+  Shirt, Users, Wand2, Zap,
+} from "lucide-react";
+import { monsterLabel, useStore } from "../store";
+import { useSummary, type UnitView } from "../lib/accountStats";
+import { MonsterIcon, Modal, RuneCard, TickBadge, fmt } from "../components/ui";
+import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
+import { setSummary, speedForTick } from "../lib/stats";
+import {
+  DECK_CONTEXT_LABEL, SPD_AREA_LABEL, spdLeaderApplies, spdLeaderSkill, type DeckContext,
+} from "../lib/deckSpeed";
+import {
+  TEAM_ROLE_LABELS, roleObjective, runeSupply,
+  type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
+} from "../lib/teamOptimizer";
+import { TEAM_TEMPLATES, teamTemplateOf, templateMembers, type TeamMemberTemplate } from "../lib/teamTemplates";
+import type { FocusEntry } from "../lib/types";
+
+/** 每隻魔靈在頁面上的設定（尚未轉成引擎需求） */
+interface MemberDraft {
+  unitId: number;
+  role: TeamRole;
+  title: string;
+  weight: number;
+  /** 4 件套；0 = 不指定 */
+  set4: number;
+  /** 2 件套；0 = 不指定 */
+  set2: number;
+  mains: Partial<Record<number, number>>;
+  min: Partial<Record<StatKey, number>>;
+  /** 目標 Tick；0 = 不限 */
+  tick: number;
+  focus: FocusEntry[];
+  /** 使用者按「固定這隻」後鎖住的符文 */
+  includeRunes: number[];
+}
+
+type Size = 3 | 4 | 5;
+type BudgetKey = "fast" | "standard" | "full";
+type OwnedUnit = UnitView & { _dup: boolean };
+
+const BUDGETS: Record<BudgetKey, { label: string; pool: number; topK: number; beam: number; nodes: number; hint: string }> = {
+  fast: { label: "快速", pool: 9, topK: 36, beam: 28, nodes: 2_000_000, hint: "約 0.5–1 秒" },
+  standard: { label: "標準", pool: 10, topK: 60, beam: 48, nodes: 4_000_000, hint: "約 1–3 秒" },
+  full: { label: "完整", pool: 12, topK: 90, beam: 72, nodes: 8_000_000, hint: "約 3–8 秒" },
+};
+
+const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
+const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25 && s.id !== 99);
+
+/** 2/4/6 號主屬性（與配符頁相同的 SWEX type id） */
+const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
+  2: [
+    { v: 0, label: "不限" }, { v: 8, label: "速度" },
+    { v: 1, label: "固定體力" }, { v: 2, label: "體力%" },
+    { v: 3, label: "固定攻擊" }, { v: 4, label: "攻擊%" },
+    { v: 5, label: "固定防禦" }, { v: 6, label: "防禦%" },
+  ],
+  4: [
+    { v: 0, label: "不限" }, { v: 9, label: "暴擊率" }, { v: 10, label: "暴擊傷害" },
+    { v: 1, label: "固定體力" }, { v: 2, label: "體力%" },
+    { v: 3, label: "固定攻擊" }, { v: 4, label: "攻擊%" },
+    { v: 5, label: "固定防禦" }, { v: 6, label: "防禦%" },
+  ],
+  6: [
+    { v: 0, label: "不限" },
+    { v: 1, label: "固定體力" }, { v: 2, label: "體力%" },
+    { v: 3, label: "固定攻擊" }, { v: 4, label: "攻擊%" },
+    { v: 5, label: "固定防禦" }, { v: 6, label: "防禦%" },
+    { v: 12, label: "效果命中" }, { v: 11, label: "效果抵抗" },
+  ],
+};
+
+function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
+  return {
+    unitId,
+    role: t.role,
+    title: t.title,
+    weight: t.weight,
+    set4: t.sets.find((s) => s.count >= 4)?.set ?? 0,
+    set2: t.sets.find((s) => s.count < 4)?.set ?? 0,
+    mains: { ...t.mains },
+    min: { ...t.min },
+    tick: t.tick,
+    focus: t.focus.map((f) => ({ ...f })),
+    includeRunes: [],
+  };
+}
+
+function initialMembers(): MemberDraft[] {
+  return templateMembers(teamTemplateOf("guild-speed"), 3).map((t) => draftFromTemplate(t));
+}
+
+export default function TeamOptimizerPage() {
+  const account = useStore((s) => s.account);
+  const runeMap = useStore((s) => s.runeMap);
+  const settings = useStore((s) => s.settings);
+  const summary = useSummary();
+  const notify = useStore((s) => s.notify);
+  const saveDeckFav = useStore((s) => s.saveDeckFav);
+  const equipTeam = useStore((s) => s.equipTeam);
+  const setRuneFlag = useStore((s) => s.setRuneFlag);
+
+  const bonus = settings.bonus;
+  const rta = settings.rta;
+
+  const [templateId, setTemplateId] = useState("guild-speed");
+  const [size, setSize] = useState<Size>(3);
+  const [content, setContent] = useState<DeckContext>("guild");
+  const [members, setMembers] = useState<MemberDraft[]>(initialMembers);
+  const [leaderUnitId, setLeaderUnitId] = useState(0);
+  const [budgetKey, setBudgetKey] = useState<BudgetKey>("standard");
+
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<TeamProgress | null>(null);
+  const [plan, setPlan] = useState<TeamPlan | null>(null);
+  const [altIndex, setAltIndex] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [pickerIndex, setPickerIndex] = useState(-1);
+  const [q, setQ] = useState("");
+
+  const workerRef = useRef<Worker | null>(null);
+  const runIdRef = useRef(0);
+
+  const template = teamTemplateOf(templateId);
+  const budget = BUDGETS[budgetKey];
+
+  // 換帳號時清掉舊結果與已不存在的魔靈（上符只會改 account，不會改 importedAt）
+  const importedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (account && importedAtRef.current !== account.importedAt) {
+      importedAtRef.current = account.importedAt;
+      setPlan(null);
+      setError(null);
+    }
+    setMembers((prev) => {
+      if (!summary) return prev;
+      const ids = new Set(summary.views.map((v) => v.unit.id));
+      return prev.map((m) => (m.unitId && !ids.has(m.unitId) ? { ...m, unitId: 0, includeRunes: [] } : m));
+    });
+  }, [account, summary]);
+
+  // 隊長一定要在隊伍裡
+  useEffect(() => {
+    const ids = members.map((m) => m.unitId).filter((id) => id > 0);
+    if (!ids.includes(leaderUnitId)) setLeaderUnitId(ids[0] ?? 0);
+  }, [members, leaderUnitId]);
+
+  useEffect(() => () => {
+    workerRef.current?.terminate();
+    workerRef.current = null;
+  }, []);
+
+  const viewOf = (unitId: number): UnitView | undefined =>
+    summary?.views.find((v) => v.unit.id === unitId);
+
+  const applyTemplate = (id: string, nextSize?: Size) => {
+    const t = teamTemplateOf(id);
+    const s = nextSize ?? t.size;
+    setTemplateId(id);
+    setSize(s);
+    setContent(t.content);
+    setMembers((prev) =>
+      templateMembers(t, s).map((tm, i) => draftFromTemplate(tm, prev[i]?.unitId ?? 0)),
+    );
+    setPlan(null);
+    setError(null);
+  };
+
+  const changeSize = (s: Size) => {
+    setSize(s);
+    setMembers((prev) => {
+      const next = prev.slice(0, s).map((m) => ({ ...m }));
+      const t = teamTemplateOf(templateId);
+      const defaults = templateMembers(t, s);
+      while (next.length < s) next.push(draftFromTemplate(defaults[next.length]));
+      return next;
+    });
+    setPlan(null);
+    setError(null);
+  };
+
+  const updateMember = (i: number, patch: Partial<MemberDraft>) => {
+    setMembers((prev) => prev.map((m, j) => (j === i ? { ...m, ...patch } : m)));
+    setPlan(null);
+  };
+
+  const patchMin = (i: number, key: StatKey, value: number) => {
+    setMembers((prev) =>
+      prev.map((m, j) => {
+        if (j !== i) return m;
+        const min = { ...m.min };
+        if (value > 0) min[key] = value;
+        else delete min[key];
+        return { ...m, min };
+      }),
+    );
+    setPlan(null);
+  };
+
+  const selected = members.filter((m) => m.unitId > 0);
+  const teamIds = selected.map((m) => m.unitId);
+
+  /** 全域「包括」符文：分配給目前裝備它的隊員（不在隊上的忽略） */
+  const globalIncludes = useMemo(() => {
+    const m = new Map<number, number[]>();
+    for (const id of settings.includedRunes) {
+      const r = runeMap.get(id);
+      if (!r || !r.occupied) continue;
+      const arr = m.get(r.occupied) ?? [];
+      arr.push(id);
+      m.set(r.occupied, arr);
+    }
+    return m;
+  }, [settings.includedRunes, runeMap]);
+
+  const ignoredIncludes = useMemo(
+    () =>
+      settings.includedRunes.filter((id) => {
+        const r = runeMap.get(id);
+        return !r || !teamIds.includes(r.occupied);
+      }),
+    [settings.includedRunes, runeMap, teamIds],
+  );
+
+  const supply = useMemo(
+    () =>
+      runeSupply(
+        account?.runes ?? [],
+        teamIds,
+        settings.excludedRunes,
+        settings.lockedRunes,
+        members.length,
+      ),
+    [account, teamIds, members.length, settings.excludedRunes, settings.lockedRunes],
+  );
+
+  const leaderView = viewOf(leaderUnitId);
+  const leaderSkill = leaderView ? spdLeaderSkill(leaderView.monster.id) : null;
+  const leadPctFor = (v: UnitView | undefined) => {
+    if (!v || !leaderSkill) return 0;
+    return spdLeaderApplies(leaderSkill, v.monster.el, content) ? leaderSkill.p : 0;
+  };
+
+  const owned = useMemo(() => {
+    if (!summary) return [] as OwnedUnit[];
+    const dup = new Map<number, number>();
+    for (const v of summary.views) dup.set(v.monster.id, (dup.get(v.monster.id) ?? 0) + 1);
+    const term = q.trim().toLowerCase();
+    return summary.views
+      .filter((v) => !term || `${v.monster.name} ${v.unit.id}`.toLowerCase().includes(term))
+      .slice()
+      .sort((a, b) => b.unit.stars - a.unit.stars || b.monster.nat - a.monster.nat || a.monster.name.localeCompare(b.monster.name))
+      .map((v): OwnedUnit => ({ ...v, _dup: (dup.get(v.monster.id) ?? 0) > 1 }))
+      .slice(0, 200);
+  }, [summary, q]);
+
+  /** 把草案轉成引擎需求 */
+  const buildRequest = (): TeamRequest | null => {
+    if (!account || !summary) return null;
+    const specs: TeamMemberSpec[] = [];
+    for (const m of members) {
+      const v = viewOf(m.unitId);
+      if (!v) return null;
+      const sets: { set: number; count: number }[] = [];
+      if (m.set4) sets.push({ set: m.set4, count: 4 });
+      if (m.set2 && m.set2 !== m.set4) sets.push({ set: m.set2, count: 2 });
+
+      const min: Partial<Record<StatKey, number>> = { ...m.min };
+      if (m.tick > 0) min.spd = speedForTick(m.tick, rta);
+      else delete min.spd;
+
+      const bySlot = new Map<number, number>();
+      for (const id of [...m.includeRunes, ...(globalIncludes.get(m.unitId) ?? [])]) {
+        const r = runeMap.get(id);
+        if (!r || bySlot.has(r.slot)) continue;
+        bySlot.set(r.slot, id);
+      }
+
+      specs.push({
+        unitId: m.unitId,
+        master: v.monster.id,
+        label: monsterLabel(v.monster.id),
+        base: v.base,
+        role: m.role,
+        weight: m.weight,
+        sets,
+        mains: m.mains,
+        min,
+        focus: m.focus,
+        includeRunes: [...bySlot.values()],
+        leadSpd: leadPctFor(v),
+        objective: roleObjective(m.role),
+      });
+    }
+    return {
+      members: specs,
+      runes: account.runes,
+      bonus: { ...bonus, leadSpd: 0 },
+      rta,
+      pool: budget.pool,
+      topK: budget.topK,
+      beamWidth: budget.beam,
+      allowEquipped: true,
+      relaxSub: false,
+      intangible: false,
+      excludeRunes: settings.excludedRunes,
+      lockedRunes: settings.lockedRunes,
+      maxNodesPerSearch: budget.nodes,
+      diversify: true,
+      alternatives: 4,
+    };
+  };
+
+  const run = () => {
+    if (!account) return notify("請先匯入存檔", "err");
+    if (members.length !== size) return notify("隊伍人數不一致，請重新選擇", "err");
+    if (members.some((m) => !m.unitId)) return notify("還有位置未選擇魔靈", "err");
+    if (new Set(members.map((m) => m.unitId)).size !== members.length) {
+      return notify("同一隻魔靈不能重複加入隊伍", "err");
+    }
+    const bad = supply.find((s) => s.count < s.need);
+    if (bad) {
+      return notify(
+        `位置 ${bad.slot} 可用符文只有 ${bad.count} 顆，不足 ${bad.need} 隻使用。請先解除排除 / 鎖定，或放寬條件。`,
+        "err",
+      );
+    }
+    const req = buildRequest();
+    if (!req) return notify("無法建立配隊需求，請重新整理頁面", "err");
+
+    workerRef.current?.terminate();
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("../lib/teamOptimizer.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      return setError("瀏覽器無法啟動配隊運算模組，請重新整理頁面或改用 Chrome / Edge。");
+    }
+    workerRef.current = worker;
+    const id = ++runIdRef.current;
+
+    setRunning(true);
+    setError(null);
+    setPlan(null);
+    setAltIndex(0);
+    setProgress({ stage: "candidates", member: 0, total: members.length });
+
+    const timer = window.setTimeout(() => {
+      if (workerRef.current !== worker) return;
+      worker.terminate();
+      workerRef.current = null;
+      setRunning(false);
+      setProgress(null);
+      setError("配隊運算超過 90 秒，已停止。請把搜尋預算改成「快速」、放寬條件，或減少隊伍人數。");
+    }, 90_000);
+
+    const done = () => {
+      window.clearTimeout(timer);
+      worker.terminate();
+      if (workerRef.current === worker) workerRef.current = null;
+      setRunning(false);
+      setProgress(null);
+    };
+
+    worker.onmessage = (e: MessageEvent<{
+      id: number;
+      progress?: TeamProgress;
+      out?: { ok: true; plan: TeamPlan } | { ok: false; error: string; unitId?: number };
+      error?: string;
+    }>) => {
+      if (e.data.id !== id) return;
+      if (e.data.progress) {
+        setProgress(e.data.progress);
+        return;
+      }
+      if (e.data.error) {
+        setError(e.data.error);
+        done();
+        return;
+      }
+      const out = e.data.out;
+      if (!out) {
+        setError("配隊運算沒有回傳結果，請重新整理頁面再試。");
+        done();
+        return;
+      }
+      if (!out.ok) {
+        setError(out.error);
+        done();
+        return;
+      }
+      setPlan(out.plan);
+      setAltIndex(0);
+      done();
+    };
+    worker.onerror = (ev) => {
+      console.error("team optimizer worker error", ev);
+      setError("配隊運算模組載入失敗（可能是網站剛更新）。請按 Ctrl + F5 重新整理後再試。");
+      done();
+    };
+
+    worker.postMessage({ id, req });
+  };
+
+  const cancel = () => {
+    workerRef.current?.terminate();
+    workerRef.current = null;
+    setRunning(false);
+    setProgress(null);
+  };
+
+  const activePlan = plan ? (altIndex === 0 ? plan : plan.alternatives[altIndex - 1] ?? plan) : null;
+  const planSpeedOrder = useMemo(
+    () => (activePlan ? [...activePlan.members].sort((a, b) => b.stats.spd - a.stats.spd) : []),
+    [activePlan],
+  );
+
+  const pinMember = (unitId: number) => {
+    const b = activePlan?.members.find((m) => m.unitId === unitId);
+    if (!b) return;
+    setMembers((prev) => prev.map((m) => (m.unitId === unitId ? { ...m, includeRunes: b.runeIds } : m)));
+    setPlan(null);
+    setAltIndex(0);
+    notify(`已固定 ${monsterLabel(b.master)} 的 6 顆符文，按「一鍵配隊」會重新配其他魔靈`);
+  };
+
+  const unpinMember = (unitId: number) => {
+    setMembers((prev) => prev.map((m) => (m.unitId === unitId ? { ...m, includeRunes: [] } : m)));
+    setPlan(null);
+  };
+
+  const equipPlan = () => {
+    if (!activePlan) return;
+    const n = equipTeam(activePlan.members.map((m) => ({ unitId: m.unitId, runeIds: m.runeIds })));
+    notify(
+      n > 0
+        ? `已將 ${n} 顆符文上符到整隊（僅本機模擬，不會修改遊戲存檔）`
+        : "上符失敗：沒有可用的符文",
+      n > 0 ? "ok" : "err",
+    );
+  };
+
+  const lockPlan = () => {
+    if (!activePlan) return;
+    const ids = activePlan.members.flatMap((m) => m.runeIds);
+    setRuneFlag("locked", ids, true);
+    notify(`已鎖定整隊 ${ids.length} 顆符文，其他魔靈配符時不會使用`);
+  };
+
+  const savePlan = () => {
+    if (!activePlan) return;
+    saveDeckFav({
+      name: `一鍵配隊 · ${activePlan.members.map((m) => monsterLabel(m.master)).join(" / ")}`,
+      type: 0,
+      seq: 1,
+      units: activePlan.members.map((m) => {
+        const u = account?.units.find((x) => x.id === m.unitId);
+        return { unitId: m.unitId, master: m.master, runeIds: m.runeIds, artifactIds: u?.artifacts ?? [] };
+      }),
+    });
+  };
+
+  const copyPlan = () => {
+    if (!activePlan) return;
+    const lines = activePlan.members.map((m) => {
+      const sets = setSummary(m.sets);
+      return `${monsterLabel(m.master)}  SPD ${m.stats.spd} (T${m.stats.tick})  HP ${fmt(m.stats.hp)}  DEF ${fmt(m.stats.def)}  EHP ${fmt(m.ehp)}  ${sets}  符文 ${m.runeIds.join(", ")}`;
+    });
+    void navigator.clipboard?.writeText(lines.join("\n"));
+    notify("已複製整隊配裝清單");
+  };
+
+  if (!account) {
+    return <div className="empty"><Users size={40} /><div>尚未匯入存檔</div></div>;
+  }
+
+  const totalWeight = members.reduce((s, m) => s + Math.max(1, m.weight), 0);
+
+  return (
+    <>
+      <div className="row between wrap" style={{ gap: 10, marginBottom: 14 }}>
+        <div>
+          <div className="card-title row" style={{ gap: 7 }}>
+            <Zap size={15} className="gold" /> 一鍵配隊
+          </div>
+          <div className="card-sub">
+            先選 3～5 隻魔靈，再一次配好整隊符文；同一顆符文不會重複分配給兩隻魔靈。
+          </div>
+        </div>
+        <div className="row wrap" style={{ gap: 6 }}>
+          <span className="chip gold">符文衝突 0</span>
+          <span className="chip muted">隊長技：速度</span>
+          <span className="chip muted">{rta ? "RTA Tick 1.5%" : "一般 Tick 7%"}</span>
+        </div>
+      </div>
+
+      {/* 隊型 / 人數 / 隊長 / 預算 */}
+      <div className="card card-pad" style={{ marginBottom: 12 }}>
+        <div className="row between wrap" style={{ gap: 10 }}>
+          <div>
+            <div className="card-title row" style={{ gap: 7 }}><Layers size={14} className="gold" /> 隊型</div>
+            <div className="tiny dim" style={{ marginTop: 3, maxWidth: 620 }}>{template.desc}</div>
+          </div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            {([3, 4, 5] as Size[]).map((n) => (
+              <button key={n} type="button" className={`chip ${size === n ? "gold" : "muted"}`} style={{ cursor: "pointer" }} onClick={() => changeSize(n)}>
+                {n} 隻
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+          <select className="select" style={{ minWidth: 300 }} value={templateId} onChange={(e) => applyTemplate(e.target.value)}>
+            {TEAM_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <select className="select" style={{ width: 180 }} value={content} onChange={(e) => { setContent(e.target.value as DeckContext); setPlan(null); }}>
+            {(["arena", "guild", "dungeon"] as DeckContext[]).map((c) => <option key={c} value={c}>{DECK_CONTEXT_LABEL[c]}</option>)}
+          </select>
+          <select className="select" style={{ width: 170 }} value={leaderUnitId} onChange={(e) => { setLeaderUnitId(Number(e.target.value)); setPlan(null); }}>
+            <option value={0}>隊長：未選擇</option>
+            {members.filter((m) => m.unitId > 0).map((m) => {
+              const v = viewOf(m.unitId);
+              return <option key={m.unitId} value={m.unitId}>隊長：{v ? monsterLabel(v.monster.id) : `#${m.unitId}`}</option>;
+            })}
+          </select>
+          <select className="select" style={{ width: 170 }} value={budgetKey} onChange={(e) => setBudgetKey(e.target.value as BudgetKey)}>
+            {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => <option key={k} value={k}>預算：{BUDGETS[k].label}（{BUDGETS[k].hint}）</option>)}
+          </select>
+        </div>
+
+        <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
+          <span className="tiny" style={{ color: "var(--gold, #f2c65c)" }}>
+            {leaderView
+              ? leaderSkill
+                ? `隊長技：${monsterLabel(leaderView.monster.id)} 速度 +${leaderSkill.p}%（${SPD_AREA_LABEL[leaderSkill.a] ?? "全內容"}）`
+                : "此魔靈沒有速度隊長技；V1 只計入速度隊長技，其餘隊長技不套用"
+              : "尚未選擇隊長"}
+          </span>
+          {rta && <span className="tiny dim">RTA 模式：Tick 以 1.5% 計算，且不含一般建築</span>}
+        </div>
+      </div>
+
+      {/* 隊伍成員 */}
+      <div className="team-member-grid">
+        {members.map((m, i) => {
+          const v = viewOf(m.unitId);
+          const pinned = m.includeRunes.length > 0;
+          return (
+            <div key={i} className={`card card-pad team-member ${pinned ? "pinned" : ""}`}>
+              <div className="row between" style={{ gap: 8 }}>
+                <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                  <MonsterIcon id={v?.monster.id ?? 0} size={38} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {v ? monsterLabel(v.monster.id) : "尚未選擇"}
+                    </div>
+                    <div className="tiny dim">{m.title}</div>
+                  </div>
+                </div>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setPickerIndex(i); setQ(""); }}>
+                  <Search size={12} /> {v ? "更換" : "選擇"}
+                </button>
+              </div>
+
+              {v && (
+                <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 6 }}>
+                  <span>目前 SPD <b className="gold">{v.stats.spd}</b></span>
+                  <span>T{v.stats.tick}</span>
+                  <span>{v.runes.length}/6 符文</span>
+                  {m.unitId === leaderUnitId && <span className="chip gold">隊長</span>}
+                  {pinned && <span className="chip green"><Pin size={10} /> 已固定</span>}
+                </div>
+              )}
+
+              <div className="team-fields">
+                <label>
+                  <span>角色</span>
+                  <select className="select" value={m.role} onChange={(e) => updateMember(i, { role: e.target.value as TeamRole, title: TEAM_ROLE_LABELS[e.target.value as TeamRole] })}>
+                    {(Object.keys(TEAM_ROLE_LABELS) as TeamRole[]).map((r) => <option key={r} value={r}>{TEAM_ROLE_LABELS[r]}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>權重</span>
+                  <input className="input mono" type="number" min={1} max={10} value={m.weight} onChange={(e) => updateMember(i, { weight: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
+                </label>
+                <label>
+                  <span>目標 Tick</span>
+                  <input className="input mono" type="number" min={0} max={20} value={m.tick} onChange={(e) => updateMember(i, { tick: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} title="0 = 不限" />
+                </label>
+                <label>
+                  <span>抵抗下限</span>
+                  <input className="input mono" type="number" min={0} max={100} value={m.min.res ?? 0} onChange={(e) => patchMin(i, "res", Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
+                </label>
+                <label>
+                  <span>暴率下限</span>
+                  <input className="input mono" type="number" min={0} max={100} value={m.min.cr ?? 0} onChange={(e) => patchMin(i, "cr", Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
+                </label>
+              </div>
+
+              <details className="team-advanced">
+                <summary>套裝 / 主屬性</summary>
+                <div className="team-fields">
+                  <label>
+                    <span>4 件套</span>
+                    <select className="select" value={m.set4} onChange={(e) => {
+                      const set4 = Number(e.target.value);
+                      updateMember(i, { set4, ...(set4 === m.set2 ? { set2: 0 } : {}) });
+                    }}>
+                      <option value={0}>不指定</option>
+                      {FOUR_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>2 件套</span>
+                    <select className="select" value={m.set2} onChange={(e) => {
+                      const set2 = Number(e.target.value);
+                      updateMember(i, { set2, ...(set2 === m.set4 ? { set4: 0 } : {}) });
+                    }}>
+                      <option value={0}>不指定</option>
+                      {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </label>
+                  {([2, 4, 6] as number[]).map((slot) => (
+                    <label key={slot}>
+                      <span>{slot} 號主屬性</span>
+                      <select className="select" value={m.mains[slot] ?? 0} onChange={(e) => {
+                        const mains = { ...m.mains };
+                        const v2 = Number(e.target.value);
+                        if (v2) mains[slot] = v2; else delete mains[slot];
+                        updateMember(i, { mains });
+                      }}>
+                        {MAIN_OPTIONS[slot].map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <div className="tiny dim" style={{ marginTop: 4 }}>
+                  焦點：{m.focus.length ? m.focus.map((f) => `${f.key} ${f.weight}`).join(" / ") : "無"}
+                  {pinned && <> · 已固定 {m.includeRunes.length} 顆符文</>}
+                </div>
+              </details>
+
+              {pinned && (
+                <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => unpinMember(m.unitId)}>
+                    <Pin size={12} /> 解除固定
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 供給檢查 + 執行 */}
+      <div className="card card-pad" style={{ marginTop: 12 }}>
+        <div className="row between wrap" style={{ gap: 8 }}>
+          <div className="row wrap" style={{ gap: 6 }}>
+            <span className="tiny dim">符文供給（每位置可用 / 需求）：</span>
+            {supply.map((s) => (
+              <span key={s.slot} className={`chip ${s.count >= s.need ? "muted" : "red"}`}>
+                位置 {s.slot} {s.count}/{s.need}
+              </span>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 6 }}>
+            {running ? (
+              <>
+                <span className="tiny dim row" style={{ gap: 6 }}>
+                  <Loader2 size={13} className="spin" />
+                  {progress
+                    ? progress.stage === "candidates"
+                      ? `正在產生第 ${progress.member + 1}/${progress.total} 隻的候選配裝…`
+                      : progress.stage === "search"
+                        ? `正在聯合挑選第 ${progress.member + 1}/${progress.total} 隻…`
+                        : "正在局部改良…"
+                    : "運算中…"}
+                </span>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={cancel}>取消</button>
+              </>
+            ) : (
+              <button type="button" className="btn btn-primary" onClick={run} disabled={members.some((m) => !m.unitId)}>
+                <Wand2 size={15} /> 一鍵配一隊
+              </button>
+            )}
+          </div>
+        </div>
+        {ignoredIncludes.length > 0 && (
+          <div className="tiny" style={{ color: "var(--gold, #f2c65c)", marginTop: 6 }}>
+            <AlertTriangle size={12} /> 有 {ignoredIncludes.length} 顆「包括」符文屬於隊外魔靈，這次不會使用。
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="card card-pad" style={{ marginTop: 12, borderColor: "rgba(255,107,107,.35)" }}>
+          <div className="row" style={{ gap: 8, color: "var(--red)" }}>
+            <AlertTriangle size={15} />
+            <span style={{ fontSize: 12.5 }}>{error}</span>
+          </div>
+        </div>
+      )}
+
+      {activePlan && (
+        <div className="card card-pad team-result" style={{ marginTop: 14 }}>
+          <div className="row between wrap" style={{ gap: 8 }}>
+            <div>
+              <div className="card-title row" style={{ gap: 7 }}>
+                <Check size={15} className="gold" /> 配隊結果
+              </div>
+              <div className="tiny dim" style={{ marginTop: 3 }}>
+                隊伍分數 <b className="gold">{Math.round(activePlan.teamScore * 10) / 10}</b> / {totalWeight}
+                （{Math.round((activePlan.teamScore / Math.max(1, totalWeight)) * 100)}%）
+                · 平均效率 {Math.round(activePlan.totalEff)}%
+                · 用時{" "}
+                {activePlan.searchMs < 1000
+                  ? `${Math.max(1, Math.round(activePlan.searchMs))} ms`
+                  : `${(activePlan.searchMs / 1000).toFixed(1)} s`}
+                · 節點 {fmt(activePlan.nodes)}
+              </div>
+            </div>
+            <div className="row wrap" style={{ gap: 5 }}>
+              {[plan, ...(plan?.alternatives ?? [])].map((p, idx) => (
+                <button key={idx} type="button" className={`chip ${altIndex === idx ? "gold" : "muted"}`} style={{ cursor: "pointer" }} onClick={() => setAltIndex(idx)}>
+                  隊伍 {idx + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {activePlan.truncated && (
+            <div className="tiny" style={{ color: "var(--gold, #f2c65c)", marginTop: 6 }}>
+              <AlertTriangle size={12} /> 搜尋已達節點上限，結果可能不是最佳；可把預算改成「完整」再試。
+            </div>
+          )}
+
+          {activePlan.notes.length > 0 && (
+            <div className="tiny" style={{ color: "var(--gold, #f2c65c)", marginTop: 6 }}>
+              <AlertTriangle size={12} /> {activePlan.notes.join(" ")}
+            </div>
+          )}
+
+          <div className="deck-speedbar" style={{ marginTop: 10 }}>
+            <div className="row between" style={{ marginBottom: 6 }}>
+              <span className="tiny dim">速度順序</span>
+              <span className="tiny dim">Speed Tick</span>
+            </div>
+            <div className="row wrap" style={{ gap: 5 }}>
+              {planSpeedOrder.map((m, i) => (
+                <span key={m.unitId} className="chip muted" title={`SPD ${m.stats.spd} · Tick ${m.stats.tick}`}>
+                  <b className="gold">{i + 1}</b>
+                  <span style={{ margin: "0 4px" }}>{monsterLabel(m.master)}</span>
+                  <span className="mono">{m.stats.spd}</span>
+                  <span style={{ marginLeft: 4 }}>T{m.stats.tick}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="team-result-grid">
+            {activePlan.members.map((m) => {
+              const runes = m.runeIds.map((id) => runeMap.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
+              return (
+                <div key={m.unitId} className="team-result-member">
+                  <div className="row between" style={{ gap: 8 }}>
+                    <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                      <MonsterIcon id={m.master} size={40} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 12.5 }}>{monsterLabel(m.master)}</div>
+                        <div className="tiny dim">{TEAM_ROLE_LABELS[m.role]} · 個人最佳 {Math.round(m.norm * 100)}%</div>
+                      </div>
+                    </div>
+                    <TickBadge spd={m.stats.spd} rta={rta} />
+                  </div>
+                  <div className="row wrap tiny" style={{ gap: 6, marginTop: 7 }}>
+                    <span>SPD <b className="gold">{m.stats.spd}</b></span>
+                    <span>HP {fmt(m.stats.hp)}</span>
+                    <span>DEF {fmt(m.stats.def)}</span>
+                    <span>ATK {fmt(m.stats.atk)}</span>
+                    <span>CR {m.stats.cr}%</span>
+                    <span>CD {m.stats.cd}%</span>
+                    <span>RES {m.stats.res}%</span>
+                    <span>ACC {m.stats.acc}%</span>
+                    <span>EHP {fmt(m.ehp)}</span>
+                  </div>
+                  <div className="tiny dim" style={{ marginTop: 4 }}>{setSummary(m.sets) || "無套裝加成"}</div>
+                  <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginTop: 7 }}>
+                    {runes.map((r) => <RuneCard key={r.id} rune={r} compact owner={monsterLabel(m.master)} />)}
+                  </div>
+                  <div className="row" style={{ gap: 6, marginTop: 8 }}>
+                    <button type="button" className="btn btn-sm btn-ghost" onClick={() => pinMember(m.unitId)} title="固定這隻的符文，重新配其他魔靈">
+                      <Pin size={12} /> 固定這隻
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="row wrap" style={{ gap: 6, marginTop: 12 }}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={equipPlan}><Shirt size={13} /> 整隊上符</button>
+            <button type="button" className="btn btn-sm" onClick={lockPlan}><Lock size={13} /> 鎖定這隊符文</button>
+            <button type="button" className="btn btn-sm" onClick={savePlan}><Save size={13} /> 儲存到儲存庫</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={copyPlan}><Copy size={13} /> 複製清單</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={run}><Gauge size={13} /> 重新計算</button>
+          </div>
+          <div className="tiny dim" style={{ marginTop: 6 }}>
+            上符只修改本工具的模擬資料，不會更動遊戲存檔；儲存後可在「儲存庫」或「Speed Tick → 從儲存庫載入」使用。
+          </div>
+        </div>
+      )}
+
+      {/* 魔靈選擇 */}
+      {pickerIndex >= 0 && (
+        <Modal title={`選擇第 ${pickerIndex + 1} 隻魔靈`} onClose={() => setPickerIndex(-1)} width={720}>
+          <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
+              <input className="input" style={{ paddingLeft: 28 }} placeholder="搜尋名稱或 unit id" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+            </div>
+            <span className="tiny dim" style={{ alignSelf: "center" }}>共 {owned.length} 隻</span>
+          </div>
+          <div className="scroll-y" style={{ maxHeight: 460 }}>
+            {owned.map((v) => {
+              const used = members.some((m, j) => j !== pickerIndex && m.unitId === v.unit.id);
+              return (
+                <button
+                  key={v.unit.id}
+                  type="button"
+                  disabled={used}
+                  onClick={() => {
+                    updateMember(pickerIndex, { unitId: v.unit.id, includeRunes: [] });
+                    setPickerIndex(-1);
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "7px 9px",
+                    background: "transparent", border: 0, borderBottom: "1px solid var(--line-soft)",
+                    color: used ? "var(--muted-2)" : "var(--text)", textAlign: "left", cursor: used ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <MonsterIcon id={v.monster.id} size={34} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                      {monsterLabel(v.monster.id)}
+                      {v._dup && <span className="tiny dim"> #{v.unit.id}</span>}
+                    </div>
+                    <div className="tiny dim">
+                      {v.monster.nat}★ · {v.runes.length}/6 符文 · SPD {v.stats.spd} · T{v.stats.tick}
+                    </div>
+                  </div>
+                  {used ? <span className="tiny dim">已加入</span> : <ChevronRight />}
+                </button>
+              );
+            })}
+            {owned.length === 0 && <div className="empty" style={{ padding: 24 }}>找不到魔靈</div>}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function ChevronRight() {
+  return <span className="tiny dim">選擇</span>;
+}

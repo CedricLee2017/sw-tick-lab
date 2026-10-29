@@ -103,14 +103,14 @@ export default function BuildsPage() {
         <div className="card-title row" style={{ gap: 7 }}>
           <Layers size={15} className="gold" /> 預設隊儲存庫
         </div>
-        <span className="tiny dim">在「預設隊」頁按「儲存整隊」加入</span>
+        <span className="tiny dim">在「預設隊」或「一鍵配隊」頁按「儲存」加入</span>
       </div>
 
       {sortedDecks.length === 0 ? (
         <div className="empty" style={{ padding: "30px 20px", marginBottom: 20 }}>
           <Layers size={34} style={{ opacity: .3, marginBottom: 8 }} />
           <div style={{ fontWeight: 600, color: "var(--text)" }}>還沒有儲存的預設隊</div>
-          <div className="tiny" style={{ marginTop: 4 }}>到「預設隊」頁對任何一隊按「儲存整隊」就會出現在這裡。</div>
+          <div className="tiny" style={{ marginTop: 4 }}>到「預設隊」頁按「儲存整隊」，或在「一鍵配隊」頁按「儲存到儲存庫」就會出現在這裡。</div>
         </div>
       ) : (
         <div className="grid g3" style={{ marginBottom: 22 }}>
