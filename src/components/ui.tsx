@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Search, X, ChevronDown, Lock, Unlock, Ban } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { X, Lock, Unlock, Ban } from "lucide-react";
 import { ELEMENTS, SET_BY_ID, STAT_TYPES, type StatKey } from "../lib/constants";
-import { MONSTERS, monsterOf } from "../store";
-import type { Artifact, Monster, Rune, Stats } from "../lib/types";
+import { monsterOf } from "../store";
+import type { Artifact, Rune, Stats } from "../lib/types";
 import { artifactKindText, artifactMainText, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
 import { tickInfo } from "../lib/optimizer";
 
@@ -342,86 +342,6 @@ export function Modal({ title, onClose, children, width }: { title: string; onCl
         </div>
         <div className="modal-body">{children}</div>
       </div>
-    </div>
-  );
-}
-
-/* ── 魔靈搜尋下拉 ─────────────────────────────── */
-export function MonsterPicker({
-  value,
-  onChange,
-  placeholder = "搜尋魔靈（英文名）…",
-  options,
-}: {
-  value: number;
-  onChange: (id: number) => void;
-  placeholder?: string;
-  /** 限制定單，例如只列出帳號內擁有的魔靈 */
-  options?: Monster[];
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  const m = value ? monsterOf(value) : undefined;
-
-  useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-
-  const list = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    let arr = options ?? MONSTERS;
-    if (term) arr = arr.filter((x) => x.name.toLowerCase().includes(term));
-    return arr
-      .slice()
-      .sort((a, b) => (b.nat - a.nat) || a.name.localeCompare(b.name))
-      .slice(0, 120);
-  }, [q, options]);
-
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button type="button" className="input" style={{ display: "flex", alignItems: "center", gap: 9, textAlign: "left" }} onClick={() => setOpen((v) => !v)}>
-        {m ? <MonsterIcon id={m.id} size={26} /> : <Search size={15} className="dim" />}
-        <span style={{ flex: 1, color: m ? "var(--text)" : "var(--muted-2)" }}>{m ? m.name : placeholder}</span>
-        <ChevronDown size={14} className="dim" />
-      </button>
-      {open && (
-        <div
-          style={{
-            position: "absolute", zIndex: 60, top: "calc(100% + 6px)", left: 0, right: 0,
-            background: "#0e1626", border: "1px solid var(--line)", borderRadius: 12,
-            boxShadow: "0 24px 50px -20px #000", overflow: "hidden",
-          }}
-        >
-          <div style={{ padding: 8, borderBottom: "1px solid var(--line-soft)" }}>
-            <input autoFocus className="input" placeholder={placeholder} value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-          <div className="scroll-y" style={{ maxHeight: 300 }}>
-            {list.map((x) => (
-              <button
-                key={x.id}
-                type="button"
-                onClick={() => { onChange(x.id); setOpen(false); setQ(""); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "6px 10px",
-                  background: x.id === value ? "rgba(242,198,92,.1)" : "transparent", border: 0, color: "var(--text)",
-                  textAlign: "left", fontSize: 12.5,
-                }}
-              >
-                <MonsterIcon id={x.id} size={26} />
-                <span style={{ flex: 1 }}>{x.name}</span>
-                <span className={`el-${x.el}`} style={{ fontSize: 11 }}>{ELEMENTS[x.el as 1 | 2 | 3 | 4 | 5]?.name}</span>
-                <span className="dim tiny">{"★".repeat(x.nat)}</span>
-              </button>
-            ))}
-            {list.length === 0 && <div className="empty" style={{ padding: 20 }}>找不到魔靈</div>}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

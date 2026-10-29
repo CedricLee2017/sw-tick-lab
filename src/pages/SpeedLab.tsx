@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { ArrowRight, Gauge, ListOrdered, Plus, Trash2, Wand2, Users, Info } from "lucide-react";
 import { useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
-import { MonsterPicker, MonsterIcon, NumberField, TickBadge, fmt } from "../components/ui";
+import { MonsterIcon, NumberField, TickBadge, fmt } from "../components/ui";
+import { MonsterPickerField } from "../components/MonsterPicker";
 import { speedForTick, tickOf } from "../lib/stats";
 import { simulateOrder } from "../lib/optimizer";
 import { ELEMENTS } from "../lib/constants";
@@ -74,7 +75,7 @@ export default function SpeedPage() {
               <div className="card-pad col" style={{ gap: 14 }}>
                 <div className="field">
                   <label>魔靈（可選，選了會自動帶入基礎速度）</label>
-                  <MonsterPicker
+                  <MonsterPickerField
                     value={monsterId}
                     onChange={(id) => {
                       setMonsterId(id);
@@ -249,7 +250,7 @@ function OrderTab() {
               <Plus size={13} /> 新增
             </button>
             <div style={{ width: 220 }}>
-              <MonsterPicker value={0} onChange={addFromBox} placeholder="從我的魔靈加入…" />
+              <MonsterPickerField value={0} onChange={addFromBox} placeholder="從我的魔靈加入…" />
             </div>
             <NumberField label="" value={turns} onChange={setTurns} min={2} max={20} />
           </div>

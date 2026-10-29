@@ -200,7 +200,10 @@ src/
     teamOptimizer.worker.ts 一鍵配隊 Web Worker 入口
     teamTemplates.ts    3／4／5 人隊型預設與角色需求
     accountStats.ts     帳號統計
-  components/ui.tsx     共用 UI（魔靈選擇器、符文卡、神器卡、Tick 徽章）
+  components/ui.tsx     共用 UI（魔靈圖示、符文卡、神器卡、Tick 徽章、Modal）
+  components/MonsterPicker.tsx 共用的魔靈選擇器（搜尋、元素／胎生星級篩選）
+                              預設排序：屬性 水火風光暗 → 原生星級高到低 → 已覺醒 → 名稱
+                              所有會「選擇／新增魔靈」的頁面（Speed Tick、配符、速度實驗室、一鍵配隊、配神器、神器追傷）共用同一套卡片式選單
   components/ArtifactStage.tsx 第二階段神器面板與結果
   components/RuneRestrictions.tsx 排除 / 固定使用符文面板
   pages/                匯入、總覽、速度實驗室、Speed Tick、RTA、配符、一鍵配隊、配神器、神器追傷、配裝、預設隊、符文、神器、魔靈、設定

@@ -4,6 +4,7 @@ import { ELEMENTS } from "../lib/constants";
 import { deckTypeLabel } from "../lib/deckTypes";
 import { MONSTERS, MONSTER_MAP, useStore } from "../store";
 import { MonsterIcon, Modal } from "../components/ui";
+import { MonsterPickerModal, sortMonsterEntries, toMonsterEntries } from "../components/MonsterPicker";
 import type { DeckFav, Loadout } from "../store";
 import {
   AB_RATES,
@@ -117,11 +118,6 @@ function loadSaves(): SavedCalc[] {
 const numOr0 = (v: string) => Number(v) || 0;
 const clampTick = (v: number) => Math.max(0, Math.min(TICKS[TICKS.length - 1], Math.round(v)));
 
-/** 元素篩選按鈕的顏色（與全域 --water / --fire … 一致） */
-const EL_COLOR: Record<number, string> = {
-  1: "var(--water)", 2: "var(--fire)", 3: "var(--wind)", 4: "var(--light)", 5: "var(--dark)",
-};
-
 export default function SpeedTickPage() {
   const runeMap = useStore((s) => s.runeMap);
   const loadouts = useStore((s) => s.loadouts);
@@ -146,10 +142,6 @@ export default function SpeedTickPage() {
   const [loadOpen, setLoadOpen] = useState(false);
   // 手動新增：先開魔靈選擇視窗（可搜尋 / 依元素與胎生星級縮小範圍）
   const [pickOpen, setPickOpen] = useState(false);
-  const [pickQ, setPickQ] = useState("");
-  const [pickEl, setPickEl] = useState(0);
-  const [pickNat, setPickNat] = useState(0);
-  const [pickAwake, setPickAwake] = useState(false);
   const [pickedCount, setPickedCount] = useState(0);
   const [lastPicked, setLastPicked] = useState("");
   const [boostModal, setBoostModal] = useState<{
@@ -301,29 +293,14 @@ export default function SpeedTickPage() {
     if (teamFull("blue")) return notify(`藍隊最多 ${MAX_PER_TEAM} 隻魔靈`, "err");
     setPickedCount(0);
     setLastPicked("");
-    setPickQ("");
-    setPickEl(0);
-    setPickNat(0);
-    setPickAwake(false);
     setPickOpen(true);
   };
 
-  /** 魔靈選擇視窗的清單：依元素 / 胎生星級 / 關鍵字篩選，高星級優先 */
-  const pickList = useMemo(() => {
-    const term = pickQ.trim().toLowerCase();
-    const el = ELEMENTS[pickEl as 1 | 2 | 3 | 4 | 5];
-    return MONSTERS.filter((m) => {
-      if (pickEl && m.el !== pickEl) return false;
-      if (pickNat && m.nat !== pickNat) return false;
-      if (pickAwake && !m.awk) return false;
-      if (!term) return true;
-      return (
-        m.name.toLowerCase().includes(term) ||
-        (el?.name ?? "").includes(term) ||
-        `${m.nat}★`.includes(term)
-      );
-    }).sort((a, b) => b.nat - a.nat || b.awk - a.awk || a.name.localeCompare(b.name));
-  }, [pickQ, pickEl, pickNat, pickAwake]);
+  /** 魔靈選擇視窗的清單：依元素 / 胎生星級 / 關鍵字篩選，水→火→風→光→暗、星級高到低 */
+  const pickEntries = useMemo(
+    () => toMonsterEntries().map((e) => ({ ...e, disabled: teamFull("blue") })),
+    [units.length],
+  );
 
   const addBlank = () => {
     if (teamFull("blue")) return;
@@ -441,10 +418,11 @@ export default function SpeedTickPage() {
   const searchResults = useMemo(() => {
     const term = q.trim().toLowerCase();
     if (!term) return [];
-    return MONSTERS.filter((m) => {
+    const hits = MONSTERS.filter((m) => {
       const el = ELEMENTS[m.el as 1]?.name ?? "";
       return m.name.toLowerCase().includes(term) || el.includes(term) || `${m.nat}★`.includes(term);
-    }).slice(0, 24);
+    });
+    return sortMonsterEntries(toMonsterEntries(hits)).slice(0, 24).map((e) => e.monster);
   }, [q]);
 
   const saveCurrent = () => {
@@ -1587,95 +1565,37 @@ export default function SpeedTickPage() {
       )}
 
       {pickOpen && (
-        <Modal title="選擇魔靈" width={980} onClose={() => setPickOpen(false)}>
-          <div className="mp-toolbar">
-            <input
-              autoFocus
-              className="input"
-              placeholder="搜尋魔靈名稱（英文，例如 Lushen）…"
-              value={pickQ}
-              onChange={(e) => setPickQ(e.target.value)}
-            />
-            <div className="mp-filter-row">
-              <span className="mp-label">元素</span>
-              <button type="button" className={`mp-chip ${pickEl === 0 ? "on" : ""}`} onClick={() => setPickEl(0)}>全部</button>
-              {[1, 2, 3, 4, 5].map((el) => (
-                <button
-                  key={el}
-                  type="button"
-                  className={`mp-chip ${pickEl === el ? "on" : ""}`}
-                  style={{ color: EL_COLOR[el] }}
-                  onClick={() => setPickEl(el)}
-                >
-                  <i className="mp-dot" />
-                  {ELEMENTS[el as 1].name}
-                </button>
-              ))}
-            </div>
-            <div className="mp-filter-row">
-              <span className="mp-label">胎生星級</span>
-              <button type="button" className={`mp-chip ${pickNat === 0 ? "on" : ""}`} onClick={() => setPickNat(0)}>全部</button>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button" className={`mp-chip ${pickNat === n ? "on" : ""}`} onClick={() => setPickNat(n)}>
-                  {n}★
-                </button>
-              ))}
-              <label className="row tiny" style={{ gap: 6, marginLeft: "auto", cursor: "pointer" }}>
-                <input type="checkbox" checked={pickAwake} onChange={(e) => setPickAwake(e.target.checked)} />
-                只顯示已覺醒
-              </label>
-            </div>
-          </div>
-
-          <div className="mp-count">
-            符合 {pickList.length} 隻
-            {pickList.length > 0 && " · 點擊即可加入，可連續加入多隻"}
-          </div>
-
-          <div className="mp-grid">
-            {pickList.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className="mp-card"
-                disabled={teamFull("blue")}
-                title={`${m.name} · ${ELEMENTS[m.el as 1].name} · ${m.nat}★ · 基礎速度 ${m.spd}`}
-                onClick={() => {
-                  addMonster(m.id);
-                  setPickedCount((c) => c + 1);
-                  setLastPicked(m.name);
-                }}
-              >
-                <MonsterIcon id={m.id} size={48} />
-                <span className="mp-name">{m.name}</span>
-                <span className="mp-meta">
-                  <span className={`el-${m.el}`}>{ELEMENTS[m.el as 1].name}</span> · {m.nat}★
-                </span>
-              </button>
-            ))}
-            {pickList.length === 0 && (
-              <div className="empty" style={{ gridColumn: "1 / -1", padding: "32px 16px" }}>找不到符合條件的魔靈</div>
-            )}
-          </div>
-
-          <div className="row between" style={{ marginTop: 12, gap: 10 }}>
-            <span className="tiny dim">
+        <MonsterPickerModal
+          title="選擇魔靈"
+          width={980}
+          multi
+          entries={pickEntries}
+          pickedCount={pickedCount}
+          lastPicked={lastPicked}
+          footerLeft={
+            <>
               已加入 {pickedCount} 隻{lastPicked && `（最近：${lastPicked}）`} · 藍隊 {teamCount("blue")}/{MAX_PER_TEAM}
               {teamFull("blue") && " · 已達上限"}
-            </span>
-            <div className="row" style={{ gap: 8 }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => { addBlank(); setPickOpen(false); }}
-              >
-                新增空白自訂魔靈
-              </button>
-              <button type="button" className="btn btn-primary" onClick={() => setPickOpen(false)}>完成</button>
-            </div>
-          </div>
-        </Modal>
+            </>
+          }
+          extraActions={
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => { addBlank(); setPickOpen(false); }}
+            >
+              新增空白自訂魔靈
+            </button>
+          }
+          onPick={(e) => {
+            addMonster(e.monster.id);
+            setPickedCount((c) => c + 1);
+            setLastPicked(e.monster.name);
+          }}
+          onClose={() => setPickOpen(false)}
+        />
       )}
+
 
     </>
   );

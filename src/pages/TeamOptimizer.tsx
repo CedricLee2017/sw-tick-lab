@@ -6,6 +6,7 @@ import {
 import { monsterLabel, useStore } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
 import { MonsterIcon, Modal, RuneCard, TickBadge, fmt } from "../components/ui";
+import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPicker";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import { setSummary, speedForTick } from "../lib/stats";
 import {
@@ -119,7 +120,6 @@ export default function TeamOptimizerPage() {
   const [altIndex, setAltIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pickerIndex, setPickerIndex] = useState(-1);
-  const [q, setQ] = useState("");
 
   const workerRef = useRef<Worker | null>(null);
   const runIdRef = useRef(0);
@@ -248,14 +248,8 @@ export default function TeamOptimizerPage() {
     if (!summary) return [] as OwnedUnit[];
     const dup = new Map<number, number>();
     for (const v of summary.views) dup.set(v.monster.id, (dup.get(v.monster.id) ?? 0) + 1);
-    const term = q.trim().toLowerCase();
-    return summary.views
-      .filter((v) => !term || `${v.monster.name} ${v.unit.id}`.toLowerCase().includes(term))
-      .slice()
-      .sort((a, b) => b.unit.stars - a.unit.stars || b.monster.nat - a.monster.nat || a.monster.name.localeCompare(b.monster.name))
-      .map((v): OwnedUnit => ({ ...v, _dup: (dup.get(v.monster.id) ?? 0) > 1 }))
-      .slice(0, 200);
-  }, [summary, q]);
+    return sortMonsterEntries(summary.views.map((v): OwnedUnit => ({ ...v, _dup: (dup.get(v.monster.id) ?? 0) > 1 })));
+  }, [summary]);
 
   /** 把草案轉成引擎需求 */
   const buildRequest = (): TeamRequest | null => {
@@ -560,7 +554,7 @@ export default function TeamOptimizerPage() {
                     <div className="tiny dim">{m.title}</div>
                   </div>
                 </div>
-                <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setPickerIndex(i); setQ(""); }}>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPickerIndex(i)}>
                   <Search size={12} /> {v ? "更換" : "選擇"}
                 </button>
               </div>
@@ -813,56 +807,24 @@ export default function TeamOptimizerPage() {
         </div>
       )}
 
-      {/* 魔靈選擇 */}
+      {/* 魔靈選擇（與 Speed Tick 相同的卡片式選單） */}
       {pickerIndex >= 0 && (
-        <Modal title={`選擇第 ${pickerIndex + 1} 隻魔靈`} onClose={() => setPickerIndex(-1)} width={720}>
-          <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-            <div style={{ position: "relative", flex: 1 }}>
-              <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
-              <input className="input" style={{ paddingLeft: 28 }} placeholder="搜尋名稱或 unit id" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
-            </div>
-            <span className="tiny dim" style={{ alignSelf: "center" }}>共 {owned.length} 隻</span>
-          </div>
-          <div className="scroll-y" style={{ maxHeight: 460 }}>
-            {owned.map((v) => {
-              const used = members.some((m, j) => j !== pickerIndex && m.unitId === v.unit.id);
-              return (
-                <button
-                  key={v.unit.id}
-                  type="button"
-                  disabled={used}
-                  onClick={() => {
-                    updateMember(pickerIndex, { unitId: v.unit.id, includeRunes: [] });
-                    setPickerIndex(-1);
-                  }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "7px 9px",
-                    background: "transparent", border: 0, borderBottom: "1px solid var(--line-soft)",
-                    color: used ? "var(--muted-2)" : "var(--text)", textAlign: "left", cursor: used ? "not-allowed" : "pointer",
-                  }}
-                >
-                  <MonsterIcon id={v.monster.id} size={34} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                      {monsterLabel(v.monster.id)}
-                      {v._dup && <span className="tiny dim"> #{v.unit.id}</span>}
-                    </div>
-                    <div className="tiny dim">
-                      {v.monster.nat}★ · {v.runes.length}/6 符文 · SPD {v.stats.spd} · T{v.stats.tick}
-                    </div>
-                  </div>
-                  {used ? <span className="tiny dim">已加入</span> : <ChevronRight />}
-                </button>
-              );
-            })}
-            {owned.length === 0 && <div className="empty" style={{ padding: 24 }}>找不到魔靈</div>}
-          </div>
-        </Modal>
+        <MonsterPickerModal
+          title={`選擇第 ${pickerIndex + 1} 隻魔靈`}
+          width={980}
+          entries={owned.map((v) => ({
+            key: String(v.unit.id),
+            monster: v.monster,
+            disabled: members.some((m, j) => j !== pickerIndex && m.unitId === v.unit.id),
+            meta: `${v._dup ? `#${v.unit.id} · ` : ""}${v.monster.nat}★ · ${v.runes.length}/6 符文 · SPD ${v.stats.spd} · T${v.stats.tick}`,
+          }))}
+          onPick={(e) => {
+            updateMember(pickerIndex, { unitId: Number(e.key), includeRunes: [] });
+            setPickerIndex(-1);
+          }}
+          onClose={() => setPickerIndex(-1)}
+        />
       )}
     </>
   );
-}
-
-function ChevronRight() {
-  return <span className="tiny dim">選擇</span>;
 }

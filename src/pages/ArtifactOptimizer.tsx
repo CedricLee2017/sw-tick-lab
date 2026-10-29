@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Sparkles, X } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 import { MONSTER_MAP, monsterLabel, useStore, type Loadout } from "../store";
 import { ArtifactStage } from "../components/ArtifactStage";
 import { DamagePanel } from "../components/DamagePanel";
 import { ArtifactCard, MonsterIcon, StatGrid, TickBadge } from "../components/ui";
+import { MonsterPickerField } from "../components/MonsterPicker";
 import { ELEMENTS } from "../lib/constants";
 import { defaultSkill, loadSkillData, skillsForMonster, type DamageOptions, type SkillData } from "../lib/damage";
 import { baseStats, statsForRunes } from "../lib/stats";
@@ -17,8 +18,6 @@ export default function ArtifactOptimizerPage() {
   const notify = useStore((s) => s.notify);
   const runeMap = useStore((s) => s.runeMap);
   const [unitId, setUnitId] = useState(0);
-  const [unitQuery, setUnitQuery] = useState("");
-  const [unitOpen, setUnitOpen] = useState(false);
   const [saved, setSaved] = useState<Loadout | null>(null);
   const [autoRunKey, setAutoRunKey] = useState(0);
   const [skillData, setSkillData] = useState<SkillData | null>(null);
@@ -58,19 +57,12 @@ export default function ArtifactOptimizerPage() {
     if (!account) return [];
     return account.units
       .map((u) => ({ u, m: MONSTER_MAP.get(u.master) }))
-      .filter((x) => !!x.m)
-      .sort((a, b) => a.m!.name.localeCompare(b.m!.name));
+      .filter((x) => !!x.m);
   }, [account]);
 
   const picked = units.find((x) => x.u.id === unitId) ?? null;
   const monster = picked?.m;
   const unit = picked?.u;
-
-  const matches = useMemo(() => {
-    const q = unitQuery.trim().toLowerCase();
-    const arr = q ? units.filter(({ m }) => m!.name.toLowerCase().includes(q)) : units;
-    return arr.slice(0, 40);
-  }, [units, unitQuery]);
 
   const monsterSkills = useMemo(
     () => (skillData && monster ? skillsForMonster(skillData, monster.id) : []),
@@ -127,8 +119,6 @@ export default function ArtifactOptimizerPage() {
     setUnitId(id);
     setSaved(null);
     setSkillId(0);
-    setUnitQuery("");
-    setUnitOpen(false);
   };
 
   const applySaved = (l: Loadout) => {
@@ -137,8 +127,6 @@ export default function ArtifactOptimizerPage() {
     setUnitId(target.u.id);
     setSaved(l);
     setSkillId(0);
-    setUnitQuery("");
-    setUnitOpen(false);
     setAutoRunKey((k) => k + 1);
     notify(`已選擇收藏配裝「${l.name}」，開始計算神器`);
   };
@@ -158,37 +146,24 @@ export default function ArtifactOptimizerPage() {
             </div>
           </div>
           <div style={{ minWidth: 280, flex: "0 1 400px" }}>
-            <label className="tiny dim">魔靈（可直接輸入名稱搜尋）</label>
-            <div className="unit-picker">
-              <Search size={14} className="unit-search-icon" />
-              <input
-                className="input"
-                style={{ paddingLeft: 30, paddingRight: 28 }}
-                placeholder={picked ? `${monster!.name}（目前選擇，輸入可更換）` : "輸入魔靈名稱…"}
-                value={unitQuery}
-                onFocus={() => setUnitOpen(true)}
-                onChange={(e) => { setUnitQuery(e.target.value); setUnitOpen(true); }}
-                onBlur={() => window.setTimeout(() => setUnitOpen(false), 160)}
-              />
+            <label className="tiny dim">魔靈</label>
+            <div className="row" style={{ gap: 6 }}>
+              <div style={{ flex: 1 }}>
+                <MonsterPickerField
+                  value={unitId}
+                  entries={units.map(({ u, m }) => ({
+                    key: String(u.id),
+                    monster: m!,
+                    meta: `${u.stars}★Lv.${u.level} · ${u.runes.length}/6 符文`,
+                  }))}
+                  label={(e) => (e ? <>{e.monster.name} · {e.meta}</> : "選擇魔靈…")}
+                  onChange={pickUnit}
+                />
+              </div>
               {unitId > 0 && (
-                <button type="button" className="unit-clear" title="清除" onClick={() => pickUnit(0)}>
+                <button type="button" className="btn btn-ghost btn-sm btn-icon" title="清除" onClick={() => pickUnit(0)}>
                   <X size={13} />
                 </button>
-              )}
-              {unitOpen && (
-                <div className="unit-pop">
-                  {matches.map(({ u, m }) => (
-                    <button key={u.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => pickUnit(u.id)}>
-                      <MonsterIcon id={m!.id} size={28} />
-                      <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ display: "block" }}>{m!.name}</span>
-                        <span className="tiny dim">{u.stars}★Lv.{u.level} · {u.runes.length}/6 符文</span>
-                      </span>
-                      <span className={`el-${m!.el}`} style={{ fontSize: 10.5 }}>{ELEMENTS[m!.el as 1]?.name}</span>
-                    </button>
-                  ))}
-                  {matches.length === 0 && <div className="empty tiny" style={{ padding: 14 }}>找不到魔靈</div>}
-                </div>
               )}
             </div>
             {picked && (

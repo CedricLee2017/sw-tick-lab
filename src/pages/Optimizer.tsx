@@ -5,7 +5,8 @@ import {
 } from "lucide-react";
 import { useStore, monsterLabel, type Loadout, type RuneFlag } from "../store";
 import { useSummary } from "../lib/accountStats";
-import { MonsterPicker, MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
+import { MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
+import { MonsterPickerField } from "../components/MonsterPicker";
 import { DamagePanel } from "../components/DamagePanel";
 import {
   computeSkillDamage, defaultSkill, loadSkillData, skillsForMonster,
@@ -786,7 +787,7 @@ export default function OptimizerPage() {
 
             <div className="field">
               <label>魔靈</label>
-              <MonsterPicker
+              <MonsterPickerField
                 value={monsterId}
                 onChange={setMonsterId}
                 options={account ? ownedMonsters : undefined}

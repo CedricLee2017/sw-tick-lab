@@ -13,6 +13,7 @@ import {
 import { baseStats, statsForRunes } from "../lib/stats";
 import { artifactKindText, artifactMainText, artifactSubText } from "../lib/artifacts";
 import { MonsterIcon, NumberField, fmt } from "../components/ui";
+import { MonsterPickerField } from "../components/MonsterPicker";
 import type { Artifact } from "../lib/types";
 
 const ZERO: AdEffects = { hp: 0, atk: 0, def: 0, spd: 0 };
@@ -138,12 +139,16 @@ export default function AdCalculatorPage() {
           </div>
           <div style={{ minWidth: 250, flex: "0 1 340px" }}>
             <label className="tiny dim">快速帶入魔靈目前面板</label>
-            <select className="select" value={unitId} onChange={(e) => pickUnit(Number(e.target.value))}>
-              <option value={0}>選擇魔靈…</option>
-              {units.map(({ u, m }) => (
-                <option key={u.id} value={u.id}>{m!.name} · {u.stars}★Lv.{u.level}</option>
-              ))}
-            </select>
+            <MonsterPickerField
+              value={unitId}
+              entries={units.map(({ u, m }) => ({
+                key: String(u.id),
+                monster: m!,
+                meta: `${u.stars}★Lv.${u.level}`,
+              }))}
+              label={(e) => (e ? <>{e.monster.name} · {e.meta}</> : "選擇魔靈…")}
+              onChange={(key) => pickUnit(key)}
+            />
           </div>
         </div>
         {saved && (
