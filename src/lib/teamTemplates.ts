@@ -17,6 +17,14 @@ export interface TeamMemberTemplate {
   tick: number;
   focus: FocusEntry[];
   objective?: OptObjective;
+  /** 攻擊順序；1 = 最先，省略時為 1 */
+  order?: number;
+  /** 預設會收到的提條 % */
+  boostPct?: number;
+  /** 預設是否有速度強化 */
+  speedBuff?: boolean;
+  /** 預設神器「速度增加效果 +%」 */
+  artifactPct?: number;
 }
 
 export interface TeamTemplate {
@@ -132,7 +140,12 @@ export const TEAM_TEMPLATES: TeamTemplate[] = [
     desc: "公會戰／據點戰進攻：兩隻迅速一速搶先手，暴走打手負責輸出。",
     size: 3,
     content: "guild",
-    members: [SPEED_UNIT, BOOSTER, DPS_VIOLENT],
+    members: [
+      // 預設攻擊順序：提條先手 → 主力打手 → 速隊長
+      { ...SPEED_UNIT, order: 3 },
+      { ...BOOSTER, order: 1 },
+      { ...DPS_VIOLENT, order: 2 },
+    ],
   },
   {
     id: "siege-tank",

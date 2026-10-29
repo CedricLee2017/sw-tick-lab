@@ -35,11 +35,12 @@ const {
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
-  artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels,
+  artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
   rtaStats, rtaView,
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
+  computeFollowPlan, followSpeedRequirement, panelSpeed, panelExtraFor, speedBuffPct, tickWithBoost,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
 } = engine;
@@ -1500,6 +1501,9 @@ check("隊型預設涵蓋 3 / 4 / 5 人與角色", () => {
   const speed = teamTemplateOf("guild-speed");
   const m3 = templateMembers(speed, 3);
   assert.deepEqual(m3.map((m) => m.role), ["speed", "booster", "dps"]);
+  // 速隊長＋提條＋主力打手：提條先手 → 主力打手 → 速隊長
+  assert.deepEqual(m3.map((m) => m.order ?? 1), [3, 1, 2]);
+  assert.ok(templateMembers(teamTemplateOf("arena-4"), 4).every((m) => (m.order ?? 1) === 1));
 
   const m5 = templateMembers(speed, 5);
   assert.equal(m5.length, 5);
@@ -1514,6 +1518,90 @@ check("隊型預設涵蓋 3 / 4 / 5 人與角色", () => {
     assert.ok(used.has(role), `隊型應包含 ${role} 角色`);
   }
   assert.ok(TEAM_ROLE_LABELS.tank.includes("坦克"));
+});
+
+check("接速：面板速度與速度強化倍率", () => {
+  assert.equal(panelSpeed(111, 100), 211);
+  assert.equal(panelSpeed(111, 0), null);
+  assert.equal(panelExtraFor(111, 211), 100);
+  assert.equal(panelExtraFor(111, 100), 0);
+  assert.equal(speedBuffPct(false, 20), 0);
+  assert.equal(speedBuffPct(true, 0), 30);
+  assert.equal(speedBuffPct(true, 20), 36);
+  assert.equal(tickWithBoost(286, 7), 5);
+  assert.equal(tickWithBoost(167, 7, 30), 6);
+});
+
+check("接速：提條與速度強化會降低最低面板速度", () => {
+  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7 }), 239);
+  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30 }), 167);
+  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, buffPct: 30 }), 184);
+  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 30 }), 129);
+  assert.equal(followSpeedRequirement({ targetTick: 6, ratePct: 7, boostPct: 30, buffPct: 36 }), 123);
+});
+
+check("接速：依攻擊順序串接前後 Tick", () => {
+  const plan = computeFollowPlan([
+    { order: 3, baseSpd: 111, panelExtra: 0, tick: 6, boostPct: 30, speedBuff: false },
+    { order: 1, baseSpd: 111, panelExtra: 0, tick: 5, boostPct: 0, speedBuff: false },
+    { order: 2, baseSpd: 111, panelExtra: 0, tick: 0, boostPct: 30, speedBuff: true, artifactPct: 0 },
+  ], 7);
+
+  // 回傳順序與輸入相同；position 才是攻擊順序
+  assert.deepEqual(plan.map((r) => r.position), [2, 0, 1]);
+
+  const booster = plan[1];
+  assert.equal(booster.anchorTick, null);
+  assert.equal(booster.targetTick, 5);
+  assert.equal(booster.minSpeed, 286);
+
+  const dps = plan[2];
+  assert.equal(dps.anchorTick, 5);
+  assert.equal(dps.targetTick, 6);
+  assert.equal(dps.buffPct, 30);
+  assert.equal(dps.minSpeed, 129);
+
+  const speedUnit = plan[0];
+  assert.equal(speedUnit.anchorTick, 6);
+  assert.equal(speedUnit.targetTick, 7);
+  assert.equal(speedUnit.minSpeed, 143);
+});
+
+check("接速：面板速度、提條與實際出手 Tick", () => {
+  const plan = computeFollowPlan([
+    { order: 1, baseSpd: 111, panelExtra: 130, tick: 0 }, // 241 → T6
+    { order: 2, baseSpd: 111, panelExtra: 32, tick: 0, boostPct: 30 }, // 143 → T7（含提條）
+  ], 7);
+  assert.equal(plan[0].panelSpd, 241);
+  assert.equal(plan[0].panelTick, 6);
+  assert.equal(plan[0].targetTick, 6);
+  assert.equal(plan[1].anchorTick, 6);
+  assert.equal(plan[1].targetTick, 7);
+  assert.equal(plan[1].panelSpd, 143);
+  assert.equal(plan[1].panelTick, 7);
+  assert.equal(plan[1].minSpeed, 143);
+  assert.equal(plan[1].met, true);
+});
+
+check("接速：速度強化與神器「速度增加效果」", () => {
+  const arts = [
+    { subs: [{ t: 206, v: 20 }, { t: 206, v: 10 }] },
+    { subs: [{ t: 206, v: 15 }] },
+  ];
+  assert.equal(artifactSpeedBuffPct(arts), 35);
+  assert.equal(artifactSpeedBuffPct([]), 0);
+
+  const plan = computeFollowPlan([
+    { order: 1, baseSpd: 111, panelExtra: 130, speedBuff: true, artifactPct: 20 },
+    { order: 2, baseSpd: 111, panelExtra: 12, speedBuff: true, artifactPct: 20, boostPct: 30 },
+  ], 7);
+  // 241 × 1.36 = 327.76 → T5
+  assert.equal(plan[0].panelTick, 5);
+  assert.equal(plan[1].targetTick, 6);
+  assert.equal(plan[1].minSpeed, 123); // 166.67 / 1.36
+  assert.equal(plan[1].panelSpd, 123);
+  assert.equal(plan[1].panelTick, 6);
+  assert.equal(plan[1].met, true);
 });
 
 check("runeSupply 依位置計算可用符文與鎖定", () => {

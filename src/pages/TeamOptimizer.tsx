@@ -3,15 +3,18 @@ import {
   AlertTriangle, Check, Copy, Gauge, Layers, Loader2, Lock, Pin, Save, Search,
   Shirt, Users, Wand2, Zap,
 } from "lucide-react";
-import { monsterLabel, useStore } from "../store";
+import { monsterLabel, useStore, type DeckFav } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
 import { MonsterIcon, Modal, RuneCard, TickBadge, fmt } from "../components/ui";
 import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPicker";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import { setSummary, speedForTick } from "../lib/stats";
 import {
-  DECK_CONTEXT_LABEL, SPD_AREA_LABEL, spdLeaderApplies, spdLeaderSkill, type DeckContext,
+  DECK_CONTEXT_LABEL, SPD_AREA_LABEL, deckContext, spdLeaderApplies, spdLeaderSkill, type DeckContext,
 } from "../lib/deckSpeed";
+import { deckTypeLabel } from "../lib/deckTypes";
+import { artifactSpeedBuffPct } from "../lib/artifacts";
+import { computeFollowPlan, panelExtraFor } from "../lib/teamSpeed";
 import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply,
   type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
@@ -33,6 +36,16 @@ interface MemberDraft {
   min: Partial<Record<StatKey, number>>;
   /** 目標 Tick；0 = 不限 */
   tick: number;
+  /** 面板額外速度（基礎速度以外）；0 = 不指定，面板速度會覆寫目標 Tick */
+  panelExtra: number;
+  /** 攻擊順序；1 = 最先 */
+  order: number;
+  /** 這隻魔靈會收到的提條 % */
+  boostPct: number;
+  /** 是否有速度強化（+30%，神器可放大） */
+  speedBuff: boolean;
+  /** 神器「速度增加效果 +%」 */
+  artifactPct: number;
   focus: FocusEntry[];
   /** 使用者按「固定這隻」後鎖住的符文 */
   includeRunes: number[];
@@ -85,6 +98,11 @@ function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
     mains: { ...t.mains },
     min: { ...t.min },
     tick: t.tick,
+    panelExtra: 0,
+    order: t.order ?? 1,
+    boostPct: t.boostPct ?? 0,
+    speedBuff: t.speedBuff ?? false,
+    artifactPct: t.artifactPct ?? 0,
     focus: t.focus.map((f) => ({ ...f })),
     includeRunes: [],
   };
@@ -101,6 +119,7 @@ export default function TeamOptimizerPage() {
   const summary = useSummary();
   const notify = useStore((s) => s.notify);
   const saveDeckFav = useStore((s) => s.saveDeckFav);
+  const deckFavs = useStore((s) => s.deckFavs);
   const equipTeam = useStore((s) => s.equipTeam);
   const setRuneFlag = useStore((s) => s.setRuneFlag);
 
@@ -120,6 +139,8 @@ export default function TeamOptimizerPage() {
   const [altIndex, setAltIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pickerIndex, setPickerIndex] = useState(-1);
+  const [deckOpen, setDeckOpen] = useState(false);
+  const [pinDeckRunes, setPinDeckRunes] = useState(false);
 
   const workerRef = useRef<Worker | null>(null);
   const runIdRef = useRef(0);
@@ -138,7 +159,7 @@ export default function TeamOptimizerPage() {
     setMembers((prev) => {
       if (!summary) return prev;
       const ids = new Set(summary.views.map((v) => v.unit.id));
-      return prev.map((m) => (m.unitId && !ids.has(m.unitId) ? { ...m, unitId: 0, includeRunes: [] } : m));
+      return prev.map((m) => (m.unitId && !ids.has(m.unitId) ? { ...m, unitId: 0, includeRunes: [], panelExtra: 0 } : m));
     });
   }, [account, summary]);
 
@@ -163,7 +184,12 @@ export default function TeamOptimizerPage() {
     setSize(s);
     setContent(t.content);
     setMembers((prev) =>
-      templateMembers(t, s).map((tm, i) => draftFromTemplate(tm, prev[i]?.unitId ?? 0)),
+      templateMembers(t, s).map((tm, i) => {
+        const d = draftFromTemplate(tm, prev[i]?.unitId ?? 0);
+        // 神器速度增加效果是跟著魔靈走的，換隊型時保留已自動帶入的數值
+        if (prev[i]?.unitId && prev[i].unitId === d.unitId) d.artifactPct = prev[i].artifactPct;
+        return d;
+      }),
     );
     setPlan(null);
     setError(null);
@@ -180,6 +206,80 @@ export default function TeamOptimizerPage() {
     });
     setPlan(null);
     setError(null);
+  };
+
+  /** 從預設隊儲存庫載入整隊（可選擇固定當時的符文） */
+  const loadDeck = (d: DeckFav) => {
+    if (!summary) return;
+    if (d.units.length === 0) return notify("這組預設隊沒有隊員", "err");
+
+    const deckUnits = d.units.slice(0, 5);
+    const nextSize = Math.min(5, Math.max(3, deckUnits.length)) as Size;
+    const byUnit = new Map(summary.views.map((v) => [v.unit.id, v]));
+    const byMaster = new Map<number, UnitView>();
+    for (const v of summary.views) if (!byMaster.has(v.monster.id)) byMaster.set(v.monster.id, v);
+
+    const t = teamTemplateOf(templateId);
+    let matched = 0;
+    const next = templateMembers(t, nextSize).map((tm, i) => {
+      const du = deckUnits[i];
+      const v = du ? byUnit.get(du.unitId) ?? byMaster.get(du.master) : undefined;
+      const draft = draftFromTemplate(tm, v?.unit.id ?? 0);
+      if (v) {
+        matched++;
+        draft.artifactPct = artifactSpeedBuffPct(v.artifacts);
+        if (pinDeckRunes && du) {
+          draft.includeRunes = du.runeIds.filter((id) => runeMap.has(id));
+        }
+      }
+      return draft;
+    });
+    if (matched === 0) {
+      notify("這組預設隊的魔靈不在目前帳號中，無法載入", "err");
+      return;
+    }
+
+    setSize(nextSize);
+    // 類型 0 是工具自己的自訂配隊，沒有內容資訊，保留目前選擇
+    setContent(d.type === 0 ? content : deckContext(d.type));
+    setMembers(next);
+    setLeaderUnitId(next.find((m) => m.unitId > 0)?.unitId ?? 0);
+    setPlan(null);
+    setError(null);
+    setDeckOpen(false);
+    notify(
+      `已載入${deckTypeLabel(d.type)}第 ${d.seq} 隊（${matched} 隻${d.units.length > 5 ? "，超過 5 隻只取前 5 隻" : ""}${matched < deckUnits.length ? `，${deckUnits.length - matched} 隻不在目前帳號` : ""}）`,
+      matched < deckUnits.length ? "err" : "ok",
+    );
+  };
+
+  /** 把某一隻的面板速度設成即時算出的接速下限 */
+  const applyFollowFloor = (index: number) => {
+    const r = followPlan[index];
+    const m = members[index];
+    const v = m ? viewOf(m.unitId) : undefined;
+    if (!r || !v || !Number.isFinite(r.minSpeed)) return;
+    updateMember(index, { panelExtra: panelExtraFor(v.base.spd, r.minSpeed) });
+    notify(`已將 ${monsterLabel(v.monster.id)} 的面板速度設為接速下限 ${r.minSpeed}`);
+  };
+
+  /** 一次把整隊的面板速度設成接速下限 */
+  const applyAllFollow = () => {
+    let count = 0;
+    const next = members.map((m, i) => {
+      const r = followPlan[i];
+      const v = viewOf(m.unitId);
+      if (!r || !v || !Number.isFinite(r.minSpeed)) return m;
+      count++;
+      const panelExtra = panelExtraFor(v.base.spd, r.minSpeed);
+      return m.panelExtra === panelExtra ? m : { ...m, panelExtra };
+    });
+    setMembers(next);
+    setPlan(null);
+    notify(
+      count > 0 ? `已套用 ${count} 隻的接速下限` : "目前沒有可套用的接速下限",
+      count > 0 ? "ok" : "err",
+    );
   };
 
   const updateMember = (i: number, patch: Partial<MemberDraft>) => {
@@ -202,6 +302,28 @@ export default function TeamOptimizerPage() {
 
   const selected = members.filter((m) => m.unitId > 0);
   const teamIds = selected.map((m) => m.unitId);
+
+  /** 即時接速試算：依攻擊順序串接每一隻的出手 Tick */
+  const followPlan = useMemo(() => {
+    const rate = rta ? 1.5 : 7;
+    return computeFollowPlan(
+      members.map((m, index) => {
+        const v = viewOf(m.unitId);
+        return {
+          index,
+          order: m.order,
+          baseSpd: v?.base.spd ?? 0,
+          panelExtra: m.panelExtra,
+          tick: m.tick,
+          boostPct: m.boostPct,
+          speedBuff: m.speedBuff,
+          artifactPct: m.artifactPct,
+          currentSpd: v?.stats.spd ?? 0,
+        };
+      }),
+      rate,
+    );
+  }, [members, summary, rta]);
 
   /** 全域「包括」符文：分配給目前裝備它的隊員（不在隊上的忽略） */
   const globalIncludes = useMemo(() => {
@@ -263,7 +385,10 @@ export default function TeamOptimizerPage() {
       if (m.set2 && m.set2 !== m.set4) sets.push({ set: m.set2, count: 2 });
 
       const min: Partial<Record<StatKey, number>> = { ...m.min };
-      if (m.tick > 0) min.spd = speedForTick(m.tick, rta);
+      // 面板速度優先於目標 Tick：使用者輸入的是「基礎速度以外的額外速度」
+      const panelSpd = m.panelExtra > 0 ? v.base.spd + m.panelExtra : 0;
+      if (panelSpd > 0) min.spd = panelSpd;
+      else if (m.tick > 0) min.spd = speedForTick(m.tick, rta);
       else delete min.spd;
 
       const bySlot = new Map<number, number>();
@@ -471,6 +596,7 @@ export default function TeamOptimizerPage() {
   }
 
   const totalWeight = members.reduce((s, m) => s + Math.max(1, m.weight), 0);
+  const orderedFollow = [...followPlan].sort((a, b) => a.position - b.position);
 
   return (
     <>
@@ -484,6 +610,9 @@ export default function TeamOptimizerPage() {
           </div>
         </div>
         <div className="row wrap" style={{ gap: 6 }}>
+          <button type="button" className="btn btn-sm" onClick={() => setDeckOpen(true)}>
+            <Layers size={13} /> 從儲存庫載入
+          </button>
           <span className="chip gold">符文衝突 0</span>
           <span className="chip muted">隊長技：速度</span>
           <span className="chip muted">{rta ? "RTA Tick 1.5%" : "一般 Tick 7%"}</span>
@@ -562,6 +691,7 @@ export default function TeamOptimizerPage() {
               {v && (
                 <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 6 }}>
                   <span>目前 SPD <b className="gold">{v.stats.spd}</b></span>
+                  <span>基礎 {v.base.spd}</span>
                   <span>T{v.stats.tick}</span>
                   <span>{v.runes.length}/6 符文</span>
                   {m.unitId === leaderUnitId && <span className="chip gold">隊長</span>}
@@ -582,7 +712,46 @@ export default function TeamOptimizerPage() {
                 </label>
                 <label>
                   <span>目標 Tick</span>
-                  <input className="input mono" type="number" min={0} max={20} value={m.tick} onChange={(e) => updateMember(i, { tick: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} title="0 = 不限" />
+                  <input className="input mono" type="number" min={0} max={20} value={m.tick} onChange={(e) => updateMember(i, { tick: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} title="0 = 不限；有填面板速度時以面板速度為準" />
+                </label>
+                <label>
+                  <span>面板速度（額外）</span>
+                  <input
+                    className="input mono"
+                    type="number"
+                    min={0}
+                    value={m.panelExtra || ""}
+                    placeholder={v ? `基礎 ${v.base.spd}` : "基礎 ?"}
+                    onChange={(e) => updateMember(i, { panelExtra: Math.max(0, Number(e.target.value) || 0) })}
+                    title={v ? `基礎速度 ${v.base.spd}；例如要 211 就輸入 ${Math.max(0, 211 - v.base.spd)}` : "輸入基礎速度以外的額外速度"}
+                  />
+                </label>
+                <label>
+                  <span>攻擊順序</span>
+                  <input className="input mono" type="number" min={1} max={10} value={m.order} onChange={(e) => updateMember(i, { order: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} title="1 = 最先出手；接速以下一個 Tick 為目標" />
+                </label>
+                <label>
+                  <span>提條 %</span>
+                  <input className="input mono" type="number" min={0} max={100} value={m.boostPct} onChange={(e) => updateMember(i, { boostPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} title="這隻魔靈會收到的攻擊條 %（例如 風格 S3 全隊 +30）" />
+                </label>
+                <label>
+                  <span>速度強化</span>
+                  <select className="select" value={m.speedBuff ? "on" : "off"} onChange={(e) => updateMember(i, { speedBuff: e.target.value === "on" })}>
+                    <option value="off">無</option>
+                    <option value="on">有（+30%）</option>
+                  </select>
+                </label>
+                <label>
+                  <span>神器速度 +%</span>
+                  <input
+                    className="input mono"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={m.artifactPct}
+                    onChange={(e) => updateMember(i, { artifactPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                    title="神器「速度增加效果 +%」（效果 206）；只有啟用速度強化時才會放大 Buff"
+                  />
                 </label>
                 <label>
                   <span>抵抗下限</span>
@@ -647,6 +816,74 @@ export default function TeamOptimizerPage() {
             </div>
           );
         })}
+      </div>
+
+      {/* 即時接速 */}
+      <div className="card card-pad" style={{ marginTop: 12 }}>
+        <div className="row between wrap" style={{ gap: 8 }}>
+          <div>
+            <div className="card-title row" style={{ gap: 7 }}>
+              <Gauge size={14} className="gold" /> 接速最低要求
+            </div>
+            <div className="tiny dim" style={{ marginTop: 3, maxWidth: 760 }}>
+              依攻擊順序串接：後一隻要在前一隻出手後的下一個 Tick 出手。已扣除提條，並在啟用速度強化時除以 Buff 倍率（神器「速度增加效果」會再放大 Buff）。
+            </div>
+          </div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            <span className="chip muted">每 Tick {rta ? "1.5%" : "7%"}</span>
+            <button type="button" className="btn btn-sm" onClick={applyAllFollow}>
+              <Gauge size={12} /> 全部套用接速
+            </button>
+          </div>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(235px, 1fr))", gap: 8, marginTop: 10 }}>
+          {orderedFollow.map((r) => {
+            const v = viewOf(members[r.index]?.unitId ?? 0);
+            const shownTick = r.panelSpd != null ? r.panelTick : r.currentTick;
+            const exactTick = shownTick != null && r.targetTick != null && shownTick === r.targetTick;
+            const hasSpeed = r.panelSpd != null || r.currentSpd != null;
+            const statusClass = !hasSpeed ? "muted" : exactTick ? "green" : "red";
+            return (
+              <div key={r.index} className="team-result-member" style={{ padding: 9 }}>
+                <div className="row between" style={{ gap: 6 }}>
+                  <span className="chip gold">順序 {r.position + 1}</span>
+                  <span className="tiny dim">{r.anchorTick != null ? `接 T${r.anchorTick}` : "起手"}</span>
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 12.5, marginTop: 6 }}>
+                  {v ? monsterLabel(v.monster.id) : "尚未選擇"}
+                </div>
+                <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 4 }}>
+                  <span>目標 T{r.targetTick ?? "—"}</span>
+                  <span>提條 {r.boostPct}%</span>
+                  {r.buffPct > 0 && <span className="gold">強化 +{Math.round(r.buffPct * 10) / 10}%</span>}
+                </div>
+                <div className="row between" style={{ gap: 6, marginTop: 6 }}>
+                  <span className="tiny dim">
+                    最低 <b className="gold mono">{Number.isFinite(r.minSpeed) ? r.minSpeed : "—"}</b>
+                  </span>
+                  <span className={`chip ${statusClass}`} title={shownTick != null ? `實際出手 T${shownTick}` : ""}>
+                    {r.panelSpd != null ? `面板 ${r.panelSpd}` : r.currentSpd != null ? `目前 ${r.currentSpd}` : "未選"}
+                    {shownTick != null ? ` · T${shownTick} ${exactTick ? "✓" : "✗"}` : ""}
+                  </span>
+                </div>
+                <div className="row between" style={{ gap: 6, marginTop: 6 }}>
+                  <span className="tiny dim">
+                    {r.panelTick != null ? `面板出手 T${r.panelTick}` : r.currentTick != null ? `目前出手 T${r.currentTick}` : "面板速度未設定"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    disabled={!v || !Number.isFinite(r.minSpeed)}
+                    onClick={() => applyFollowFloor(r.index)}
+                  >
+                    套用下限
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* 供給檢查 + 執行 */}
@@ -807,6 +1044,59 @@ export default function TeamOptimizerPage() {
         </div>
       )}
 
+      {/* 從預設隊儲存庫載入 */}
+      {deckOpen && (
+        <Modal title="從預設隊儲存庫載入" onClose={() => setDeckOpen(false)} width={820}>
+          <div className="st-modal-sec">
+            <div className="row between wrap" style={{ gap: 8 }}>
+              <div>
+                <div className="st-modal-label">預設隊</div>
+                <div className="tiny dim">載入後會依目前隊型的角色順序帶入，仍可再調整攻擊順序、提條與速度強化。</div>
+              </div>
+              <span className="chip gold">{deckFavs.length} 組</span>
+            </div>
+            <label className="row tiny" style={{ gap: 6, marginTop: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={pinDeckRunes} onChange={(e) => setPinDeckRunes(e.target.checked)} />
+              同時固定儲存庫中的符文（預設關閉，讓引擎重新分配）
+            </label>
+          </div>
+
+          <div className="st-modal-sec">
+            {deckFavs.length === 0 ? (
+              <div className="tiny dim">
+                還沒有儲存的預設隊。可以先在「一鍵配隊」跑出結果後按「儲存到儲存庫」。
+              </div>
+            ) : (
+              <div className="col" style={{ gap: 8 }}>
+                {[...deckFavs]
+                  .sort((a, b) => b.createdAt - a.createdAt)
+                  .map((d) => (
+                    <div key={d.id} className="row between wrap" style={{ gap: 8 }}>
+                      <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                        <div className="row" style={{ gap: 2 }}>
+                          {d.units.slice(0, 5).map((u) => <MonsterIcon key={u.unitId} id={u.master} size={26} />)}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600 }}>
+                            {deckTypeLabel(d.type)} · 第 {d.seq} 隊
+                          </div>
+                          <div className="tiny dim">
+                            {d.units.length} 隻 · {d.name}
+                            {d.battlePower ? ` · 戰力 ${fmt(d.battlePower)}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => loadDeck(d)}>
+                        載入
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
       {/* 魔靈選擇（與 Speed Tick 相同的卡片式選單） */}
       {pickerIndex >= 0 && (
         <MonsterPickerModal
@@ -819,7 +1109,16 @@ export default function TeamOptimizerPage() {
             meta: `${v._dup ? `#${v.unit.id} · ` : ""}${v.monster.nat}★ · ${v.runes.length}/6 符文 · SPD ${v.stats.spd} · T${v.stats.tick}`,
           }))}
           onPick={(e) => {
-            updateMember(pickerIndex, { unitId: Number(e.key), includeRunes: [] });
+            const unitId = Number(e.key);
+            const picked = viewOf(unitId);
+            updateMember(pickerIndex, {
+              unitId,
+              includeRunes: [],
+              // 換魔靈時基礎速度會變，面板額外速度重新設定
+              panelExtra: 0,
+              // 自動帶入該魔靈神器上的「速度增加效果 +%」
+              artifactPct: picked ? artifactSpeedBuffPct(picked.artifacts) : 0,
+            });
             setPickerIndex(-1);
           }}
           onClose={() => setPickerIndex(-1)}

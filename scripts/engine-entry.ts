@@ -8,6 +8,7 @@ export * from "../src/lib/rta";
 export * from "../src/lib/adCalculator";
 export * from "../src/lib/deckSpeed";
 export * from "../src/lib/speedTick";
+export * from "../src/lib/teamSpeed";
 export * from "../src/lib/teamOptimizer";
 export * from "../src/lib/teamTemplates";
 export { parseAccountJSON, exportAccount } from "../src/lib/parse";

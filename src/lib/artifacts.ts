@@ -116,6 +116,16 @@ export function artifactSubValue(art: Artifact, effect: number): number {
   return v;
 }
 
+/**
+ * 神器「速度增加效果 +%」（效果 206）的總和。
+ * 這個效果只會放大「速度 Buff」，本身不會直接加面板速度；
+ * 有兩件神器時分別取每件的最高數值再加總。
+ */
+export function artifactSpeedBuffPct(artifacts: Artifact[] | undefined): number {
+  let total = 0;
+  for (const art of artifacts ?? []) total += artifactSubValue(art, 206);
+  return total;
+}
 
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
