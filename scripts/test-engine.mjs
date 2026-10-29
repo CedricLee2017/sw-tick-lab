@@ -41,7 +41,7 @@ const {
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
   computeFollowPlan, mirrorTimeline, followSpeedAgainstOpponent, opponentAttackBar,
-  panelSpeed, panelExtraFor, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost,
+  panelSpeed, panelExtraFor, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
 } = engine;
@@ -1583,6 +1583,39 @@ check("接速：起手沒有下限，之後每隻都要贏過鏡像對手", () =
   // 兩隻都夠快，第一時間都是 T5；實際誰先出手由攻擊條 / 順序決定（見鏡像順序測試）
   assert.equal(plan[2].panelTick, 5);
   assert.equal(plan[2].effectiveTick, 5);
+});
+
+check("接速：速度隊長技以基礎速度計算，每隻可個別覆寫", () => {
+  assert.equal(leadBonus(111, 0), 0);
+  assert.equal(leadBonus(111, 30), 34); // 33.3 → 34
+  assert.equal(leadBonus(103, 30), 31);
+  assert.equal(leadBonus(107, 30), 33); // 32.1 → 33
+  assert.equal(panelSpeed(111, 230, 30), 375);
+  assert.equal(panelExtraFor(111, 375, 30), 230);
+  assert.equal(panelExtraFor(103, 289, 30), 155);
+
+  const plan = computeFollowPlan([
+    { order: 1, baseSpd: 111, panelExtra: 246, leadPct: 30 }, // 111 + 34 + 246 = 391 → T4
+    { order: 2, baseSpd: 103, panelExtra: 155, leadPct: 30, boostPct: 30, speedBuff: true }, // 289
+    { order: 3, baseSpd: 107, panelExtra: 184, leadPct: 0, boostPct: 30, speedBuff: true }, // 291（這隻不吃隊長技）
+  ], 7);
+
+  assert.equal(plan[0].leadPct, 30);
+  assert.equal(plan[0].leadFlat, 34);
+  assert.equal(plan[0].panelSpd, 391);
+  assert.equal(plan[0].panelTick, 4);
+
+  assert.equal(plan[1].leadFlat, 31);
+  assert.equal(plan[1].panelSpd, 289);
+  assert.equal(plan[1].minSpeed, 289);
+  assert.equal(plan[1].met, true);
+  assert.equal(plan[1].panelTick, 5);
+
+  assert.equal(plan[2].leadPct, 0);
+  assert.equal(plan[2].leadFlat, 0);
+  assert.equal(plan[2].panelSpd, 291);
+  assert.equal(plan[2].minSpeed, 291);
+  assert.equal(plan[2].met, true);
 });
 
 check("接速：目標 Tick 依攻擊順序串接，不是用最早滿 100% 的 Tick", () => {

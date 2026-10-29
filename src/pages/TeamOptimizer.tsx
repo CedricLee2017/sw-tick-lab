@@ -10,11 +10,11 @@ import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPic
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import { setSummary, speedForTick } from "../lib/stats";
 import {
-  DECK_CONTEXT_LABEL, SPD_AREA_LABEL, deckContext, spdLeaderApplies, spdLeaderSkill, type DeckContext,
+  DECK_CONTEXT_LABEL, deckContext, type DeckContext,
 } from "../lib/deckSpeed";
 import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
-import { computeFollowPlan, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
+import { computeFollowPlan, leadBonus, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
 import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply,
   type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
@@ -48,6 +48,8 @@ interface MemberDraft {
   speedBuff: boolean;
   /** 神器「速度增加效果 +%」 */
   artifactPct: number;
+  /** 速度隊長技 %；null = 跟隨全隊數值，0 = 這隻不吃隊長技 */
+  leadPct: number | null;
   focus: FocusEntry[];
   /** 使用者按「固定這隻」後鎖住的符文 */
   includeRunes: number[];
@@ -107,6 +109,7 @@ function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
     boostPct: t.boostPct ?? 0,
     speedBuff: t.speedBuff ?? false,
     artifactPct: t.artifactPct ?? 0,
+    leadPct: null,
     focus: t.focus.map((f) => ({ ...f })),
     includeRunes: [],
   };
@@ -134,7 +137,8 @@ export default function TeamOptimizerPage() {
   const [size, setSize] = useState<Size>(3);
   const [content, setContent] = useState<DeckContext>("guild");
   const [members, setMembers] = useState<MemberDraft[]>(initialMembers);
-  const [leaderUnitId, setLeaderUnitId] = useState(0);
+  /** 全隊速度隊長技 %（0 = 沒有）；每隻可在卡片上個別覆寫 */
+  const [leadPct, setLeadPct] = useState(0);
   const [budgetKey, setBudgetKey] = useState<BudgetKey>("standard");
 
   const [running, setRunning] = useState(false);
@@ -169,11 +173,7 @@ export default function TeamOptimizerPage() {
     });
   }, [account, summary]);
 
-  // 隊長一定要在隊伍裡
-  useEffect(() => {
-    const ids = members.map((m) => m.unitId).filter((id) => id > 0);
-    if (!ids.includes(leaderUnitId)) setLeaderUnitId(ids[0] ?? 0);
-  }, [members, leaderUnitId]);
+  // 隊長技全部由數值欄位決定，不再依魔靈自動判斷
 
   useEffect(() => () => {
     workerRef.current?.terminate();
@@ -249,7 +249,6 @@ export default function TeamOptimizerPage() {
     // 類型 0 是工具自己的自訂配隊，沒有內容資訊，保留目前選擇
     setContent(d.type === 0 ? content : deckContext(d.type));
     setMembers(next);
-    setLeaderUnitId(next.find((m) => m.unitId > 0)?.unitId ?? 0);
     setPlan(null);
     setError(null);
     setDeckOpen(false);
@@ -265,7 +264,10 @@ export default function TeamOptimizerPage() {
     const m = members[index];
     const v = m ? viewOf(m.unitId) : undefined;
     if (!r || !v || !Number.isFinite(r.minSpeed)) return;
-    updateMember(index, { panelExtra: panelExtraFor(v.base.spd, r.minSpeed), speedMode: "panel" });
+    updateMember(index, {
+      panelExtra: panelExtraFor(v.base.spd, r.minSpeed, r.leadPct),
+      speedMode: "panel",
+    });
     notify(`已將 ${monsterLabel(v.monster.id)} 的面板速度設為接速下限 ${r.minSpeed}`);
   };
 
@@ -277,7 +279,7 @@ export default function TeamOptimizerPage() {
       const v = viewOf(m.unitId);
       if (!r || !v || !Number.isFinite(r.minSpeed)) return m;
       count++;
-      const panelExtra = panelExtraFor(v.base.spd, r.minSpeed);
+      const panelExtra = panelExtraFor(v.base.spd, r.minSpeed, r.leadPct);
       return m.panelExtra === panelExtra && m.speedMode === "panel" ? m : { ...m, panelExtra, speedMode: "panel" as const };
     });
     setMembers(next);
@@ -327,6 +329,9 @@ export default function TeamOptimizerPage() {
     setPlan(null);
   };
 
+  /** 每隻實際套用的速度隊長技 %（卡片留空 = 跟隨全隊數值） */
+  const leadPctOf = (m: MemberDraft) => Math.max(0, m.leadPct ?? leadPct);
+
   const selected = members.filter((m) => m.unitId > 0);
   const teamIds = selected.map((m) => m.unitId);
 
@@ -346,13 +351,14 @@ export default function TeamOptimizerPage() {
           boostPct: m.boostPct,
           speedBuff: m.speedBuff,
           artifactPct: m.artifactPct,
+          leadPct: leadPctOf(m),
           currentSpd: v?.stats.spd ?? 0,
         };
       }),
       rate,
       { opponentSpeed: oppSpd },
     );
-  }, [members, summary, rta, oppSpd]);
+  }, [members, summary, rta, oppSpd, leadPct]);
 
   /** 鏡像對戰的實際出手順序：只顯示到「對手第一次出手」為止，最多一個循環 */
   const mirrorSteps = useMemo(() => {
@@ -420,13 +426,6 @@ export default function TeamOptimizerPage() {
     [account, teamIds, members.length, settings.excludedRunes, settings.lockedRunes],
   );
 
-  const leaderView = viewOf(leaderUnitId);
-  const leaderSkill = leaderView ? spdLeaderSkill(leaderView.monster.id) : null;
-  const leadPctFor = (v: UnitView | undefined) => {
-    if (!v || !leaderSkill) return 0;
-    return spdLeaderApplies(leaderSkill, v.monster.el, content) ? leaderSkill.p : 0;
-  };
-
   const owned = useMemo(() => {
     if (!summary) return [] as OwnedUnit[];
     const dup = new Map<number, number>();
@@ -446,8 +445,11 @@ export default function TeamOptimizerPage() {
       if (m.set2 && m.set2 !== m.set4) sets.push({ set: m.set2, count: 2 });
 
       const min: Partial<Record<StatKey, number>> = { ...m.min };
-      // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度以外的額外速度」
-      const panelSpd = m.speedMode !== "tick" && m.panelExtra > 0 ? v.base.spd + m.panelExtra : 0;
+      // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度與隊長技以外的額外速度」
+      const panelSpd =
+        m.speedMode !== "tick" && m.panelExtra > 0
+          ? v.base.spd + leadBonus(v.base.spd, leadPctOf(m)) + m.panelExtra
+          : 0;
       if (panelSpd > 0) min.spd = panelSpd;
       else if (m.speedMode === "tick" && m.tick > 0) min.spd = speedForTick(m.tick, rta);
       else delete min.spd;
@@ -471,7 +473,7 @@ export default function TeamOptimizerPage() {
         min,
         focus: m.focus,
         includeRunes: [...bySlot.values()],
-        leadSpd: leadPctFor(v),
+        leadSpd: leadPctOf(m),
         objective: roleObjective(m.role),
       });
     }
@@ -703,13 +705,22 @@ export default function TeamOptimizerPage() {
           <select className="select" style={{ width: 180 }} value={content} onChange={(e) => { setContent(e.target.value as DeckContext); setPlan(null); }}>
             {(["arena", "guild", "dungeon"] as DeckContext[]).map((c) => <option key={c} value={c}>{DECK_CONTEXT_LABEL[c]}</option>)}
           </select>
-          <select className="select" style={{ width: 170 }} value={leaderUnitId} onChange={(e) => { setLeaderUnitId(Number(e.target.value)); setPlan(null); }}>
-            <option value={0}>隊長：未選擇</option>
-            {members.filter((m) => m.unitId > 0).map((m) => {
-              const v = viewOf(m.unitId);
-              return <option key={m.unitId} value={m.unitId}>隊長：{v ? monsterLabel(v.monster.id) : `#${m.unitId}`}</option>;
-            })}
-          </select>
+          <label className="row" style={{ gap: 6 }}>
+            <span className="tiny dim">速度隊長技 %</span>
+            <input
+              className="input mono"
+              style={{ width: 84 }}
+              type="number"
+              min={0}
+              max={50}
+              value={leadPct}
+              onChange={(e) => {
+                setLeadPct(Math.max(0, Math.min(50, Number(e.target.value) || 0)));
+                setPlan(null);
+              }}
+              title="全隊速度隊長技加成，以每隻的基礎速度計算；0 = 沒有隊長技"
+            />
+          </label>
           <select className="select" style={{ width: 170 }} value={budgetKey} onChange={(e) => setBudgetKey(e.target.value as BudgetKey)}>
             {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => <option key={k} value={k}>預算：{BUDGETS[k].label}（{BUDGETS[k].hint}）</option>)}
           </select>
@@ -717,11 +728,9 @@ export default function TeamOptimizerPage() {
 
         <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
           <span className="tiny" style={{ color: "var(--gold, #f2c65c)" }}>
-            {leaderView
-              ? leaderSkill
-                ? `隊長技：${monsterLabel(leaderView.monster.id)} 速度 +${leaderSkill.p}%（${SPD_AREA_LABEL[leaderSkill.a] ?? "全內容"}）`
-                : "此魔靈沒有速度隊長技；V1 只計入速度隊長技，其餘隊長技不套用"
-              : "尚未選擇隊長"}
+            {leadPct > 0
+              ? `速度隊長技：每隻基礎速度 +${leadPct}%（可在成員卡片個別調整，留空 = 跟隨全隊）`
+              : "速度隊長技：0%（可在成員卡片輸入個別數值，例如只有部分屬性／內容吃得到）"}
           </span>
           {rta && <span className="tiny dim">RTA 模式：Tick 以 1.5% 計算，且不含一般建築</span>}
         </div>
@@ -755,14 +764,25 @@ export default function TeamOptimizerPage() {
                   <span>目前 SPD <b className="gold">{v.stats.spd}</b></span>
                   <span>基礎 {v.base.spd}</span>
                   {m.speedMode !== "tick" && m.panelExtra > 0 && (
-                    <span>面板 <b className="gold">{v.base.spd + m.panelExtra}</b></span>
+                    <span>
+                      面板{" "}
+                      <b className="gold">
+                        {v.base.spd + leadBonus(v.base.spd, leadPctOf(m)) + m.panelExtra}
+                      </b>
+                      {leadPctOf(m) > 0 && (
+                        <span className="dim">
+                          （{v.base.spd} + 隊長 {leadBonus(v.base.spd, leadPctOf(m))} + 額外{" "}
+                          {m.panelExtra}）
+                        </span>
+                      )}
+                    </span>
                   )}
                   {m.speedMode !== "tick" && m.panelExtra === 0 && m.tick > 0 && (
                     <span className="chip muted" title="目前是面板速度模式，目標 Tick 不會套用；切換成「目標 Tick」才會使用">Tick T{m.tick} 未套用</span>
                   )}
                   <span>T{v.stats.tick}</span>
                   <span>{v.runes.length}/6 符文</span>
-                  {m.unitId === leaderUnitId && <span className="chip gold">隊長</span>}
+                  {leadPctOf(m) > 0 && <span className="chip gold">隊長 +{leadPctOf(m)}%</span>}
                   {pinned && <span className="chip green"><Pin size={10} /> 已固定</span>}
                 </div>
               )}
@@ -811,7 +831,11 @@ export default function TeamOptimizerPage() {
                       value={m.panelExtra || ""}
                       placeholder={v ? `基礎 ${v.base.spd}` : "基礎 ?"}
                       onChange={(e) => updateMember(i, { panelExtra: Math.max(0, Number(e.target.value) || 0) })}
-                      title={v ? `基礎速度 ${v.base.spd}；例如要 211 就輸入 ${Math.max(0, 211 - v.base.spd)}` : "輸入基礎速度以外的額外速度"}
+                      title={
+                        v
+                          ? `基礎速度 ${v.base.spd} + 隊長技 ${leadBonus(v.base.spd, leadPctOf(m))} + 額外速度；例如要 391 就輸入 ${Math.max(0, 391 - v.base.spd - leadBonus(v.base.spd, leadPctOf(m)))}`
+                          : "輸入基礎速度與隊長技以外的額外速度"
+                      }
                     />
                   </label>
                 ) : (
@@ -827,6 +851,26 @@ export default function TeamOptimizerPage() {
                 <label>
                   <span>提條 %</span>
                   <input className="input mono" type="number" min={0} max={100} value={m.boostPct} onChange={(e) => updateMember(i, { boostPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} title="這隻魔靈會收到的攻擊條 %（例如 風格 S3 全隊 +30）" />
+                </label>
+                <label>
+                  <span>隊長技 %</span>
+                  <input
+                    className="input mono"
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={m.leadPct ?? ""}
+                    placeholder={`全隊 ${leadPct}`}
+                    onChange={(e) =>
+                      updateMember(i, {
+                        leadPct:
+                          e.target.value === ""
+                            ? null
+                            : Math.max(0, Math.min(50, Number(e.target.value) || 0)),
+                      })
+                    }
+                    title="速度隊長技加成（以這隻的基礎速度計算）；留空 = 跟隨全隊，輸入 0 = 這隻不吃隊長技"
+                  />
                 </label>
                 <label>
                   <span>速度強化</span>
@@ -1031,11 +1075,11 @@ export default function TeamOptimizerPage() {
                 </div>
 
                 {isOpener ? (
-                  <div className="row between" style={{ gap: 6, marginTop: 8 }}>
+                  <div className="row between wrap" style={{ gap: 6, marginTop: 8 }}>
                     <span className="tiny dim">沒有接速下限</span>
                     <span className="chip muted">
                       {r.panelSpd != null
-                        ? `面板 ${r.panelSpd} → T${r.panelTick ?? "—"}`
+                        ? `面板 ${r.panelSpd}（${v ? v.base.spd : "—"}${r.leadFlat > 0 ? ` + ${r.leadFlat}` : ""} + 額外 ${Math.max(0, r.panelSpd - (v?.base.spd ?? 0) - r.leadFlat)}）→ T${r.panelTick ?? "—"}`
                         : r.currentSpd != null
                           ? `目前 ${r.currentSpd} → T${r.currentTick ?? "—"}`
                           : "尚未設定速度"}
@@ -1043,12 +1087,20 @@ export default function TeamOptimizerPage() {
                   </div>
                 ) : (
                   <>
-                    <div className="row between" style={{ gap: 6, marginTop: 7 }}>
+                    <div className="row between wrap" style={{ gap: 6, marginTop: 7 }}>
                       <span className="tiny dim">
                         最低速度{" "}
                         <b className={hasTarget ? "gold mono" : "muted mono"}>
                           {hasTarget && Number.isFinite(r.minSpeed) ? r.minSpeed : "—"}
                         </b>
+                        {hasTarget && v && Number.isFinite(r.minSpeed) && (
+                          <span className="dim mono">
+                            {" "}
+                            （{v.base.spd}
+                            {r.leadFlat > 0 ? ` + 隊長 ${r.leadFlat}` : ""} + 額外{" "}
+                            {Math.max(0, r.minSpeed - v.base.spd - r.leadFlat)}）
+                          </span>
+                        )}
                       </span>
                       <span className="tiny dim">
                         對手攻擊條 <b className="mono">{r.opponentAb ? `${r.opponentAb.toFixed(1)}%` : "—"}</b>

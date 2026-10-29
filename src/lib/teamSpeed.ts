@@ -13,14 +13,15 @@
  * - 面板速度與目標 Tick 二選一（預設面板速度）。
  *
  * 公式（ratePct = 每 Tick 攻擊條 %，一般 7、RTA 1.5）：
+ *   面板速度 = 基礎速度 + ceil(基礎速度 × 速度隊長技%) + 額外速度（符文 / 其他）
  *   weightedTicks(n) = n + Buff% × max(0, n − 起手 Tick)
  *   我方攻擊條(n) = 面板速度 × ratePct/100 × weightedTicks(n) + 提條%
  *   對手攻擊條(n) = 鏡像對手速度 × ratePct/100 × n
  *   最低速度 = 最小的整數 S，使 我方攻擊條(目標 Tick) ≥ 對手攻擊條(目標 Tick)
  *
  * 例：風格 391（T4）提條 30%、速度強化 30%
- *   風武士要接 T5：對手攻擊條 = 391 × 7% × 5 = 136.9%，最低 289
- *   風忍要接 T6：對手攻擊條 = 391 × 7% × 6 = 164.2%，最低 291
+ *   風武士要接 T5：對手攻擊條 = 391 × 7% × 5 = 136.9%，最低 289（基礎 103 + 額外 186）
+ *   風忍要接 T6：對手攻擊條 = 391 × 7% × 6 = 164.2%，最低 291（基礎 107 + 額外 184）
  */
 
 export const SPEED_BUFF_BASE_PCT = 30;
@@ -35,16 +36,32 @@ export function speedBuffPct(active: boolean, artifactPct = 0): number {
   return SPEED_BUFF_BASE_PCT * (1 + Math.max(0, finite(artifactPct)) / 100);
 }
 
-/** 面板總速度；額外速度未設定（0）時回傳 null */
-export function panelSpeed(baseSpd: number, extra: number): number | null {
+/**
+ * 速度隊長技帶來的固定速度：以「基礎速度 × %」計算並向上取整，
+ * 與遊戲面板（先算基礎速度的百分比、再加符文速度）一致。
+ */
+export function leadBonus(baseSpd: number, leadPct = 0): number {
   const base = Math.max(0, finite(baseSpd));
-  const add = Math.max(0, finite(extra));
-  return add > 0 ? base + add : null;
+  const pct = Math.max(0, finite(leadPct));
+  return pct > 0 ? Math.ceil((base * pct) / 100) : 0;
 }
 
-/** 由目標面板總速度換算成「基礎速度以外的額外速度」 */
-export function panelExtraFor(baseSpd: number, totalSpd: number): number {
-  return Math.max(0, Math.round(finite(totalSpd) - Math.max(0, finite(baseSpd))));
+/**
+ * 面板總速度 = 基礎速度 + 隊長技加成 + 額外速度（符文 / 其他）。
+ * 額外速度未設定（0）時回傳 null（代表「尚未指定面板速度」）。
+ */
+export function panelSpeed(baseSpd: number, extra: number, leadPct = 0): number | null {
+  const base = Math.max(0, finite(baseSpd));
+  const add = Math.max(0, finite(extra));
+  return add > 0 ? base + leadBonus(base, leadPct) + add : null;
+}
+
+/** 由目標面板總速度換算成「基礎速度與隊長技以外的額外速度」 */
+export function panelExtraFor(baseSpd: number, totalSpd: number, leadPct = 0): number {
+  return Math.max(
+    0,
+    Math.round(finite(totalSpd) - Math.max(0, finite(baseSpd)) - leadBonus(baseSpd, leadPct)),
+  );
 }
 
 /**
@@ -180,6 +197,8 @@ export interface FollowMemberInput {
   speedBuff?: boolean;
   /** 神器「速度增加效果 +%」 */
   artifactPct?: number;
+  /** 速度隊長技 %（以這隻的基礎速度計算；0 / 未設定 = 沒有隊長技） */
+  leadPct?: number;
   /** 沒有面板速度 / 目標 Tick 時，用目前裝備的速度當起手基準 */
   currentSpd?: number;
 }
@@ -196,6 +215,10 @@ export interface FollowMemberResult<T extends FollowMemberInput = FollowMemberIn
   targetTick: number | null;
   /** 依面板額外速度算出的總速度；未設定為 null */
   panelSpd: number | null;
+  /** 這隻套用的速度隊長技 % */
+  leadPct: number;
+  /** 速度隊長技帶來的固定速度（基礎 × %，向上取整） */
+  leadFlat: number;
   /** 面板速度（含速度強化）第一次出手的 Tick */
   panelTick: number | null;
   /** 目前裝備速度（未 Buff 面板速度）；沒有目前速度時為 null */
@@ -255,7 +278,11 @@ export function computeFollowPlan<T extends FollowMemberInput>(
   // 起手：只用面板速度 / 目標 Tick / 目前速度決定自己的 Tick
   const opener = ordered[0].member;
   const openerMode: SpeedMode = opener.mode ?? "panel";
-  const openerPanel = openerMode === "panel" ? panelSpeed(opener.baseSpd, opener.panelExtra ?? 0) : null;
+  const openerLeadPct = Math.max(0, finite(opener.leadPct));
+  const openerPanel =
+    openerMode === "panel"
+      ? panelSpeed(opener.baseSpd, opener.panelExtra ?? 0, openerLeadPct)
+      : null;
   const openerCurrent = Math.max(0, finite(opener.currentSpd));
   const openerTick =
     openerMode === "tick" && finite(opener.tick) > 0
@@ -275,11 +302,15 @@ export function computeFollowPlan<T extends FollowMemberInput>(
     const mode: SpeedMode = member.mode ?? "panel";
     const boostPct = clamp(finite(member.boostPct), 0, 100);
     const buffPct = speedBuffPct(!!member.speedBuff, member.artifactPct);
+    // 速度隊長技對全隊都有效（含起手），以這隻自己的基礎速度計算
+    const leadPct = Math.max(0, finite(member.leadPct));
+    const leadFlat = leadBonus(member.baseSpd, leadPct);
     // 起手自己不會吃到自己的提條 / 速度強化
     const start = position === 0 ? 0 : buffStart;
     const ownBuff = position === 0 ? 0 : buffPct;
     const ownBoost = position === 0 ? 0 : boostPct;
-    const panelSpd = mode === "panel" ? panelSpeed(member.baseSpd, member.panelExtra ?? 0) : null;
+    const panelSpd =
+      mode === "panel" ? panelSpeed(member.baseSpd, member.panelExtra ?? 0, leadPct) : null;
     const panelTick =
       panelSpd != null
         ? tickAfterBoost({
@@ -343,6 +374,8 @@ export function computeFollowPlan<T extends FollowMemberInput>(
       anchorTick,
       targetTick,
       panelSpd,
+      leadPct,
+      leadFlat,
       panelTick: Number.isFinite(panelTick) ? panelTick : null,
       currentSpd: current > 0 ? current : null,
       currentTick: Number.isFinite(currentTick) ? currentTick : null,
@@ -369,6 +402,10 @@ export function computeFollowPlan<T extends FollowMemberInput>(
  * 用「攻擊條溢出」規則模擬鏡像對戰，回傳每一 Tick 誰先出手。
  * 我方拿到提條與速度強化，鏡像對手只有相同速度（沒有提條 / Buff）。
  * 攻擊條相同時我方先出手（進攻方優先）。
+ *
+ * 我方成員只會在「排定的 Tick」之後才出手（起手 T、之後 T+1、T+2…），
+ * 這樣模擬結果才會和每隻的接速判定一致；比排定更早滿 100% 的情况
+ * 由畫面上的「最早 T」提示，不在這裡插隊。
  */
 export function mirrorTimeline(
   plan: FollowMemberResult[],
@@ -385,6 +422,10 @@ export function mirrorTimeline(
   const spdOf = (p: FollowMemberResult) => p.panelSpd ?? p.currentSpd ?? 0;
   const allies = plan.filter((p) => spdOf(p) > 0 && p.position >= 0);
   if (!allies.length) return [];
+
+  /** 這隻最早可以在哪個 Tick 出手（排定順序） */
+  const readyOf = (p: FollowMemberResult) =>
+    p.position === 0 ? T : (p.targetTick ?? T + p.position);
 
   const bars = new Map<string, number>();
   const keyOf = (team: "ally" | "opponent", index: number) => `${team}:${index}`;
@@ -410,6 +451,7 @@ export function mirrorTimeline(
       for (const team of ["ally", "opponent"] as const) {
         const ab = bars.get(keyOf(team, p.index)) ?? 0;
         if (ab < 100 - 1e-9) continue;
+        if (team === "ally" && tick < readyOf(p)) continue;
         const candidate = { team, index: p.index, ab, position: p.position };
         if (!best) {
           best = candidate;
