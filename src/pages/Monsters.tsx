@@ -3,7 +3,7 @@ import { Search, Users, Wand2 } from "lucide-react";
 import { useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
-import { Modal, MonsterIcon, RuneCard, ArtifactCard, StatGrid, TickBadge, fmt, setColor } from "../components/ui";
+import { Modal, MonsterIcon, MonsterPanel, RuneCard, ArtifactCard, TickBadge, fmt, setColor } from "../components/ui";
 import { setSummary } from "../lib/stats";
 
 export default function MonstersPage() {
@@ -95,19 +95,20 @@ export default function MonstersPage() {
 
       {current && (
         <Modal title={current.monster.name} onClose={() => setOpen(null)} width={820}>
-          <div className="row" style={{ gap: 14, alignItems: "flex-start" }}>
-            <MonsterIcon id={current.monster.id} size={72} />
-            <div style={{ flex: 1 }}>
-              <div className="row" style={{ gap: 8, marginBottom: 4 }}>
-                <span className={`chip el-${current.monster.el}`} style={{ borderColor: "transparent", background: "rgba(255,255,255,.04)" }}>
-                  {ELEMENTS[current.monster.el as 1].name}屬性
-                </span>
-                <span className="chip gold">{current.monster.nat}★ 原生</span>
-                <span className="chip muted">{current.unit.stars}★ Lv.{current.unit.level}</span>
-                <TickBadge spd={current.stats.spd} rta={rta} />
-              </div>
-              <StatGrid stats={current.stats} />
-            </div>
+          <MonsterPanel
+            monster={current.monster}
+            base={current.base}
+            stats={current.stats}
+            stars={current.unit.stars}
+            level={current.unit.level}
+            artifacts={current.artifacts}
+            badge={<TickBadge spd={current.stats.spd} rta={rta} />}
+          />
+
+          <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+            <span className="chip gold">{current.monster.nat}★ 原生</span>
+            <span className="chip muted">符文 {current.runes.length}/6</span>
+            <span className="chip muted">神器 {current.artifacts.length}/2</span>
           </div>
 
           <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>

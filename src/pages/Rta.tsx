@@ -5,7 +5,7 @@ import { ELEMENTS } from "../lib/constants";
 import { rtaView, type RtaView } from "../lib/rta";
 import { setSummary } from "../lib/stats";
 import type { Monster } from "../lib/types";
-import { ArtifactCard, Modal, MonsterIcon, RuneCard, StatGrid, TickBadge, fmt } from "../components/ui";
+import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, RuneCard, TickBadge, fmt } from "../components/ui";
 
 type RtaRow = RtaView & { monster: Monster };
 
@@ -191,20 +191,18 @@ export default function RtaPage() {
 
       {current && (
         <Modal title={`${current.monster.name} · RTA 配裝`} onClose={() => setOpen(null)} width={860}>
-          <div className="row" style={{ gap: 14, alignItems: "flex-start" }}>
-            <MonsterIcon id={current.monster.id} size={72} />
-            <div style={{ flex: 1 }}>
-              <div className="row wrap" style={{ gap: 8, marginBottom: 4 }}>
-                <span className={`chip el-${current.monster.el}`} style={{ borderColor: "transparent", background: "rgba(255,255,255,.04)" }}>
-                  {ELEMENTS[current.monster.el as 1].name}屬性
-                </span>
-                <span className="chip gold">{current.monster.nat}★ 原生</span>
-                <span className="chip muted">{current.unit.stars}★ Lv.{current.unit.level}</span>
-                <TickBadge spd={current.stats.spd} rta />
-                <span className="chip muted">RTA 獨立配裝</span>
-              </div>
-              <StatGrid stats={current.stats} />
-            </div>
+          <MonsterPanel
+            monster={current.monster}
+            base={current.base}
+            stats={current.stats}
+            stars={current.unit.stars}
+            level={current.unit.level}
+            artifacts={current.artifacts}
+            badge={<TickBadge spd={current.stats.spd} rta />}
+          />
+          <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+            <span className="chip gold">{current.monster.nat}★ 原生</span>
+            <span className="chip muted">RTA 獨立配裝</span>
           </div>
 
           <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>

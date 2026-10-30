@@ -3,9 +3,8 @@ import { Sparkles, X } from "lucide-react";
 import { MONSTER_MAP, monsterLabel, useStore, type Loadout } from "../store";
 import { ArtifactStage } from "../components/ArtifactStage";
 import { DamagePanel } from "../components/DamagePanel";
-import { ArtifactCard, MonsterIcon, StatGrid, TickBadge } from "../components/ui";
+import { ArtifactCard, MonsterIcon, MonsterPanel, TickBadge } from "../components/ui";
 import { MonsterPickerField } from "../components/MonsterPicker";
-import { ELEMENTS } from "../lib/constants";
 import { defaultSkill, loadSkillData, skillsForMonster, type DamageOptions, type SkillData } from "../lib/damage";
 import { baseStats, statsForRunes } from "../lib/stats";
 import type { Build } from "../lib/optimizer";
@@ -175,29 +174,32 @@ export default function ArtifactOptimizerPage() {
         </div>
 
         {picked && monster && unit ? (
-          <div className="row" style={{ gap: 14, alignItems: "flex-start", marginTop: 12 }}>
-            <MonsterIcon id={monster.id} size={64} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="row wrap" style={{ gap: 7, marginBottom: 5 }}>
-                <b>{monster.name}</b>
-                <span className={`el-${monster.el}`} style={{ fontSize: 11 }}>{ELEMENTS[monster.el as 1]?.name}</span>
-                <span className="chip muted">{unit.stars}★ Lv.{unit.level}</span>
-                {currentStats && <TickBadge spd={currentStats.spd} rta={settings.rta} />}
-                <span className="chip muted">{sourceRunes.length}/6 符文</span>
-                <span className="chip muted">目前神器 {currentArtifacts.length}/2</span>
-                {saved && <span className="chip gold" title={saved.name}>使用收藏：{saved.name}</span>}
-              </div>
-              {currentStats && <StatGrid stats={currentStats} compact />}
-              {saved && (
-                <div className="row wrap" style={{ gap: 6, marginTop: 7 }}>
-                  <span className="tiny dim">符文來源：已儲存的配裝（不變動目前裝備）</span>
-                  <button className="btn btn-sm btn-ghost" style={{ padding: "1px 7px", fontSize: 10.5 }} onClick={() => setSaved(null)}>
-                    改用目前裝備
-                  </button>
-                  {missingSaved > 0 && <span className="tiny red">缺少 {missingSaved} 顆符文</span>}
-                </div>
-              )}
+          <div style={{ marginTop: 12 }}>
+            {currentStats && (
+              <MonsterPanel
+                monster={monster}
+                base={baseStats(monster, unit.stars, unit.level)}
+                stats={currentStats}
+                stars={unit.stars}
+                level={unit.level}
+                artifacts={currentArtifacts}
+                badge={<TickBadge spd={currentStats.spd} rta={settings.rta} />}
+              />
+            )}
+            <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+              <span className="chip muted">{sourceRunes.length}/6 符文</span>
+              <span className="chip muted">目前神器 {currentArtifacts.length}/2</span>
+              {saved && <span className="chip gold" title={saved.name}>使用收藏：{saved.name}</span>}
             </div>
+            {saved && (
+              <div className="row wrap" style={{ gap: 6, marginTop: 7 }}>
+                <span className="tiny dim">符文來源：已儲存的配裝（不變動目前裝備）</span>
+                <button className="btn btn-sm btn-ghost" style={{ padding: "1px 7px", fontSize: 10.5 }} onClick={() => setSaved(null)}>
+                  改用目前裝備
+                </button>
+                {missingSaved > 0 && <span className="tiny red">缺少 {missingSaved} 顆符文</span>}
+              </div>
+            )}
           </div>
         ) : (
           <div className="empty tiny" style={{ marginTop: 12 }}>輸入或選擇一隻魔靈，系統會讀取牠目前裝備的符文與神器。</div>

@@ -185,6 +185,93 @@ p { margin: 0; }
 .stat-tile .v { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .stat-tile .u { font-size: 11px; color: var(--muted-2); font-weight: 600; margin-left: 3px; }
 
+/* ── 魔靈資料面板（仿遊戲內魔靈資訊） ─────────────── */
+.mon-panel {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(52, 74, 120, .34), transparent 60%),
+    linear-gradient(180deg, #121a2b, #0b1120);
+  border: 1px solid var(--line);
+}
+.mon-panel.compact { padding: 10px 12px; }
+.mon-panel-head { display: flex; align-items: flex-start; gap: 14px; }
+.mon-panel.compact .mon-panel-head { gap: 10px; }
+.mon-portrait {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 3px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #e8c66a, #8a6520);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+}
+.mon-portrait .mon-icon { display: block; border-radius: 8px; box-shadow: none !important; }
+.mon-el-badge {
+  position: absolute;
+  left: -7px;
+  bottom: -7px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #0b1120;
+  border: 1.5px solid #d9ad4a;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .6);
+}
+.mon-panel.compact .mon-el-badge { width: 20px; height: 20px; left: -6px; bottom: -6px; }
+.mon-panel-id { min-width: 0; flex: 1; }
+.mon-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.mon-title .mon-lv { font-size: 13px; font-weight: 600; color: #dbe5f8; }
+.mon-title .mon-name { font-size: 15.5px; font-weight: 800; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-panel.compact .mon-title .mon-name { font-size: 13.5px; }
+.mon-badge { margin-left: auto; display: flex; align-items: center; }
+.mon-stars { color: #ff6bd6; font-size: 15px; line-height: 1.35; letter-spacing: 2px; text-shadow: 0 0 8px rgba(255, 107, 214, .5); }
+.mon-panel.compact .mon-stars { font-size: 12.5px; letter-spacing: 1px; }
+.mon-art {
+  margin-top: 5px;
+  max-width: 320px;
+  border: 1px solid #59401f;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #3b2a15, #281d0e);
+  overflow: hidden;
+}
+.mon-art > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: #e6c98f;
+  user-select: none;
+}
+.mon-art > summary::-webkit-details-marker { display: none; }
+.mon-art-caret { font-size: 9px; transition: transform .15s; }
+.mon-art[open] .mon-art-caret { transform: rotate(180deg); }
+.mon-art-count { margin-left: auto; color: #b99a63; font-size: 10.5px; }
+.mon-art-body { padding: 2px 9px 7px; }
+.mon-art-item + .mon-art-item { margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, .05); padding-top: 4px; }
+.mon-art-name { font-size: 11px; color: #f0d9a8; }
+.mon-art-sub { font-size: 10.5px; color: var(--muted); line-height: 1.5; }
+.mon-panel-stats { margin-top: 12px; }
+.mon-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2.5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, .035);
+}
+.mon-row:last-child { border-bottom: 0; }
+.mon-row .k { color: #efe2c4; font-size: 12.5px; letter-spacing: .03em; }
+.mon-row .v { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13.5px; text-align: right; white-space: nowrap; }
+.mon-panel.compact .mon-row .k { font-size: 11.5px; }
+.mon-panel.compact .mon-row .v { font-size: 12.5px; }
+.mon-row .v .base { color: #fff; }
+.mon-row .v .add { color: #6ee7a0; margin-left: 7px; }
+
 .table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .table th {
   text-align: left; font-weight: 600; color: var(--muted);

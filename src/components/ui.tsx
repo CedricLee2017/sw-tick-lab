@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { X, Lock, Unlock, Ban } from "lucide-react";
+import { X, Lock, Unlock, Ban, Droplet, Flame, Wind, Sun, Moon } from "lucide-react";
 import { ELEMENTS, SET_BY_ID, STAT_TYPES, type StatKey } from "../lib/constants";
 import { monsterOf } from "../store";
-import type { Artifact, Rune, Stats } from "../lib/types";
+import type { Artifact, Monster, Rune, Stats } from "../lib/types";
+import type { BaseStats } from "../lib/stats";
 import { artifactKindText, artifactMainText, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
 import { tickInfo } from "../lib/optimizer";
 
@@ -76,6 +77,115 @@ export function StatGrid({ stats, compact = false }: { stats: Stats; compact?: b
           <div className="mono" style={{ fontWeight: 700, fontSize: compact ? 12 : 13 }}>{v}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** 屬性圖示（與遊戲面板的屬性徽章對應） */
+const EL_ICON = { 1: Droplet, 2: Flame, 3: Wind, 4: Sun, 5: Moon } as const;
+
+/**
+ * 魔靈資料面板：仿遊戲內魔靈資訊畫面。
+ * 體力／攻擊力／防禦力／攻擊速度顯示「基礎（白）＋加成（綠）」，
+ * 暴擊率／暴傷／抵抗／命中顯示總值。
+ */
+export function MonsterPanel({
+  monster,
+  base,
+  stats,
+  stars = 6,
+  level = 40,
+  artifacts = [],
+  compact = false,
+  badge,
+}: {
+  monster: Monster;
+  /** 星級 / 等級換算後的基礎值；省略時只顯示總值 */
+  base?: BaseStats;
+  stats: Stats;
+  stars?: number;
+  level?: number;
+  /** 已裝備神器（魔礦），顯示在「魔礦效果」內 */
+  artifacts?: Artifact[];
+  compact?: boolean;
+  /** 標題右側的額外資訊（例如 Tick 徽章） */
+  badge?: ReactNode;
+}) {
+  const rows: { label: string; base?: number; value: number; percent?: boolean }[] = [
+    { label: "體力", base: base?.hp, value: stats.hp },
+    { label: "攻擊力", base: base?.atk, value: stats.atk },
+    { label: "防禦力", base: base?.def, value: stats.def },
+    { label: "攻擊速度", base: base?.spd, value: stats.spd },
+    { label: "暴擊率", value: stats.cr, percent: true },
+    { label: "暴擊傷害", value: stats.cd, percent: true },
+    { label: "效果抵抗", value: stats.res, percent: true },
+    { label: "效果命中", value: stats.acc, percent: true },
+  ];
+  const num = (v: number) => Math.round(v * 10) / 10;
+  const Icon = EL_ICON[monster.el as 1 | 2 | 3 | 4 | 5] ?? Droplet;
+  const starCount = Math.max(0, Math.min(6, Math.round(stars)));
+
+  return (
+    <div className={`mon-panel ${compact ? "compact" : ""}`}>
+      <div className="mon-panel-head">
+        <div className="mon-portrait">
+          <MonsterIcon id={monster.id} size={compact ? 58 : 78} className="mon-portrait-img" />
+          <span className={`mon-el-badge el-${monster.el}`} title={ELEMENTS[monster.el as 1]?.name}>
+            <Icon size={compact ? 11 : 13} strokeWidth={2.6} />
+          </span>
+        </div>
+        <div className="mon-panel-id">
+          <div className="mon-title">
+            <Icon size={compact ? 12 : 14} className={`el-${monster.el}`} strokeWidth={2.6} />
+            <span className="mon-lv">Lv.{level}</span>
+            <span className="mon-name">{monster.name}</span>
+            {badge && <span className="mon-badge">{badge}</span>}
+          </div>
+          <div className="mon-stars" title={`${starCount} 星`}>{"★".repeat(starCount)}</div>
+          <details className="mon-art">
+            <summary>
+              <span className="mon-art-caret">▾</span>
+              <span>魔礦效果</span>
+              <span className="mon-art-count">{artifacts.length}/2</span>
+            </summary>
+            {artifacts.length === 0 ? (
+              <div className="mon-art-body tiny dim">沒有裝備神器</div>
+            ) : (
+              <div className="mon-art-body">
+                {artifacts.map((a) => (
+                  <div key={a.id} className="mon-art-item">
+                    <div className="mon-art-name">{artifactKindText(a)} · {artifactMainText(a)}</div>
+                    <div className="mon-art-sub">{artifactSubsText(a) || "—"}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </details>
+        </div>
+      </div>
+
+      <div className="mon-panel-stats">
+        {rows.map((r) => {
+          const diff = r.base == null ? 0 : r.value - r.base;
+          return (
+            <div key={r.label} className="mon-row">
+              <span className="k">{r.label}</span>
+              <span className="v">
+                {r.percent ? (
+                  <span className="base">{num(r.value)}%</span>
+                ) : r.base == null ? (
+                  <span className="base">{fmt(r.value)}</span>
+                ) : (
+                  <>
+                    <span className="base">{fmt(r.base)}</span>
+                    {diff > 0 && <span className="add">+{fmt(diff)}</span>}
+                  </>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

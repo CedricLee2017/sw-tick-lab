@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { Bookmark, Layers, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
 import { MONSTER_MAP, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
-import { setSummary } from "../lib/stats";
+import { setSummary, baseStats } from "../lib/stats";
 import { deckTypeLabel } from "../lib/deckTypes";
-import { ArtifactCard, Modal, MonsterIcon, RuneCard, StatGrid, TickBadge, fmt, setColor } from "../components/ui";
+import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, RuneCard, TickBadge, fmt, setColor } from "../components/ui";
 import type { Artifact, Rune } from "../lib/types";
 import type { DeckFav, Loadout } from "../store";
 
@@ -34,6 +34,12 @@ export default function BuildsPage() {
     return m;
   }, [account]);
   const artifactMap = useMemo(() => new Map((account?.artifacts ?? []).map((a) => [a.id, a])), [account]);
+
+  /** 檢視配裝時用來顯示「基礎＋綠色加成」的魔靈與等級 */
+  const openMonster = open ? MONSTER_MAP.get(open.monsterId) : undefined;
+  const openUnit = open && account
+    ? account.units.find((u) => (open.unitId ? u.id === open.unitId : u.master === open.monsterId))
+    : undefined;
 
   /** 把預設隊儲存庫中某一隻魔靈的符文帶到配符頁（設為包括） */
   const applyDeckUnit = (master: number, runeIds: number[]) => {
@@ -224,7 +230,16 @@ export default function BuildsPage() {
               </button>
             </div>
           </div>
-          <StatGrid stats={open.stats} />
+          {openMonster && (
+            <MonsterPanel
+              monster={openMonster}
+              base={baseStats(openMonster, openUnit?.stars ?? 6, openUnit?.level ?? 40)}
+              stats={open.stats}
+              stars={openUnit?.stars ?? 6}
+              level={openUnit?.level ?? 40}
+              artifacts={(openUnit?.artifacts ?? []).map((id) => artifactMap.get(id)).filter((a): a is Artifact => !!a)}
+            />
+          )}
           <div className="tiny dim" style={{ marginTop: 8, lineHeight: 1.6 }}>
             「一鍵上符」只會修改本工具的本機資料，把這 6 顆符文標記為裝備在 {MONSTER_MAP.get(open.monsterId)?.name ?? "這隻魔靈"} 身上；
             不會修改遊戲存檔。其他原本穿著這些符文的魔靈會自動失去該符文。
