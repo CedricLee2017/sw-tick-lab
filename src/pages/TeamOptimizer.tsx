@@ -14,6 +14,8 @@ import {
 } from "../lib/deckSpeed";
 import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
+import { loadSkillData, type SkillData } from "../lib/damage";
+import { autoAssignRoles, roleSetup, type RoleUnit } from "../lib/teamRoles";
 import { computeFollowPlan, leadBonus, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
 import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply,
@@ -154,6 +156,8 @@ export default function TeamOptimizerPage() {
 
   const workerRef = useRef<Worker | null>(null);
   const runIdRef = useRef(0);
+  /** 技能資料（判斷提條技能用）；載入後快取，之後切換隊型不必再等 */
+  const skillRef = useRef<SkillData | null>(null);
 
   const template = teamTemplateOf(templateId);
   const budget = BUDGETS[budgetKey];
@@ -175,6 +179,15 @@ export default function TeamOptimizerPage() {
 
   // 隊長技全部由數值欄位決定，不再依魔靈自動判斷
 
+  // 技能資料先預載：從儲存庫載入預設隊時要用它判斷哪隻是提條角
+  useEffect(() => {
+    let alive = true;
+    loadSkillData()
+      .then((d) => { if (alive) skillRef.current = d; })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   useEffect(() => () => {
     workerRef.current?.terminate();
     workerRef.current = null;
@@ -183,20 +196,92 @@ export default function TeamOptimizerPage() {
   const viewOf = (unitId: number): UnitView | undefined =>
     summary?.views.find((v) => v.unit.id === unitId);
 
-  const applyTemplate = (id: string, nextSize?: Size) => {
+  /** 技能資料只有第一次需要下載／解析 */
+  const ensureSkills = async (): Promise<SkillData | null> => {
+    if (skillRef.current) return skillRef.current;
+    try {
+      const d = await loadSkillData();
+      skillRef.current = d;
+      return d;
+    } catch {
+      return null;
+    }
+  };
+
+  /** 依魔靈技能自動安排角色、出手順序與預設配裝；隊型不含速隊長／提條時回傳 null */
+  const withAutoRoles = (
+    drafts: MemberDraft[],
+    ctx: DeckContext,
+    slots: TeamRole[],
+    skillData: SkillData | null,
+  ): { members: MemberDraft[]; leadPct: number } | null => {
+    if (!summary || drafts.some((d) => !d.unitId)) return null;
+    const units: RoleUnit[] = [];
+    for (const d of drafts) {
+      const v = viewOf(d.unitId);
+      if (!v) return null;
+      units.push({ master: v.monster.id, element: v.monster.el, baseSpd: v.base.spd });
+    }
+    const outcome = autoAssignRoles({ units, slots, context: ctx, skillData });
+    if (!outcome) return null;
+    const byIndex = new Map(outcome.assignments.map((a) => [a.unitIndex, a]));
+    const next = drafts.map((d, i) => {
+      const a = byIndex.get(i);
+      if (!a) return d;
+      const setup = roleSetup(a.role);
+      return {
+        ...d,
+        role: a.role,
+        title: setup.title,
+        weight: setup.weight,
+        set4: setup.set4,
+        set2: setup.set2,
+        mains: { ...setup.mains },
+        min: { ...setup.min },
+        tick: setup.tick,
+        order: a.order,
+        leadPct: a.leadPct,
+        focus: setup.focus.map((f) => ({ ...f })),
+      };
+    });
+    return { members: next, leadPct: outcome.leadPct };
+  };
+
+  /** 通知列用的角色摘要（依出手順序） */
+  const roleSummary = (list: MemberDraft[]) =>
+    [...list]
+      .sort((a, b) => a.order - b.order)
+      .map((m) => {
+        const v = viewOf(m.unitId);
+        return `${TEAM_ROLE_LABELS[m.role]} ${v ? monsterLabel(v.monster.id) : "？"}`;
+      })
+      .join("、");
+
+  const applyTemplate = async (id: string, nextSize?: Size) => {
     const t = teamTemplateOf(id);
     const s = nextSize ?? t.size;
+    const slots = templateMembers(t, s);
+    const drafts = slots.map((tm, i) => {
+      const d = draftFromTemplate(tm, members[i]?.unitId ?? 0);
+      // 神器速度增加效果是跟著魔靈走的，換隊型時保留已自動帶入的數值
+      if (members[i]?.unitId && members[i].unitId === d.unitId) d.artifactPct = members[i].artifactPct;
+      return d;
+    });
+    const skills = await ensureSkills();
+    const auto = withAutoRoles(drafts, t.content, slots.map((tm) => tm.role), skills);
+
     setTemplateId(id);
     setSize(s);
     setContent(t.content);
-    setMembers((prev) =>
-      templateMembers(t, s).map((tm, i) => {
-        const d = draftFromTemplate(tm, prev[i]?.unitId ?? 0);
-        // 神器速度增加效果是跟著魔靈走的，換隊型時保留已自動帶入的數值
-        if (prev[i]?.unitId && prev[i].unitId === d.unitId) d.artifactPct = prev[i].artifactPct;
-        return d;
-      }),
-    );
+    if (auto) {
+      setMembers(auto.members);
+      setLeadPct(auto.leadPct);
+      notify(
+        `已依技能安排角色：${roleSummary(auto.members)}${auto.leadPct > 0 ? `（速度隊長技 +${auto.leadPct}%）` : ""}`,
+      );
+    } else {
+      setMembers(drafts);
+    }
     setPlan(null);
     setError(null);
   };
@@ -214,8 +299,8 @@ export default function TeamOptimizerPage() {
     setError(null);
   };
 
-  /** 從預設隊儲存庫載入整隊（可選擇固定當時的符文） */
-  const loadDeck = (d: DeckFav) => {
+  /** 從預設隊儲存庫載入整隊（可選擇固定當時的符文），並依技能自動安排角色 */
+  const loadDeck = async (d: DeckFav) => {
     if (!summary) return;
     if (d.units.length === 0) return notify("這組預設隊沒有隊員", "err");
 
@@ -226,8 +311,9 @@ export default function TeamOptimizerPage() {
     for (const v of summary.views) if (!byMaster.has(v.monster.id)) byMaster.set(v.monster.id, v);
 
     const t = teamTemplateOf(templateId);
+    const slots = templateMembers(t, nextSize);
     let matched = 0;
-    const next = templateMembers(t, nextSize).map((tm, i) => {
+    const next = slots.map((tm, i) => {
       const du = deckUnits[i];
       const v = du ? byUnit.get(du.unitId) ?? byMaster.get(du.master) : undefined;
       const draft = draftFromTemplate(tm, v?.unit.id ?? 0);
@@ -245,15 +331,27 @@ export default function TeamOptimizerPage() {
       return;
     }
 
-    setSize(nextSize);
     // 類型 0 是工具自己的自訂配隊，沒有內容資訊，保留目前選擇
-    setContent(d.type === 0 ? content : deckContext(d.type));
-    setMembers(next);
+    const ctx = d.type === 0 ? content : deckContext(d.type);
+    const skills = await ensureSkills();
+    const auto = withAutoRoles(next, ctx, slots.map((tm) => tm.role), skills);
+
+    setSize(nextSize);
+    setContent(ctx);
+    if (auto) {
+      setMembers(auto.members);
+      setLeadPct(auto.leadPct);
+    } else {
+      setMembers(next);
+    }
     setPlan(null);
     setError(null);
     setDeckOpen(false);
+    const roleText = auto
+      ? `；自動角色：${roleSummary(auto.members)}${auto.leadPct > 0 ? `（速度隊長技 +${auto.leadPct}%）` : ""}`
+      : "";
     notify(
-      `已載入${deckTypeLabel(d.type)}第 ${d.seq} 隊（${matched} 隻${d.units.length > 5 ? "，超過 5 隻只取前 5 隻" : ""}${matched < deckUnits.length ? `，${deckUnits.length - matched} 隻不在目前帳號` : ""}）`,
+      `已載入${deckTypeLabel(d.type)}第 ${d.seq} 隊（${matched} 隻${d.units.length > 5 ? "，超過 5 隻只取前 5 隻" : ""}${matched < deckUnits.length ? `，${deckUnits.length - matched} 隻不在目前帳號` : ""}）${roleText}`,
       matched < deckUnits.length ? "err" : "ok",
     );
   };
@@ -669,7 +767,7 @@ export default function TeamOptimizerPage() {
             <Zap size={15} className="gold" /> 一鍵配隊
           </div>
           <div className="card-sub">
-            先選 3～5 隻魔靈，再一次配好整隊符文；同一顆符文不會重複分配給兩隻魔靈。
+            先選 3～5 隻魔靈，再一次配好整隊符文；同一顆符文不會重複分配給兩隻魔靈。載入預設隊或切換隊型時，會依技能自動安排角色與出手順序。
           </div>
         </div>
         <div className="row wrap" style={{ gap: 6 }}>
@@ -699,7 +797,7 @@ export default function TeamOptimizerPage() {
         </div>
 
         <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
-          <select className="select" style={{ minWidth: 300 }} value={templateId} onChange={(e) => applyTemplate(e.target.value)}>
+          <select className="select" style={{ minWidth: 300 }} value={templateId} onChange={(e) => void applyTemplate(e.target.value)}>
             {TEAM_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <select className="select" style={{ width: 180 }} value={content} onChange={(e) => { setContent(e.target.value as DeckContext); setPlan(null); }}>
@@ -1296,7 +1394,7 @@ export default function TeamOptimizerPage() {
             <div className="row between wrap" style={{ gap: 8 }}>
               <div>
                 <div className="st-modal-label">預設隊</div>
-                <div className="tiny dim">載入後會依目前隊型的角色順序帶入，仍可再調整攻擊順序、提條與速度強化。</div>
+                <div className="tiny dim">載入後會依魔靈技能自動判定速隊長、提條與打手，並排好出手順序（提條 → 打手 → 速隊長）；仍可再調整。</div>
               </div>
               <span className="chip gold">{deckFavs.length} 組</span>
             </div>
@@ -1331,7 +1429,7 @@ export default function TeamOptimizerPage() {
                           </div>
                         </div>
                       </div>
-                      <button type="button" className="btn btn-sm btn-primary" onClick={() => loadDeck(d)}>
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => void loadDeck(d)}>
                         載入
                       </button>
                     </div>

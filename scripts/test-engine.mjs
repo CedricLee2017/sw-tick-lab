@@ -44,7 +44,11 @@ const {
   panelSpeed, panelExtraFor, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
+  autoAssignRoles, roleSetup, hasAtbBoost,
 } = engine;
+
+/** 技能資料（判斷提條技能用） */
+const SKILLS = JSON.parse(await fs.readFile(path.join(ROOT, "public/data/skills.json"), "utf8"));
 
 let passed = 0;
 function check(name, fn) {
@@ -1519,6 +1523,49 @@ check("隊型預設涵蓋 3 / 4 / 5 人與角色", () => {
     assert.ok(used.has(role), `隊型應包含 ${role} 角色`);
   }
   assert.ok(TEAM_ROLE_LABELS.tank.includes("坦克"));
+});
+
+check("一鍵配隊：依技能自動判定角色與出手順序", () => {
+  // 風忍（唯一速度隊長技）／風武（剩餘）／風格（基礎速度最高且有提條技能）
+  const units = [
+    { master: 13513, element: 3, baseSpd: 107 },
+    { master: 16913, element: 3, baseSpd: 103 },
+    { master: 11513, element: 3, baseSpd: 111 },
+  ];
+  assert.equal(hasAtbBoost(SKILLS, 11513), true, "風格 S3 應判定為提條技能");
+  assert.equal(hasAtbBoost(SKILLS, 13513), false, "風忍只有吸收對手攻擊條，不算提條");
+  assert.equal(hasAtbBoost(SKILLS, 16913), false);
+
+  const out = autoAssignRoles({ units, slots: ["speed", "booster", "dps"], context: "guild", skillData: SKILLS });
+  assert.ok(out);
+  assert.equal(out.leadPct, 30, "風忍速度隊長技 30% 應自動帶入");
+  assert.equal(out.leaderIndex, 0);
+  assert.equal(out.boosterIndex, 2);
+  assert.deepEqual(out.assignments.map((a) => a.role), ["speed", "dps", "booster"]);
+  // 出手順序：提條 1 → 打手 2 → 速隊長 3
+  const byOrder = [...out.assignments].sort((a, b) => a.order - b.order);
+  assert.deepEqual(byOrder.map((a) => a.role), ["booster", "dps", "speed"]);
+  assert.ok(out.assignments.every((a) => a.leadPct == null), "全員同屬性時都吃得到隊長技");
+
+  // 三坦／自訂隊型維持原設定，不自動改角色
+  assert.equal(autoAssignRoles({ units, slots: ["tank", "tank", "tank"], context: "guild", skillData: SKILLS }), null);
+});
+
+check("一鍵配隊：角色預設配裝", () => {
+  const booster = roleSetup("booster");
+  assert.deepEqual(
+    [booster.set4, booster.set2, booster.mains[2], booster.mains[4], booster.mains[6]],
+    [3, 15, 8, 2, 2],
+    "提條＝迅速＋意志、速體體",
+  );
+  for (const role of ["speed", "dps"]) {
+    const s = roleSetup(role);
+    assert.deepEqual(
+      [s.set4, s.set2, s.mains[2], s.mains[4], s.mains[6], s.min.cr],
+      [3, 4, 8, 10, 4, 100],
+      `${role}＝迅速＋刀刃、速傷攻、暴率 100%`,
+    );
+  }
 });
 
 check("接速：面板速度與速度強化倍率", () => {

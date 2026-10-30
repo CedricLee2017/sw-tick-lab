@@ -11,5 +11,6 @@ export * from "../src/lib/speedTick";
 export * from "../src/lib/teamSpeed";
 export * from "../src/lib/teamOptimizer";
 export * from "../src/lib/teamTemplates";
+export * from "../src/lib/teamRoles";
 export { parseAccountJSON, exportAccount } from "../src/lib/parse";
 export { default as MONSTERS } from "../src/data/monsters.json";
