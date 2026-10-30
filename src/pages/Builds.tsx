@@ -4,7 +4,7 @@ import { MONSTER_MAP, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary, baseStats } from "../lib/stats";
 import { deckTypeLabel } from "../lib/deckTypes";
-import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, RuneCard, TickBadge, fmt, setColor } from "../components/ui";
+import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, RuneBoard, RuneCard, TickBadge, fmt, setColor } from "../components/ui";
 import type { Artifact, Rune } from "../lib/types";
 import type { DeckFav, Loadout } from "../store";
 
@@ -248,14 +248,10 @@ export default function BuildsPage() {
             <span className="rune-wheel-title">符文組合</span>
             <span className="tiny dim">{open.runeIds.length}/6</span>
           </div>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8 }}>
-            {[1, 2, 3, 4, 5, 6].map((slot) => {
-              const r = open.runeIds.map((id) => runeMap.get(id)).find((x) => x?.slot === slot);
-              return r ? <RuneCard key={slot} rune={r} owner={owner.get(r.id)} compact /> : (
-                <div key={slot} className="rune rune-empty"><span className="tiny dim">位置 {slot} 無符文</span></div>
-              );
-            })}
-          </div>
+          <RuneBoard
+            runes={open.runeIds.map((id) => runeMap.get(id)).filter((r): r is Rune => !!r)}
+            renderRune={(r) => <RuneCard rune={r} owner={owner.get(r.id)} compact />}
+          />
         </Modal>
       )}
 
@@ -305,8 +301,12 @@ export default function BuildsPage() {
                   ) : (
                     <>
                       {runes.length > 0 && (
-                        <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginTop: 8 }}>
-                          {runes.map((r) => <RuneCard key={r.id} rune={r} compact owner={owner.get(r.id)} />)}
+                        <div style={{ marginTop: 8 }}>
+                          <RuneBoard
+                            runes={runes}
+                            showMap={false}
+                            renderRune={(r) => <RuneCard rune={r} compact owner={owner.get(r.id)} />}
+                          />
                         </div>
                       )}
                       {artifacts.length > 0 && (

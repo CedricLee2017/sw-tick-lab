@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { useStore, monsterLabel, type Loadout, type RuneFlag } from "../store";
 import { useSummary } from "../lib/accountStats";
-import { MonsterIcon, NumberField, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
+import { MonsterIcon, NumberField, RuneBoard, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
 import { MonsterPickerField } from "../components/MonsterPicker";
 import { DamagePanel } from "../components/DamagePanel";
 import {
@@ -1375,36 +1375,20 @@ function BuildCard({
             <span className="rune-wheel-title">符文盤</span>
             <span className="tiny dim">依遊戲位置排列：1 上 → 順時針 2…6</span>
           </div>
-          <div className="rune-wheel-wrap">
-            <div className="rune-wheel">
-              {[1, 2, 3, 4, 5, 6].map((slot) => {
-                const r = build.runes[slot - 1] ?? null;
-                return (
-                  <div className="rune-wheel-cell" data-slot={slot} style={{ gridArea: `rs${slot}` }} key={slot}>
-                    {r ? (
-                      <RuneCard
-                        rune={r}
-                        detail
-                        owner={ownerOf(r.id) || undefined}
-                        locked={lockedSet.has(r.id)}
-                        excluded={excludedSet.has(r.id)}
-                        onToggleLock={() => onToggleRuneFlag("locked", r.id)}
-                        onToggleExclude={() => onToggleRuneFlag("excluded", r.id)}
-                      />
-                    ) : (
-                      <div className="rune rune-empty">
-                        <div className="rune-top">
-                          <span className="rune-set dim">未裝備</span>
-                          <span className="rune-slot">#{slot}</span>
-                        </div>
-                        <div className="tiny dim">這個位置沒有符文</div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <RuneBoard
+            runes={build.runes.filter((r): r is Rune => !!r)}
+            renderRune={(r) => (
+              <RuneCard
+                rune={r}
+                detail
+                owner={ownerOf(r.id) || undefined}
+                locked={lockedSet.has(r.id)}
+                excluded={excludedSet.has(r.id)}
+                onToggleLock={() => onToggleRuneFlag("locked", r.id)}
+                onToggleExclude={() => onToggleRuneFlag("excluded", r.id)}
+              />
+            )}
+          />
 
           <div className="row" style={{ marginTop: 12, gap: 8 }}>
             <button className="btn btn-sm" onClick={onPlan}><ArrowRight size={13} /> 配符清單 / 換符計畫</button>

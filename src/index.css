@@ -668,7 +668,41 @@ p { margin: 0; }
 .rune-wheel-cell[data-slot="4"] { transform: translateY(9px); }
 .rune-wheel-cell > .rune { flex: 1 1 auto; }
 .rune-wheel .rune-slot { color: var(--gold); opacity: .75; }
-.rune-empty { border-style: dashed; background: transparent; opacity: .6; justify-content: flex-start; }
+.rune-empty {
+  border-style: dashed; background: transparent; opacity: .75;
+  align-items: center; justify-content: center; gap: 1px; text-align: center;
+}
+.rune-empty-num {
+  font-size: 20px; font-weight: 800; line-height: 1;
+  color: rgba(242, 198, 92, .5);
+  font-variant-numeric: tabular-nums;
+}
+.rune-wheel-cell.hl > .rune {
+  border-color: rgba(242, 198, 92, .7);
+  box-shadow: 0 0 0 2px rgba(242, 198, 92, .45), 0 0 24px -6px rgba(242, 198, 92, .55);
+}
+/* 符文位置號碼（與星盤上的號碼對應） */
+.rune-pos {
+  display: inline-grid; place-items: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: rgba(242, 198, 92, .16); border: 1px solid rgba(242, 198, 92, .5);
+  color: var(--gold); font-size: 9.5px; font-weight: 800; line-height: 1;
+}
+
+/* ── 符文盤（六芒星位置圖 + 依位置排列的符文卡） ── */
+.rune-board { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 14px; align-items: center; }
+.rune-board.nomap { grid-template-columns: minmax(0, 1fr); }
+.rune-board-map { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
+.rune-board-cap { font-size: 10.5px; color: var(--muted-2); letter-spacing: .03em; text-align: center; }
+.rune-star { width: 100%; max-width: 186px; height: auto; filter: drop-shadow(0 8px 20px rgba(0, 0, 0, .5)); }
+.rune-star .rs-node { cursor: pointer; transform-box: fill-box; transform-origin: center; transition: transform .15s ease; }
+.rune-star .rs-node:hover { transform: scale(1.1); }
+.rune-star .rs-num { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; pointer-events: none; }
+@media (max-width: 780px) {
+  .rune-board { grid-template-columns: minmax(0, 1fr); }
+  .rune-board-map { flex-direction: row; gap: 10px; }
+  .rune-star { max-width: 132px; }
+}
 
 @container (max-width: 700px) {
   .rune-wheel {

@@ -5,7 +5,7 @@ import { ELEMENTS } from "../lib/constants";
 import { rtaView, type RtaView } from "../lib/rta";
 import { setSummary } from "../lib/stats";
 import type { Monster } from "../lib/types";
-import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, RuneCard, TickBadge, fmt } from "../components/ui";
+import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, RuneBoard, RuneCard, TickBadge, fmt } from "../components/ui";
 
 type RtaRow = RtaView & { monster: Monster };
 
@@ -214,27 +214,20 @@ export default function RtaPage() {
           {current.runes.length === 0 ? (
             <div className="empty tiny">這隻魔靈目前沒有 RTA 符文配置</div>
           ) : (
-            <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8 }}>
-              {[1, 2, 3, 4, 5, 6].map((slot) => {
-                const r = current.runes.find((x) => x.slot === slot);
-                return r ? (
-                  <RuneCard
-                    key={slot}
-                    rune={r}
-                    compact
-                    owner={current.monster.name}
-                    locked={lockedSet.has(r.id)}
-                    excluded={excludedSet.has(r.id)}
-                    onToggleLock={() => toggleRuneFlag("locked", r.id)}
-                    onToggleExclude={() => toggleRuneFlag("excluded", r.id)}
-                  />
-                ) : (
-                  <div key={slot} className="rune" style={{ opacity: .35, alignItems: "center", justifyContent: "center", minHeight: 80 }}>
-                    <span className="tiny dim">位置 {slot}</span>
-                  </div>
-                );
-              })}
-            </div>
+            <RuneBoard
+              runes={current.runes}
+              renderRune={(r) => (
+                <RuneCard
+                  rune={r}
+                  compact
+                  owner={current.monster.name}
+                  locked={lockedSet.has(r.id)}
+                  excluded={excludedSet.has(r.id)}
+                  onToggleLock={() => toggleRuneFlag("locked", r.id)}
+                  onToggleExclude={() => toggleRuneFlag("excluded", r.id)}
+                />
+              )}
+            />
           )}
 
           <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>
