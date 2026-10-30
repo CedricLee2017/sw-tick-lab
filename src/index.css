@@ -647,27 +647,36 @@ p { margin: 0; }
 .rune-meta-row b.gold { color: var(--gold); }
 .rune-meta .bar { margin-top: 3px; }
 
-/* ── rune wheel（依遊戲符文盤：1 上 → 順時針 2…6） ── */
+/* ── 符文盤（依遊戲符文盤排成六角形：1 上 → 順時針 2…6） ── */
 .rune-wheel-head {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 10px; margin: 0 0 8px;
 }
 .rune-wheel-title { font-size: 12px; font-weight: 700; letter-spacing: .03em; }
-.rune-wheel-wrap { container-type: inline-size; }
-.rune-wheel {
+
+/*        [1]
+ *   [6]       [2]
+ *   [5]       [3]
+ *        [4]
+ * 中間留空，卡片高度不同時仍維持六角形排列。
+ */
+.rune-hex {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-areas:
-    "rs6 rs1 rs2"
-    "rs5 rs4 rs3";
+  grid-template-rows: auto auto;
   gap: 10px;
-  padding: 9px 0;
+  align-items: start;
+  padding: 2px 0 4px;
 }
-.rune-wheel-cell { min-width: 0; display: flex; }
-.rune-wheel-cell[data-slot="1"] { transform: translateY(-9px); }
-.rune-wheel-cell[data-slot="4"] { transform: translateY(9px); }
-.rune-wheel-cell > .rune { flex: 1 1 auto; }
-.rune-wheel .rune-slot { color: var(--gold); opacity: .75; }
+.rune-hex-cell { min-width: 0; display: flex; }
+.rune-hex-cell > .rune { flex: 1 1 auto; }
+.rune-hex-cell[data-slot="1"] { grid-area: 1 / 2; }
+.rune-hex-cell[data-slot="2"] { grid-area: 1 / 3; margin-top: 34px; }
+.rune-hex-cell[data-slot="3"] { grid-area: 2 / 3; }
+.rune-hex-cell[data-slot="4"] { grid-area: 2 / 2; margin-top: 68px; }
+.rune-hex-cell[data-slot="5"] { grid-area: 2 / 1; }
+.rune-hex-cell[data-slot="6"] { grid-area: 1 / 1; margin-top: 34px; }
+
 .rune-empty {
   border-style: dashed; background: transparent; opacity: .75;
   align-items: center; justify-content: center; gap: 1px; text-align: center;
@@ -677,11 +686,7 @@ p { margin: 0; }
   color: rgba(242, 198, 92, .5);
   font-variant-numeric: tabular-nums;
 }
-.rune-wheel-cell.hl > .rune {
-  border-color: rgba(242, 198, 92, .7);
-  box-shadow: 0 0 0 2px rgba(242, 198, 92, .45), 0 0 24px -6px rgba(242, 198, 92, .55);
-}
-/* 符文位置號碼（與星盤上的號碼對應） */
+/* 符文位置號碼 */
 .rune-pos {
   display: inline-grid; place-items: center;
   width: 15px; height: 15px; border-radius: 50%;
@@ -689,29 +694,9 @@ p { margin: 0; }
   color: var(--gold); font-size: 9.5px; font-weight: 800; line-height: 1;
 }
 
-/* ── 符文盤（六芒星位置圖 + 依位置排列的符文卡） ── */
-.rune-board { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 14px; align-items: center; }
-.rune-board.nomap { grid-template-columns: minmax(0, 1fr); }
-.rune-board-map { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
-.rune-board-cap { font-size: 10.5px; color: var(--muted-2); letter-spacing: .03em; text-align: center; }
-.rune-star { width: 100%; max-width: 186px; height: auto; filter: drop-shadow(0 8px 20px rgba(0, 0, 0, .5)); }
-.rune-star .rs-node { cursor: pointer; transform-box: fill-box; transform-origin: center; transition: transform .15s ease; }
-.rune-star .rs-node:hover { transform: scale(1.1); }
-.rune-star .rs-num { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; pointer-events: none; }
-@media (max-width: 780px) {
-  .rune-board { grid-template-columns: minmax(0, 1fr); }
-  .rune-board-map { flex-direction: row; gap: 10px; }
-  .rune-star { max-width: 132px; }
-}
-
-@container (max-width: 700px) {
-  .rune-wheel {
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    grid-template-areas: none;
-    padding: 0;
-  }
-  .rune-wheel-cell { grid-area: auto !important; }
-  .rune-wheel-cell[data-slot] { transform: none; }
+@media (max-width: 700px) {
+  .rune-hex { grid-template-columns: minmax(0, 1fr); padding: 0; }
+  .rune-hex-cell[data-slot] { grid-area: auto !important; margin-top: 0 !important; }
 }
 
 /* ── focus ────────────────────────────────────────── */

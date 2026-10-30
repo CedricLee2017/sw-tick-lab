@@ -304,7 +304,6 @@ export default function BuildsPage() {
                         <div style={{ marginTop: 8 }}>
                           <RuneBoard
                             runes={runes}
-                            showMap={false}
                             renderRune={(r) => <RuneCard rune={r} compact owner={owner.get(r.id)} />}
                           />
                         </div>

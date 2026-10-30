@@ -324,124 +324,44 @@ export function RuneCard({
   );
 }
 
-/** 符文位置的座標：1 號在上方，之後順時針 2…6（與遊戲符文盤一致） */
-function slotPoint(slot: number, radius: number) {
-  const angle = ((90 - (slot - 1) * 60) * Math.PI) / 180;
-  return { x: 100 + radius * Math.cos(angle), y: 100 - radius * Math.sin(angle) };
-}
-
 /**
- * 六芒星符文盤：六個號碼代表 1～6 號符文位置，裝了符文的號碼會以套裝顏色標示。
- * 點號碼會回呼 onPick，讓旁邊的符文卡以同樣號碼對應。
- */
-export function RuneStar({
-  runes,
-  activeSlot,
-  onPick,
-}: {
-  runes: Rune[];
-  activeSlot?: number | null;
-  onPick?: (slot: number) => void;
-}) {
-  const bySlot = new Map(runes.map((r) => [r.slot, r]));
-  const tri = (slots: number[]) =>
-    slots.map((s) => { const p = slotPoint(s, 62); return `${p.x},${p.y}`; }).join(" ");
-  return (
-    <svg viewBox="0 0 200 200" className="rune-star" role="img" aria-label="符文位置 1 到 6">
-      <defs>
-        <radialGradient id="rs-bg" cx="50%" cy="42%" r="62%">
-          <stop offset="0%" stopColor="#2a1d0c" />
-          <stop offset="100%" stopColor="#0d0a06" />
-        </radialGradient>
-      </defs>
-      <circle cx="100" cy="100" r="94" fill="url(#rs-bg)" stroke="rgba(214,169,86,.32)" strokeWidth="1.4" />
-      <circle cx="100" cy="100" r="80" fill="none" stroke="rgba(214,169,86,.16)" strokeDasharray="2 6" />
-      <polygon points={tri([1, 3, 5])} fill="none" stroke="rgba(214,169,86,.4)" strokeWidth="1.6" strokeLinejoin="round" />
-      <polygon points={tri([2, 4, 6])} fill="none" stroke="rgba(214,169,86,.4)" strokeWidth="1.6" strokeLinejoin="round" />
-      <circle cx="100" cy="100" r="15" fill="rgba(28,19,8,.92)" stroke="rgba(214,169,86,.45)" strokeWidth="1.2" />
-      <path d="M100 92 L107 100 L100 108 L93 100 Z" fill="rgba(214,169,86,.55)" />
-      {[1, 2, 3, 4, 5, 6].map((slot) => {
-        const p = slotPoint(slot, 62);
-        const rune = bySlot.get(slot);
-        const color = rune ? setColor(rune.set) : "rgba(233,239,255,.5)";
-        const on = activeSlot === slot;
-        return (
-          <g
-            key={slot}
-            className="rs-node"
-            onClick={() => onPick?.(slot)}
-            role={onPick ? "button" : undefined}
-          >
-            <title>
-              {`${slot} 號位 · ${rune ? `${SET_BY_ID[rune.set]?.name ?? "套裝"} ${statText(rune.main.t, rune.main.v)}` : "未裝備"}`}
-            </title>
-            <circle
-              cx={p.x}
-              cy={p.y}
-              r={on ? 17 : 15}
-              fill={rune ? "rgba(20,14,6,.92)" : "rgba(14,11,6,.72)"}
-              stroke={color}
-              strokeWidth={on || rune ? 2 : 1.3}
-              strokeOpacity={rune ? 0.85 : 0.5}
-            />
-            <text x={p.x} y={p.y + 4.5} textAnchor="middle" className="rs-num" fill={color}>{slot}</text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-/**
- * 符文盤：左側六芒星顯示 1～6 號位置，右側依遊戲位置（上 1、順時針 2…6）排符文卡。
- * 卡片本身也會顯示號碼，兩邊號碼一致。
+ * 符文盤：六張符文卡依遊戲位置排成六角形（與遊戲內符文盤 / SWOP 一致）：
+ *
+ *        [1]
+ *   [6]       [2]
+ *   [5]       [3]
+ *        [4]
+ *
+ * 1 號在上、順時針到 6 號；中間留空，看起來就是一顆六芒星。
+ * 每張卡本身也會顯示位置號碼，空位顯示號碼與「未裝備」。
  */
 export function RuneBoard({
   runes,
   renderRune,
-  showMap = true,
   emptyHint = "未裝備",
 }: {
   runes: Rune[];
   renderRune?: (rune: Rune) => ReactNode;
-  /** 窄版面可關閉左側星盤，只留 3×2 的號碼位置 */
-  showMap?: boolean;
   emptyHint?: string;
 }) {
-  const [active, setActive] = useState<number | null>(null);
   const bySlot = new Map(runes.map((r) => [r.slot, r]));
   return (
-    <div className={`rune-board ${showMap ? "" : "nomap"}`}>
-      {showMap && (
-        <div className="rune-board-map">
-          <RuneStar runes={runes} activeSlot={active} onPick={(s) => setActive((a) => (a === s ? null : s))} />
-          <div className="rune-board-cap">1 上 · 順時針 2 → 6</div>
-        </div>
-      )}
-      <div className="rune-wheel-wrap">
-        <div className="rune-wheel">
-          {[1, 2, 3, 4, 5, 6].map((slot) => {
-            const r = bySlot.get(slot);
-            return (
-              <div
-                key={slot}
-                className={`rune-wheel-cell ${active === slot ? "hl" : ""}`}
-                data-slot={slot}
-                style={{ gridArea: `rs${slot}` }}
-              >
-                {r ? (
-                  renderRune ? renderRune(r) : <RuneCard rune={r} compact />
-                ) : (
-                  <div className="rune rune-empty">
-                    <span className="rune-empty-num">{slot}</span>
-                    <span className="tiny dim">{emptyHint}</span>
-                  </div>
-                )}
+    <div className="rune-hex">
+      {[1, 2, 3, 4, 5, 6].map((slot) => {
+        const r = bySlot.get(slot);
+        return (
+          <div key={slot} className="rune-hex-cell" data-slot={slot}>
+            {r ? (
+              renderRune ? renderRune(r) : <RuneCard rune={r} compact />
+            ) : (
+              <div className="rune rune-empty">
+                <span className="rune-empty-num">{slot}</span>
+                <span className="tiny dim">{emptyHint}</span>
               </div>
-            );
-          })}
-        </div>
-      </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
