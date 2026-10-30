@@ -124,7 +124,7 @@ export default function MonstersPage() {
               renderRune={(r) => (
                 <RuneCard
                   rune={r}
-                  compact
+                  owner={current.monster.name}
                   locked={lockedSet.has(r.id)}
                   excluded={excludedSet.has(r.id)}
                   onToggleLock={() => toggleRuneFlag("locked", r.id)}

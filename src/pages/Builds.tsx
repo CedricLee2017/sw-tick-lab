@@ -250,7 +250,7 @@ export default function BuildsPage() {
           </div>
           <RuneBoard
             runes={open.runeIds.map((id) => runeMap.get(id)).filter((r): r is Rune => !!r)}
-            renderRune={(r) => <RuneCard rune={r} owner={owner.get(r.id)} compact />}
+            renderRune={(r) => <RuneCard rune={r} owner={owner.get(r.id)} />}
           />
         </Modal>
       )}
@@ -304,7 +304,7 @@ export default function BuildsPage() {
                         <div style={{ marginTop: 8 }}>
                           <RuneBoard
                             runes={runes}
-                            renderRune={(r) => <RuneCard rune={r} compact owner={owner.get(r.id)} />}
+                            renderRune={(r) => <RuneCard rune={r} owner={owner.get(r.id)} />}
                           />
                         </div>
                       )}

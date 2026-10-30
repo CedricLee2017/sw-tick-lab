@@ -407,7 +407,7 @@ export default function DecksPage() {
                     <>
                       {runes.length > 0 && (
                         <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginTop: 8 }}>
-                          {runes.map((r) => <RuneCard key={r.id} rune={r} compact owner={ownerOfRune.get(r.id)} />)}
+                          {runes.map((r) => <RuneCard key={r.id} rune={r} owner={ownerOfRune.get(r.id)} />)}
                         </div>
                       )}
                       {artifacts.length > 0 && (
