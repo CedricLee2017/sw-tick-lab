@@ -1497,6 +1497,55 @@ check("隊長技只影響速度目標（leadSpd 逐隻帶入）", () => {
   assert.equal(roleObjective("support"), "support");
 });
 
+check("優先順序：第 1 優先的魔靈拿到個人最佳（字典序）", () => {
+  const plan = planOf(
+    optimizeTeam(
+      teamReq(3, {
+        members: [
+          mkTeamMember(900, { priority: 1 }),
+          mkTeamMember(901, { priority: 2 }),
+          mkTeamMember(902, { priority: 3 }),
+        ],
+      }),
+    ),
+  );
+  assert.equal(plan.members[0].priority, 1);
+  assert.ok(plan.members[0].norm > 0.999, `優先 1 應拿到個人最佳，實際 ${plan.members[0].norm}`);
+  const ids = plan.members.flatMap((m) => m.runeIds);
+  assert.equal(new Set(ids).size, ids.length, "優先順序模式下符文仍不可重複");
+});
+
+check("技能傷害目標：分數等於技能傷害，優先 1 會最大化它", () => {
+  // Kaito S3 的公式：ATK × (SPD + 192) / 41（同時吃攻擊與速度）
+  const skill = {
+    id: 999001, n: "測試技能", slot: 3, hits: 1, aoe: false, passive: false,
+    cool: 4, max: 5, f: "{ATK}*({SPD} + 192)/41", raw: "", sc: [], up: 0, e: [], d: "",
+  };
+  const opts = {
+    crit: "average", skillUps: true, enemyDef: 0, enemyMaxHp: 0, enemyHpPct: 100,
+    enemySpd: 0, selfHpPct: 100, atkBuff: 0, leadAtk: 0, defBreak: false, brand: false,
+    ignoreDef: false, aliveEnemies: 1, alliesAlive: 4, useGuild: false, enemyEl: 0,
+    useArtifacts: false,
+  };
+  const plan = planOf(
+    optimizeTeam(
+      teamReq(3, {
+        members: [
+          mkTeamMember(900, { priority: 1, objective: "skill", skillObjective: { skill, opts } }),
+          mkTeamMember(901),
+          mkTeamMember(902),
+        ],
+      }),
+    ),
+  );
+  const m = plan.members[0];
+  assert.equal(m.objective, "skill");
+  const dmg = computeSkillDamage(m.stats, skill, opts).total;
+  assert.ok(dmg > 0, "技能傷害應大於 0");
+  assert.ok(Math.abs(m.score - dmg) < 1e-6, `分數 ${m.score} 應等於技能傷害 ${dmg}`);
+  assert.ok(m.norm > 0.999, `優先 1 應拿到技能傷害最佳，實際 ${m.norm}`);
+});
+
 check("隊型預設涵蓋 3 / 4 / 5 人與角色", () => {
   assert.ok(TEAM_TEMPLATES.length >= 4);
   assert.ok(TEAM_TEMPLATES.every((t) => [3, 4, 5].includes(t.size)));

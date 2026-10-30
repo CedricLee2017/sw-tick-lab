@@ -14,7 +14,7 @@ import {
 } from "../lib/deckSpeed";
 import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
-import { loadSkillData, type SkillData } from "../lib/damage";
+import { loadSkillData, skillsForMonster, type DamageOptions, type Skill, type SkillData } from "../lib/damage";
 import { autoAssignRoles, roleSetup, type RoleUnit } from "../lib/teamRoles";
 import { computeFollowPlan, leadBonus, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
 import {
@@ -24,12 +24,63 @@ import {
 import { TEAM_TEMPLATES, teamTemplateOf, templateMembers, type TeamMemberTemplate } from "../lib/teamTemplates";
 import type { FocusEntry } from "../lib/types";
 
+/** 每隻魔靈的搜尋目標 */
+type ObjectiveMode = "role" | "skill" | "spd" | "dps" | "tank" | "support" | "score";
+
+const OBJECTIVE_LABELS: Record<ObjectiveMode, string> = {
+  role: "依角色",
+  skill: "技能傷害",
+  spd: "速度",
+  dps: "傷害期望",
+  tank: "坦度 EHP",
+  support: "綜合",
+  score: "符文評分",
+};
+
+/** 技能傷害目標固定使用的傷害選項（只用來排序，與實際對手無關） */
+const TEAM_DAMAGE_OPTS: DamageOptions = {
+  crit: "average",
+  skillUps: true,
+  enemyDef: 0,
+  enemyMaxHp: 0,
+  enemyHpPct: 100,
+  enemySpd: 0,
+  selfHpPct: 100,
+  atkBuff: 0,
+  leadAtk: 0,
+  defBreak: false,
+  brand: false,
+  ignoreDef: false,
+  aliveEnemies: 1,
+  alliesAlive: 4,
+  useGuild: false,
+  enemyEl: 0,
+  useArtifacts: false,
+};
+
+/**
+ * 技能傷害目標的預設技能：優先挑 S1～S3 裡有倍率公式的技能並取最高階，
+ * 讓「多數魔靈的第 3 技」成為預設（S4 常是覺醒被動 / 特殊技）。
+ */
+function defaultAttackSkill(skills: Skill[]): Skill | undefined {
+  if (skills.length === 0) return undefined;
+  const active = skills.filter((s) => s.slot <= 3);
+  const pool = active.length > 0 ? active : skills;
+  return [...pool].sort((a, b) => b.slot - a.slot || a.id - b.id)[0];
+}
+
 /** 每隻魔靈在頁面上的設定（尚未轉成引擎需求） */
 interface MemberDraft {
   unitId: number;
   role: TeamRole;
   title: string;
   weight: number;
+  /** 優先順序：1 = 最優先；0 = 不指定（依權重） */
+  priority: number;
+  /** 搜尋目標：依角色 / 技能傷害 / 速度 / 傷害 / 坦度 / 綜合 / 評分 */
+  objectiveMode: ObjectiveMode;
+  /** 技能傷害目標的技能 id；0 = 自動選最後一招（通常是 S3） */
+  skillId: number;
   /** 4 件套；0 = 不指定 */
   set4: number;
   /** 2 件套；0 = 不指定 */
@@ -99,6 +150,9 @@ function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
     role: t.role,
     title: t.title,
     weight: t.weight,
+    priority: 0,
+    objectiveMode: "role",
+    skillId: 0,
     set4: t.sets.find((s) => s.count >= 4)?.set ?? 0,
     set2: t.sets.find((s) => s.count < 4)?.set ?? 0,
     mains: { ...t.mains },
@@ -158,6 +212,8 @@ export default function TeamOptimizerPage() {
   const runIdRef = useRef(0);
   /** 技能資料（判斷提條技能用）；載入後快取，之後切換隊型不必再等 */
   const skillRef = useRef<SkillData | null>(null);
+  /** 技能下拉選單用（與 skillRef 同步） */
+  const [skillData, setSkillData] = useState<SkillData | null>(null);
 
   const template = teamTemplateOf(templateId);
   const budget = BUDGETS[budgetKey];
@@ -183,7 +239,7 @@ export default function TeamOptimizerPage() {
   useEffect(() => {
     let alive = true;
     loadSkillData()
-      .then((d) => { if (alive) skillRef.current = d; })
+      .then((d) => { if (alive) { skillRef.current = d; setSkillData(d); } })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -559,6 +615,13 @@ export default function TeamOptimizerPage() {
         bySlot.set(r.slot, id);
       }
 
+      // 技能傷害目標：優先使用指定技能，否則自動選最後一招（通常是 S3）
+      const skills = skillData ? skillsForMonster(skillData, v.monster.id) : [];
+      const skill =
+        m.objectiveMode === "skill"
+          ? (skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills))
+          : undefined;
+
       specs.push({
         unitId: m.unitId,
         master: v.monster.id,
@@ -566,13 +629,19 @@ export default function TeamOptimizerPage() {
         base: v.base,
         role: m.role,
         weight: m.weight,
+        priority: m.priority,
         sets,
         mains: m.mains,
         min,
         focus: m.focus,
         includeRunes: [...bySlot.values()],
         leadSpd: leadPctOf(m),
-        objective: roleObjective(m.role),
+        objective: skill
+          ? "skill"
+          : m.objectiveMode === "role"
+            ? roleObjective(m.role)
+            : m.objectiveMode,
+        skillObjective: skill ? { skill, opts: TEAM_DAMAGE_OPTS } : undefined,
       });
     }
     return {
@@ -840,6 +909,8 @@ export default function TeamOptimizerPage() {
           const v = viewOf(m.unitId);
           const pinned = m.includeRunes.length > 0;
           const laterCount = members.filter((x, j) => j !== i && x.order > m.order).length;
+          const skills = skillData && v ? skillsForMonster(skillData, v.monster.id) : [];
+          const effSkill = skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills);
           return (
             <div key={i} className={`card card-pad team-member ${pinned ? "pinned" : ""}`}>
               <div className="row between" style={{ gap: 8 }}>
@@ -896,6 +967,49 @@ export default function TeamOptimizerPage() {
                   <span>權重</span>
                   <input className="input mono" type="number" min={1} max={10} value={m.weight} onChange={(e) => updateMember(i, { weight: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
                 </label>
+                <label>
+                  <span>優先順序</span>
+                  <select
+                    className="select"
+                    value={m.priority}
+                    onChange={(e) => updateMember(i, { priority: Number(e.target.value) || 0 })}
+                    title="1 = 最優先。設定後會先讓第 1 優先的魔靈拿到最高目標分數，再依序最大化其他魔靈；所有符文仍不可重複。"
+                  >
+                    <option value={0}>不指定</option>
+                    {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>目標</span>
+                  <select
+                    className="select"
+                    value={m.objectiveMode}
+                    onChange={(e) => updateMember(i, { objectiveMode: e.target.value as ObjectiveMode })}
+                    title="技能傷害：以選定技能的傷害當作搜尋目標（例如 Kaito S3 吃攻擊與速度）"
+                  >
+                    {(Object.keys(OBJECTIVE_LABELS) as ObjectiveMode[]).map((k) => (
+                      <option key={k} value={k}>{OBJECTIVE_LABELS[k]}</option>
+                    ))}
+                  </select>
+                </label>
+                {m.objectiveMode === "skill" && (
+                  <label style={{ gridColumn: "1 / -1" }}>
+                    <span>技能傷害目標</span>
+                    <select
+                      className="select"
+                      value={effSkill?.id ?? 0}
+                      onChange={(e) => updateMember(i, { skillId: Number(e.target.value) || 0 })}
+                      disabled={skills.length === 0}
+                      title={skills.length === 0 ? "技能資料載入中…" : "選擇要用來最大化的技能"}
+                    >
+                      {skills.length === 0 ? (
+                        <option value={0}>{v ? "技能資料載入中…" : "請先選擇魔靈"}</option>
+                      ) : (
+                        skills.map((s) => <option key={s.id} value={s.id}>S{s.slot} · {s.n}</option>)
+                      )}
+                    </select>
+                  </label>
+                )}
                 <div className="team-mode">
                   <span>速度條件</span>
                   <div className="seg" role="radiogroup" aria-label={`第 ${i + 1} 隻速度條件`}>
@@ -1295,6 +1409,17 @@ export default function TeamOptimizerPage() {
                   : `${(activePlan.searchMs / 1000).toFixed(1)} s`}
                 · 節點 {fmt(activePlan.nodes)}
               </div>
+              {activePlan.members.some((m) => m.priority > 0) && (
+                <div className="tiny dim" style={{ marginTop: 3 }}>
+                  優先順序：
+                  {[...activePlan.members]
+                    .filter((m) => m.priority > 0)
+                    .sort((a, b) => a.priority - b.priority)
+                    .map((m) => `${m.priority}. ${monsterLabel(m.master)}`)
+                    .join(" → ")}
+                  <span className="dim">（先最大化第 1 優先，再依序最大化其他魔靈）</span>
+                </div>
+              )}
             </div>
             <div className="row wrap" style={{ gap: 5 }}>
               {[plan, ...(plan?.alternatives ?? [])].map((p, idx) => (
@@ -1344,7 +1469,11 @@ export default function TeamOptimizerPage() {
                       <MonsterIcon id={m.master} size={40} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 700, fontSize: 12.5 }}>{monsterLabel(m.master)}</div>
-                        <div className="tiny dim">{TEAM_ROLE_LABELS[m.role]} · 個人最佳 {Math.round(m.norm * 100)}%</div>
+                        <div className="tiny dim">
+                          {m.priority > 0 && <span className="chip gold" style={{ marginRight: 4 }}>優先 {m.priority}</span>}
+                          {TEAM_ROLE_LABELS[m.role]} · 個人最佳 {Math.round(m.norm * 100)}%
+                          {m.objective === "skill" && m.skillName ? ` · ${m.skillName}` : ""}
+                        </div>
                       </div>
                     </div>
                     <TickBadge spd={m.stats.spd} rta={rta} />
@@ -1359,6 +1488,9 @@ export default function TeamOptimizerPage() {
                     <span>RES {m.stats.res}%</span>
                     <span>ACC {m.stats.acc}%</span>
                     <span>EHP {fmt(m.ehp)}</span>
+                    {m.objective === "skill" && (
+                      <span>技能傷害 <b className="gold">{fmt(m.score)}</b></span>
+                    )}
                   </div>
                   <div className="tiny dim" style={{ marginTop: 4 }}>{setSummary(m.sets) || "無套裝加成"}</div>
                   <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginTop: 7 }}>

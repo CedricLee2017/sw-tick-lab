@@ -11,6 +11,7 @@ import {
   type StatAccum,
 } from "./stats";
 import type { BonusConfig, FocusEntry, Rune, Stats } from "./types";
+import { computeSkillDamage, type DamageOptions, type Skill } from "./damage";
 
 /** Focus 區塊最多可選幾組屬性 */
 export const FOCUS_LIMIT = 5;
@@ -67,13 +68,23 @@ export function focusFitOf(stats: Stats, focus: FocusEntry[] | undefined): numbe
 }
 
 /** 隊伍配符使用的搜尋目標（必須可序列化，才能傳進 Worker） */
-export type OptObjective = "score" | "spd" | "dps" | "tank" | "support";
+export type OptObjective = "score" | "spd" | "dps" | "tank" | "support" | "skill";
+
+/** 以指定技能傷害作為搜尋目標（技能與傷害選項都是純資料，可傳進 Worker） */
+export interface SkillObjective {
+  skill: Skill;
+  opts: DamageOptions;
+}
 
 /**
  * 依面板 / 實戰數值計算搜尋目標分數。
  * 只用來排序候選與剪枝；最後隊伍分數會再依每隻魔靈的正規化值加權。
  */
-export function objectiveOf(stats: Stats, objective: OptObjective = "score"): number {
+export function objectiveOf(
+  stats: Stats,
+  objective: OptObjective = "score",
+  skillObjective?: SkillObjective,
+): number {
   switch (objective) {
     case "spd":
       return stats.spd;
@@ -85,9 +96,29 @@ export function objectiveOf(stats: Stats, objective: OptObjective = "score"): nu
     case "support":
       // 速度、有效體力與命中 / 抵抗的綜合值（僅用於同一隻魔靈之間的排序）
       return stats.spd * 2 + (stats.hp + stats.def * 4) / 1000 + (stats.acc + stats.res) * 1.5;
+    case "skill":
+      return skillObjective ? computeSkillDamage(stats, skillObjective.skill, skillObjective.opts).total : 0;
     default:
       return scoreOf(stats);
   }
+}
+
+/**
+ * 技能傷害目標的候選排序權重：從倍率公式使用的變數推導，
+ * 讓「吃速度」的技能（例如 Kaito S3：ATK × (SPD + 192) / 41）也會優先挑速度符文。
+ */
+function skillRankWeights(skill: Skill): Record<StatKey, number> | null {
+  const f = skill.f;
+  const w: Record<StatKey, number> = { hp: 0, atk: 0, def: 0, spd: 0, cr: 0, cd: 0, res: 0, acc: 0 };
+  if (/\{ATK\}/.test(f)) w.atk = 1;
+  if (/\{SPD\}|\{ATTACK_SPEED\}|\{Target SPD\}/.test(f)) w.spd = 1;
+  if (/\{MAX HP\}|\{HP\}|\{Current HP\}|\{Missing HP\}/.test(f)) w.hp = 1;
+  if (/\{DEF\}/.test(f)) w.def = 1;
+  if (w.hp + w.atk + w.def + w.spd === 0) return null;
+  // 暴擊率 / 暴傷只影響倍率，不影響公式選符文的方向
+  w.cr = 0.6;
+  w.cd = 0.6;
+  return w;
 }
 
 export interface OptRequest {
@@ -125,6 +156,8 @@ export interface OptRequest {
   topK?: number;
   /** topK 模式的排序目標（預設 score） */
   objective?: OptObjective;
+  /** objective 為 "skill" 時使用的技能與傷害選項 */
+  skillObjective?: SkillObjective;
 }
 
 export interface Build {
@@ -394,6 +427,7 @@ export function optimize(req: OptRequest): OptResult {
     lockedRunes = [],
     topK = 0,
     objective = "score",
+    skillObjective,
   } = req;
 
   const INTANGIBLE_ID = 25;
@@ -425,9 +459,10 @@ export function optimize(req: OptRequest): OptResult {
    * - 沒有 FOCUS 時才退回通用綜合權重。
    */
   const focusRank = focusList.length > 0;
+  const skillWeights = objective === "skill" && skillObjective ? skillRankWeights(skillObjective.skill) : null;
   const wRank: Record<StatKey, number> = focusRank
     ? { hp: 0, atk: 0, def: 0, spd: 0, cr: 0, cd: 0, res: 0, acc: 0 }
-    : w;
+    : (skillWeights ?? w);
   if (focusRank) for (const f of focusList) wRank[f.key] = f.weight;
   const rankValue = (r: Rune) => runeValue(r, wRank, focusRank ? undefined : focusWeight) + r.eff * 0.01;
 
@@ -730,7 +765,7 @@ export function optimize(req: OptRequest): OptResult {
           idx: [...chosenIdx],
           stats,
           ehp,
-          objective: objectiveOf(battleStats, objective),
+          objective: objectiveOf(battleStats, objective, skillObjective),
           score,
           eff,
           fit,

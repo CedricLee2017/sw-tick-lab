@@ -18,6 +18,7 @@ import {
   optimize,
   type OptObjective,
   type OptRequest,
+  type SkillObjective,
   type TopBuild,
 } from "./optimizer";
 import type { BaseStats } from "./stats";
@@ -74,6 +75,14 @@ export interface TeamMemberSpec {
   leadSpd: number;
   /** 覆寫搜尋目標；省略時依角色決定 */
   objective?: OptObjective;
+  /** 指定技能傷害為搜尋目標（會覆寫 objective） */
+  skillObjective?: SkillObjective;
+  /**
+   * 優先順序：1 = 最優先。設定後改用「字典序」最大化：
+   * 先讓第 1 優先的魔靈拿到最高分，再在相同分數下最大化第 2 優先，依此類推。
+   * 0 / 未設定 = 不指定（排在已指定之後，依權重決定）。
+   */
+  priority?: number;
 }
 
 export interface TeamRequest {
@@ -119,6 +128,12 @@ export interface TeamBuild {
   contribution: number;
   eff: number;
   focusFit: number;
+  /** 這隻魔靈使用的搜尋目標 */
+  objective: OptObjective;
+  /** 優先順序（1 = 最優先；0 = 未指定） */
+  priority: number;
+  /** 技能傷害目標時顯示用 */
+  skillName?: string;
 }
 
 export interface TeamPlan {
@@ -176,6 +191,8 @@ interface State {
   total: number;
   eff: number;
   spd: number;
+  /** 依優先順序排列的個人最佳 %（字典序比較用） */
+  keys: number[];
 }
 
 const INTANGIBLE_ID = 25;
@@ -221,7 +238,9 @@ function searchOnce(
   k: number,
   over: SearchOverride = {},
 ): SearchResult {
-  const objective = spec.objective ?? roleObjective(spec.role);
+  const objective: OptObjective = spec.skillObjective
+    ? "skill"
+    : (spec.objective ?? roleObjective(spec.role));
   const sets = over.sets ?? spec.sets;
   const optReq: OptRequest = {
     base: spec.base,
@@ -245,6 +264,7 @@ function searchOnce(
     lockedRunes: req.lockedRunes,
     topK: Math.max(1, Math.round(k)),
     objective,
+    skillObjective: spec.skillObjective,
   };
   const res = optimize(optReq);
   return {
@@ -325,6 +345,33 @@ export function optimizeTeam(
   const topK = Math.max(4, Math.min(300, Math.round(req.topK || 60)));
   const diversify = req.diversify !== false;
   const firstK = diversify ? Math.max(4, Math.round(topK * 0.6)) : topK;
+
+  // ── 優先順序（字典序）──
+  // 有設定 priority（>0）時，先最大化第 1 優先魔靈的個人最佳 %，
+  // 分數相同時再最大化第 2 優先，依此類推；最後才比加權總分。
+  const priorityMode = members.some((m) => (m.priority ?? 0) > 0);
+  const rankOf = new Array<number>(n).fill(0);
+  if (priorityMode) {
+    const byPriority = members
+      .map((_, i) => i)
+      .sort((a, b) => {
+        const pa = members[a].priority ?? 0;
+        const pb = members[b].priority ?? 0;
+        const ra = pa > 0 ? pa : Number.MAX_SAFE_INTEGER;
+        const rb = pb > 0 ? pb : Number.MAX_SAFE_INTEGER;
+        return ra - rb || (members[b].weight || 1) - (members[a].weight || 1) || a - b;
+      });
+    byPriority.forEach((mi, rank) => { rankOf[mi] = rank; });
+  }
+  const cmpState = (a: State, b: State): number => {
+    if (priorityMode) {
+      for (let k = 0; k < n; k++) {
+        const d = a.keys[k] - b.keys[k];
+        if (d !== 0) return d;
+      }
+    }
+    return a.total - b.total || a.eff - b.eff || a.spd - b.spd;
+  };
 
   // ── Stage A：每隻魔靈的候選配裝 ──
   const firstLists: TopBuild[][] = [];
@@ -423,14 +470,25 @@ export function optimizeTeam(
   const width = Math.max(4, Math.min(512, Math.round(req.beamWidth || 48)));
   const altCount = Math.max(1, Math.min(10, Math.round(req.alternatives ?? 3)));
 
-  // 最難配的先處理（候選最少），可以更早剪掉不可能的分支
+  // 最難配的先處理（候選最少），可以更早剪掉不可能的分支；
+  // 有優先順序時，先處理高優先的魔靈，字典序比較才有意義。
   const order = members
     .map((_, i) => i)
-    .sort((a, b) => cands[a].length - cands[b].length || members[b].weight - members[a].weight);
+    .sort((a, b) => {
+      if (priorityMode && rankOf[a] !== rankOf[b]) return rankOf[a] - rankOf[b];
+      return cands[a].length - cands[b].length || members[b].weight - members[a].weight;
+    });
 
   // ── Stage B：Beam Search ──
   let states: State[] = [
-    { picks: new Array<Candidate | null>(n).fill(null), used: new Set<number>(), total: 0, eff: 0, spd: 0 },
+    {
+      picks: new Array<Candidate | null>(n).fill(null),
+      used: new Set<number>(),
+      total: 0,
+      eff: 0,
+      spd: 0,
+      keys: new Array<number>(n).fill(0),
+    },
   ];
 
   const extend = (mi: number, from: State[], list: Candidate[]): State[] => {
@@ -449,9 +507,12 @@ export function optimizeTeam(
         for (const id of c.runeIds) used.add(id);
         const picks = st.picks.slice();
         picks[mi] = c;
+        const keys = st.keys.slice();
+        keys[rankOf[mi]] = c.norm;
         next.push({
           picks,
           used,
+          keys,
           total: st.total + c.contribution,
           eff: st.eff + c.eff,
           spd: st.spd + c.stats.spd,
@@ -500,7 +561,7 @@ export function optimizeTeam(
         unitId: members[mi].unitId,
       };
     }
-    next.sort((a, b) => b.total - a.total || b.eff - a.eff || b.spd - a.spd);
+    next.sort((a, b) => cmpState(b, a));
     states = next.slice(0, width);
   }
 
@@ -518,17 +579,22 @@ export function optimizeTeam(
           for (const id of best.picks[j]?.runeIds ?? []) usedOthers.add(id);
         }
         let bestCand = current;
-        let bestTotal = best.total;
-        let bestEff = best.eff;
-        let bestSpd = best.spd;
+        let bestState = best;
         for (const c of cands[i]) {
           if (c === current) continue;
           if (c.runeIds.some((id) => usedOthers.has(id))) continue;
-          const total = best.total - current.contribution + c.contribution;
-          if (total > bestTotal + 1e-9) {
-            bestTotal = total;
-            bestEff = best.eff - current.eff + c.eff;
-            bestSpd = best.spd - current.stats.spd + c.stats.spd;
+          const keys = best.keys.slice();
+          keys[rankOf[i]] = c.norm;
+          const trial: State = {
+            picks: best.picks,
+            used: best.used,
+            keys,
+            total: best.total - current.contribution + c.contribution,
+            eff: best.eff - current.eff + c.eff,
+            spd: best.spd - current.stats.spd + c.stats.spd,
+          };
+          if (cmpState(trial, bestState) > 0) {
+            bestState = trial;
             bestCand = c;
           }
         }
@@ -537,7 +603,7 @@ export function optimizeTeam(
           picks[i] = bestCand;
           const used = new Set<number>();
           for (const p of picks) for (const id of p?.runeIds ?? []) used.add(id);
-          best = { picks, used, total: bestTotal, eff: bestEff, spd: bestSpd };
+          best = { ...bestState, picks, used };
           improved = true;
         }
       }
@@ -548,7 +614,7 @@ export function optimizeTeam(
 
   onProgress?.({ stage: "refine", member: n - 1, total: n });
   const refined = states.map(refine);
-  refined.sort((a, b) => b.total - a.total || b.eff - a.eff || b.spd - a.spd);
+  refined.sort((a, b) => cmpState(b, a));
 
   // 去重（不同 Beam 狀態可能被改良成同一隊）
   const seen = new Set<string>();
@@ -612,6 +678,9 @@ function toPlan(state: State, members: TeamMemberSpec[]): TeamPlan {
       contribution: c.contribution,
       eff: c.eff,
       focusFit: c.fit,
+      objective: members[i].skillObjective ? "skill" : (members[i].objective ?? roleObjective(members[i].role)),
+      priority: members[i].priority ?? 0,
+      skillName: members[i].skillObjective?.skill.n,
     });
   }
   return {
@@ -672,7 +741,7 @@ export function scoreTeam(
   return members.reduce((sum, m) => {
     const p = picks.find((x) => x.unitId === m.unitId);
     if (!p) return sum;
-    const objective = m.objective ?? roleObjective(m.role);
-    return sum + m.weight * objectiveOf(p.stats, objective);
+    const objective = m.skillObjective ? "skill" : (m.objective ?? roleObjective(m.role));
+    return sum + m.weight * objectiveOf(p.stats, objective, m.skillObjective);
   }, 0);
 }
