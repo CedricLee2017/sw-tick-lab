@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { monsterLabel, useStore, type DeckFav } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
-import { MonsterIcon, Modal, RuneCard, TickBadge, fmt } from "../components/ui";
+import { MonsterIcon, Modal, RuneCard, RuneBoard, StatRows, TickBadge, fmt, ArtifactCard } from "../components/ui";
 import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPicker";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import { setSummary, speedForTick } from "../lib/stats";
@@ -175,6 +175,59 @@ function initialMembers(): MemberDraft[] {
   return templateMembers(teamTemplateOf("guild-speed"), 3).map((t) => draftFromTemplate(t));
 }
 
+const STORAGE_KEY = "swtick:team-opt:v1";
+const CONTEXTS: DeckContext[] = ["arena", "guild", "dungeon"];
+const BUDGET_KEYS: BudgetKey[] = ["fast", "standard", "full"];
+
+/** 頁面關掉 / 換頁再回來（或重新整理）時要保留的設定與結果 */
+interface SavedState {
+  templateId: string;
+  size: Size;
+  content: DeckContext;
+  members: MemberDraft[];
+  leadPct: number;
+  budgetKey: BudgetKey;
+  oppSpd: number;
+  plan: TeamPlan | null;
+  altIndex: number;
+  /** 存檔版本（account.importedAt）；換帳號時舊結果會作廢 */
+  importedAt: number | null;
+}
+
+function loadSaved(): SavedState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<SavedState>;
+    const templateId = TEAM_TEMPLATES.some((t) => t.id === v.templateId) ? (v.templateId as string) : "guild-speed";
+    const size: Size = v.size === 4 || v.size === 5 ? v.size : 3;
+    const content: DeckContext = CONTEXTS.includes(v.content as DeckContext) ? (v.content as DeckContext) : "guild";
+    const budgetKey: BudgetKey = BUDGET_KEYS.includes(v.budgetKey as BudgetKey) ? (v.budgetKey as BudgetKey) : "standard";
+    const fallback = templateMembers(teamTemplateOf(templateId), size).map((t) => draftFromTemplate(t));
+    const members =
+      Array.isArray(v.members) && v.members.length === size
+        ? v.members.map((m, i) => ({ ...fallback[i], ...(m as MemberDraft) }))
+        : fallback;
+    const plan =
+      v.plan && Array.isArray(v.plan.members) && Array.isArray(v.plan.alternatives) ? (v.plan as TeamPlan) : null;
+    const altIndex = plan && typeof v.altIndex === "number" ? Math.max(0, Math.min(plan.alternatives.length, Math.round(v.altIndex))) : 0;
+    return {
+      templateId,
+      size,
+      content,
+      members,
+      leadPct: typeof v.leadPct === "number" ? v.leadPct : 0,
+      budgetKey,
+      oppSpd: typeof v.oppSpd === "number" ? v.oppSpd : 0,
+      plan,
+      altIndex,
+      importedAt: typeof v.importedAt === "number" ? v.importedAt : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function TeamOptimizerPage() {
   const account = useStore((s) => s.account);
   const runeMap = useStore((s) => s.runeMap);
@@ -189,24 +242,25 @@ export default function TeamOptimizerPage() {
   const bonus = settings.bonus;
   const rta = settings.rta;
 
-  const [templateId, setTemplateId] = useState("guild-speed");
-  const [size, setSize] = useState<Size>(3);
-  const [content, setContent] = useState<DeckContext>("guild");
-  const [members, setMembers] = useState<MemberDraft[]>(initialMembers);
+  const [saved] = useState(loadSaved);
+  const [templateId, setTemplateId] = useState(saved?.templateId ?? "guild-speed");
+  const [size, setSize] = useState<Size>(saved?.size ?? 3);
+  const [content, setContent] = useState<DeckContext>(saved?.content ?? "guild");
+  const [members, setMembers] = useState<MemberDraft[]>(saved?.members ?? initialMembers);
   /** 全隊速度隊長技 %（0 = 沒有）；每隻可在卡片上個別覆寫 */
-  const [leadPct, setLeadPct] = useState(0);
-  const [budgetKey, setBudgetKey] = useState<BudgetKey>("standard");
+  const [leadPct, setLeadPct] = useState(saved?.leadPct ?? 0);
+  const [budgetKey, setBudgetKey] = useState<BudgetKey>(saved?.budgetKey ?? "standard");
 
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<TeamProgress | null>(null);
-  const [plan, setPlan] = useState<TeamPlan | null>(null);
-  const [altIndex, setAltIndex] = useState(0);
+  const [plan, setPlan] = useState<TeamPlan | null>(saved?.plan ?? null);
+  const [altIndex, setAltIndex] = useState(saved?.altIndex ?? 0);
   const [error, setError] = useState<string | null>(null);
   const [pickerIndex, setPickerIndex] = useState(-1);
   const [deckOpen, setDeckOpen] = useState(false);
   const [pinDeckRunes, setPinDeckRunes] = useState(false);
   /** 鏡像對手（防守提條角）速度；0 = 自動使用起手速度 */
-  const [oppSpd, setOppSpd] = useState(0);
+  const [oppSpd, setOppSpd] = useState(saved?.oppSpd ?? 0);
 
   const workerRef = useRef<Worker | null>(null);
   const runIdRef = useRef(0);
@@ -219,7 +273,7 @@ export default function TeamOptimizerPage() {
   const budget = BUDGETS[budgetKey];
 
   // 換帳號時清掉舊結果與已不存在的魔靈（上符只會改 account，不會改 importedAt）
-  const importedAtRef = useRef<number | null>(null);
+  const importedAtRef = useRef<number | null>(saved?.importedAt ?? null);
   useEffect(() => {
     if (account && importedAtRef.current !== account.importedAt) {
       importedAtRef.current = account.importedAt;
@@ -232,6 +286,19 @@ export default function TeamOptimizerPage() {
       return prev.map((m) => (m.unitId && !ids.has(m.unitId) ? { ...m, unitId: 0, includeRunes: [], panelExtra: 0 } : m));
     });
   }, [account, summary]);
+
+  // 設定與結果存到瀏覽器：跳去其他頁面再回來、或重新整理都不會不見
+  useEffect(() => {
+    const data: SavedState = {
+      templateId, size, content, members, leadPct, budgetKey, oppSpd, plan, altIndex,
+      importedAt: account?.importedAt ?? null,
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      /* 忽略儲存失敗（例如容量不足） */
+    }
+  }, [templateId, size, content, members, leadPct, budgetKey, oppSpd, plan, altIndex, account?.importedAt]);
 
   // 隊長技全部由數值欄位決定，不再依魔靈自動判斷
 
@@ -1462,13 +1529,15 @@ export default function TeamOptimizerPage() {
           <div className="team-result-grid">
             {activePlan.members.map((m) => {
               const runes = m.runeIds.map((id) => runeMap.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
+              const v = viewOf(m.unitId);
+              const artifacts = v?.artifacts ?? [];
               return (
                 <div key={m.unitId} className="team-result-member">
-                  <div className="row between" style={{ gap: 8 }}>
+                  <div className="row between wrap" style={{ gap: 8 }}>
                     <div className="row" style={{ gap: 8, minWidth: 0 }}>
-                      <MonsterIcon id={m.master} size={40} />
+                      <MonsterIcon id={m.master} size={44} />
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 12.5 }}>{monsterLabel(m.master)}</div>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{monsterLabel(m.master)}</div>
                         <div className="tiny dim">
                           {m.priority > 0 && <span className="chip gold" style={{ marginRight: 4 }}>優先 {m.priority}</span>}
                           {TEAM_ROLE_LABELS[m.role]} · 個人最佳 {Math.round(m.norm * 100)}%
@@ -1478,24 +1547,52 @@ export default function TeamOptimizerPage() {
                     </div>
                     <TickBadge spd={m.stats.spd} rta={rta} />
                   </div>
-                  <div className="row wrap tiny" style={{ gap: 6, marginTop: 7 }}>
-                    <span>SPD <b className="gold">{m.stats.spd}</b></span>
-                    <span>HP {fmt(m.stats.hp)}</span>
-                    <span>DEF {fmt(m.stats.def)}</span>
-                    <span>ATK {fmt(m.stats.atk)}</span>
-                    <span>CR {m.stats.cr}%</span>
-                    <span>CD {m.stats.cd}%</span>
-                    <span>RES {m.stats.res}%</span>
-                    <span>ACC {m.stats.acc}%</span>
-                    <span>EHP {fmt(m.ehp)}</span>
-                    {m.objective === "skill" && (
-                      <span>技能傷害 <b className="gold">{fmt(m.score)}</b></span>
-                    )}
+
+                  <div className="team-member-body">
+                    <div className="team-member-stats">
+                      <StatRows
+                        stats={m.stats}
+                        base={v?.base}
+                        className="stat-rows-flat"
+                        extra={[
+                          {
+                            label: "EHP",
+                            value: <span title="含一般召喚師技能；公會技能不計入">{fmt(m.ehp)}</span>,
+                          },
+                          ...(m.objective === "skill"
+                            ? [{ label: "技能傷害", value: <b className="gold">{fmt(m.score)}</b> }]
+                            : []),
+                        ]}
+                      />
+                      <div className="tiny dim" style={{ marginTop: 7 }}>
+                        {setSummary(m.sets) || "無套裝加成"} · 效率 {Math.round(m.eff)}%
+                      </div>
+                    </div>
+
+                    <div className="team-member-runes">
+                      <div className="rune-wheel-head">
+                        <span className="rune-wheel-title">符文</span>
+                        <span className="tiny dim">{runes.length}/6 · 依遊戲位置 1 → 6</span>
+                      </div>
+                      <RuneBoard
+                        runes={runes}
+                        renderRune={(r) => <RuneCard rune={r} compact owner={monsterLabel(m.master)} />}
+                      />
+                    </div>
                   </div>
-                  <div className="tiny dim" style={{ marginTop: 4 }}>{setSummary(m.sets) || "無套裝加成"}</div>
-                  <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginTop: 7 }}>
-                    {runes.map((r) => <RuneCard key={r.id} rune={r} compact owner={monsterLabel(m.master)} />)}
-                  </div>
+
+                  {artifacts.length > 0 && (
+                    <details className="team-member-artifacts">
+                      <summary className="tiny dim">
+                        目前神器 {artifacts.length}/2
+                        <span className="dim"> · 一鍵配隊只配置符文，神器不計入面板數值</span>
+                      </summary>
+                      <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8, marginTop: 8 }}>
+                        {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} owner={monsterLabel(m.master)} />)}
+                      </div>
+                    </details>
+                  )}
+
                   <div className="row" style={{ gap: 6, marginTop: 8 }}>
                     <button type="button" className="btn btn-sm btn-ghost" onClick={() => pinMember(m.unitId)} title="固定這隻的符文，重新配其他魔靈">
                       <Pin size={12} /> 固定這隻

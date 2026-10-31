@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import {
   Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap,
 } from "lucide-react";
@@ -47,8 +47,29 @@ function currentRoute(): RouteKey {
   return (ROUTES.find((r) => r.key === h)?.key ?? "import") as RouteKey;
 }
 
+const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
+  import: ImportPage,
+  overview: OverviewPage,
+  speed: SpeedPage,
+  speedtick: SpeedTickPage,
+  rta: RtaPage,
+  optimizer: OptimizerPage,
+  "team-opt": TeamOptimizerPage,
+  "artifact-opt": ArtifactOptimizerPage,
+  "artifact-ad": AdCalculatorPage,
+  builds: BuildsPage,
+  decks: DecksPage,
+  monsters: MonstersPage,
+  summonlog: SummonLogPage,
+  runes: RunesPage,
+  artifacts: ArtifactsPage,
+  settings: SettingsPage,
+};
+
 export default function App() {
   const [route, setRoute] = useState<RouteKey>(currentRoute());
+  /** 已經開過的頁面：切換頁籤時只隱藏、不卸載，設定才不會消失 */
+  const [visited, setVisited] = useState<Set<RouteKey>>(() => new Set([currentRoute()]));
   const { hydrate, ready, account, toasts, settings } = useStore();
 
   useEffect(() => {
@@ -60,6 +81,10 @@ export default function App() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  useEffect(() => {
+    setVisited((prev) => (prev.has(route) ? prev : new Set(prev).add(route)));
+  }, [route]);
 
   useEffect(() => {
     if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick") {
@@ -74,27 +99,21 @@ export default function App() {
 
   const meta = ROUTES.find((r) => r.key === route) ?? ROUTES[0];
 
-  const page = (() => {
-    if (!ready) return <div className="empty">載入中…</div>;
-    switch (route) {
-      case "overview": return <OverviewPage />;
-      case "speed": return <SpeedPage />;
-      case "speedtick": return <SpeedTickPage />;
-      case "rta": return <RtaPage />;
-      case "optimizer": return <OptimizerPage />;
-      case "team-opt": return <TeamOptimizerPage />;
-      case "artifact-opt": return <ArtifactOptimizerPage />;
-      case "artifact-ad": return <AdCalculatorPage />;
-      case "builds": return <BuildsPage />;
-      case "decks": return <DecksPage />;
-      case "monsters": return <MonstersPage />;
-      case "summonlog": return <SummonLogPage />;
-      case "runes": return <RunesPage />;
-      case "artifacts": return <ArtifactsPage />;
-      case "settings": return <SettingsPage />;
-      default: return <ImportPage />;
-    }
-  })();
+  const page = !ready ? (
+    <div className="empty">載入中…</div>
+  ) : (
+    <>
+      {ROUTES.map((r) => {
+        if (!visited.has(r.key)) return null;
+        const Comp = PAGE_COMPONENTS[r.key];
+        return (
+          <div key={r.key} hidden={route !== r.key}>
+            <Comp />
+          </div>
+        );
+      })}
+    </>
+  );
 
   return (
     <div className="app">

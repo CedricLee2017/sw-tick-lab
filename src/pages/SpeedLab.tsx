@@ -7,6 +7,7 @@ import { MonsterPickerField } from "../components/MonsterPicker";
 import { speedForTick, tickOf } from "../lib/stats";
 import { simulateOrder } from "../lib/optimizer";
 import { ELEMENTS } from "../lib/constants";
+import { sendOptimizerDraft } from "../lib/draft";
 
 const TICK_PRESETS = [3, 4, 5, 6, 7, 8, 9, 10];
 
@@ -43,7 +44,7 @@ export default function SpeedPage() {
   }, [effectiveBase, extra, rta]);
 
   const goOptimizer = () => {
-    sessionStorage.setItem("swtick:draft", JSON.stringify({ monsterId, tick, swift }));
+    sendOptimizerDraft({ monsterId, tick, swift });
     window.location.hash = "#/optimizer";
   };
 

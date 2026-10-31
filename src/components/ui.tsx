@@ -81,6 +81,67 @@ export function StatGrid({ stats, compact = false }: { stats: Stats; compact?: b
   );
 }
 
+/**
+ * 屬性列：一行一項，與遊戲內魔靈資訊面板相同。
+ * 體力 / 攻擊力 / 防禦力 / 攻擊速度顯示「基礎（白）＋加成（綠）」，
+ * 暴擊率 / 暴傷 / 抵抗 / 命中顯示總值。
+ * `extra` 可追加 EHP、技能傷害等不是面板原生欄位的數值（一行一項）。
+ */
+export function StatRows({
+  stats,
+  base,
+  extra = [],
+  className = "",
+}: {
+  stats: Stats;
+  base?: BaseStats;
+  extra?: { label: string; value: ReactNode }[];
+  className?: string;
+}) {
+  const rows: { label: string; base?: number; value: number; percent?: boolean }[] = [
+    { label: "體力", base: base?.hp, value: stats.hp },
+    { label: "攻擊力", base: base?.atk, value: stats.atk },
+    { label: "防禦力", base: base?.def, value: stats.def },
+    { label: "攻擊速度", base: base?.spd, value: stats.spd },
+    { label: "暴擊率", value: stats.cr, percent: true },
+    { label: "暴擊傷害", value: stats.cd, percent: true },
+    { label: "效果抵抗", value: stats.res, percent: true },
+    { label: "效果命中", value: stats.acc, percent: true },
+  ];
+  const num = (v: number) => Math.round(v * 10) / 10;
+
+  return (
+    <div className={`mon-panel-stats ${className}`.trim()}>
+      {rows.map((r) => {
+        const diff = r.base == null ? 0 : r.value - r.base;
+        return (
+          <div key={r.label} className="mon-row">
+            <span className="k">{r.label}</span>
+            <span className="v">
+              {r.percent ? (
+                <span className="base">{num(r.value)}%</span>
+              ) : r.base == null ? (
+                <span className="base">{fmt(r.value)}</span>
+              ) : (
+                <>
+                  <span className="base">{fmt(r.base)}</span>
+                  {diff > 0 && <span className="add">+{fmt(diff)}</span>}
+                </>
+              )}
+            </span>
+          </div>
+        );
+      })}
+      {extra.map((e) => (
+        <div key={e.label} className="mon-row">
+          <span className="k">{e.label}</span>
+          <span className="v">{e.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** 屬性圖示（與遊戲面板的屬性徽章對應） */
 const EL_ICON = { 1: Droplet, 2: Flame, 3: Wind, 4: Sun, 5: Moon } as const;
 
@@ -111,17 +172,6 @@ export function MonsterPanel({
   /** 標題右側的額外資訊（例如 Tick 徽章） */
   badge?: ReactNode;
 }) {
-  const rows: { label: string; base?: number; value: number; percent?: boolean }[] = [
-    { label: "體力", base: base?.hp, value: stats.hp },
-    { label: "攻擊力", base: base?.atk, value: stats.atk },
-    { label: "防禦力", base: base?.def, value: stats.def },
-    { label: "攻擊速度", base: base?.spd, value: stats.spd },
-    { label: "暴擊率", value: stats.cr, percent: true },
-    { label: "暴擊傷害", value: stats.cd, percent: true },
-    { label: "效果抵抗", value: stats.res, percent: true },
-    { label: "效果命中", value: stats.acc, percent: true },
-  ];
-  const num = (v: number) => Math.round(v * 10) / 10;
   const Icon = EL_ICON[monster.el as 1 | 2 | 3 | 4 | 5] ?? Droplet;
   const starCount = Math.max(0, Math.min(6, Math.round(stars)));
 
@@ -164,28 +214,7 @@ export function MonsterPanel({
         </div>
       </div>
 
-      <div className="mon-panel-stats">
-        {rows.map((r) => {
-          const diff = r.base == null ? 0 : r.value - r.base;
-          return (
-            <div key={r.label} className="mon-row">
-              <span className="k">{r.label}</span>
-              <span className="v">
-                {r.percent ? (
-                  <span className="base">{num(r.value)}%</span>
-                ) : r.base == null ? (
-                  <span className="base">{fmt(r.value)}</span>
-                ) : (
-                  <>
-                    <span className="base">{fmt(r.base)}</span>
-                    {diff > 0 && <span className="add">+{fmt(diff)}</span>}
-                  </>
-                )}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <StatRows stats={stats} base={base} />
     </div>
   );
 }

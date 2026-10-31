@@ -5,6 +5,7 @@ import { useSummary } from "../lib/accountStats";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
 import { Modal, MonsterIcon, MonsterPanel, RuneBoard, RuneCard, ArtifactCard, TickBadge, fmt, setColor } from "../components/ui";
 import { setSummary } from "../lib/stats";
+import { sendOptimizerDraft } from "../lib/draft";
 
 export default function MonstersPage() {
   const summary = useSummary();
@@ -150,7 +151,7 @@ export default function MonstersPage() {
             <button
               className="btn btn-primary btn-sm"
               onClick={() => {
-                sessionStorage.setItem("swtick:draft", JSON.stringify({ monsterId: current.monster.id }));
+                sendOptimizerDraft({ monsterId: current.monster.id });
                 window.location.hash = "#/optimizer";
                 setOpen(null);
               }}

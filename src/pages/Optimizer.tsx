@@ -13,6 +13,7 @@ import {
   type DamageOptions, type DamageResult, type Skill, type SkillData,
 } from "../lib/damage";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
+import { onOptimizerDraft, takeOptimizerDraft } from "../lib/draft";
 import { RuneRestrictions } from "../components/RuneRestrictions";
 import {
   FOCUS_LIMIT, FOCUS_OPTIONS, STAT_KEYS, buildAt, normalizeFocus, statsAt,
@@ -344,12 +345,11 @@ export default function OptimizerPage() {
     setPlanIdx(-1);
   }, [monsterId]);
 
-  // 從速度實驗室帶入
+  // 從速度實驗室 / 儲存庫 / 魔靈頁帶入（配符頁可能已經開啟，所以事件也要監聽）
   useEffect(() => {
-    const raw = sessionStorage.getItem("swtick:draft");
-    if (!raw) return;
-    try {
-      const d = JSON.parse(raw) as { monsterId?: number; tick?: number; includeRunes?: number[]; mode?: "tick" | "speed"; speed?: number };
+    const applyDraft = () => {
+      const d = takeOptimizerDraft();
+      if (!d) return;
       if (d.monsterId) setMonsterId(d.monsterId);
       if (d.tick) { setTick(d.tick); setMode("tick"); }
       if (d.includeRunes?.length) {
@@ -359,8 +359,9 @@ export default function OptimizerPage() {
         setMode(d.mode ?? "speed");
         setSpeedTarget(d.speed ?? 0);
       }
-      sessionStorage.removeItem("swtick:draft");
-    } catch { /* ignore */ }
+    };
+    applyDraft();
+    return onOptimizerDraft(applyDraft);
   }, []);
 
   const boxMonster = useMemo(() => (monsterId ? summary?.views.find((v) => v.monster.id === monsterId) : undefined), [monsterId, summary]);

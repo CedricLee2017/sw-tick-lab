@@ -4,6 +4,7 @@ import { MONSTER_MAP, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary, baseStats } from "../lib/stats";
 import { deckTypeLabel } from "../lib/deckTypes";
+import { sendOptimizerDraft } from "../lib/draft";
 import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, RuneBoard, RuneCard, TickBadge, fmt, setColor } from "../components/ui";
 import type { Artifact, Rune } from "../lib/types";
 import type { DeckFav, Loadout } from "../store";
@@ -43,19 +44,13 @@ export default function BuildsPage() {
 
   /** 把預設隊儲存庫中某一隻魔靈的符文帶到配符頁（設為包括） */
   const applyDeckUnit = (master: number, runeIds: number[]) => {
-    sessionStorage.setItem(
-      "swtick:draft",
-      JSON.stringify({ monsterId: master, includeRunes: runeIds, mode: "speed", speed: 0 }),
-    );
+    sendOptimizerDraft({ monsterId: master, includeRunes: runeIds, mode: "speed", speed: 0 });
     window.location.hash = "#/optimizer";
     notify("已把這隻魔靈的符文帶入配符頁（符文設為包括）");
   };
 
   const apply = (l: Loadout) => {
-    sessionStorage.setItem(
-      "swtick:draft",
-      JSON.stringify({ monsterId: l.monsterId, includeRunes: l.runeIds, mode: "speed", speed: 0 }),
-    );
+    sendOptimizerDraft({ monsterId: l.monsterId, includeRunes: l.runeIds, mode: "speed", speed: 0 });
     window.location.hash = "#/optimizer";
     notify("已把配裝帶入配符頁（符文設為包括）");
   };
