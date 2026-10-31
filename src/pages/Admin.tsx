@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Download, Loader2, RefreshCw, Search, ShieldCheck, Trash2, UserCheck, UserX } from "lucide-react";
 import { fmt } from "../components/ui";
 import { useStore } from "../store";
+import { useAuth } from "../lib/auth";
 
 interface AdminUser {
   id: number;
@@ -45,6 +46,7 @@ async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export default function AdminPage() {
   const notify = useStore((s) => s.notify);
+  const user = useAuth((s) => s.user);
   const [tab, setTab] = useState<"users" | "uploads">("users");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [uploads, setUploads] = useState<AdminUpload[]>([]);
@@ -86,8 +88,18 @@ export default function AdminPage() {
   }, [tab, q, loadUsers, loadUploads]);
 
   useEffect(() => {
+    if (!user?.isAdmin) return;
     void refresh();
-  }, [refresh]);
+  }, [refresh, user?.id, user?.isAdmin]);
+
+  if (!user?.isAdmin) {
+    return (
+      <div className="card card-pad" style={{ maxWidth: 420, margin: "40px auto", textAlign: "center" }}>
+        <div className="card-title">需要管理員權限</div>
+        <div className="tiny dim" style={{ marginTop: 6 }}>請用管理員帳號登入後再開啟這個頁面。</div>
+      </div>
+    );
+  }
 
   const patchUser = async (id: number, body: { status?: string; role?: string }) => {
     try {
