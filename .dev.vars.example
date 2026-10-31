@@ -1,0 +1,6 @@
+# 本機開發用的變數（複製成 .dev.vars，已列入 .gitignore）
+# 正式環境請用 `npx wrangler pages secret put SESSION_SECRET --project-name sw-tick-lab`
+
+SESSION_SECRET="用 openssl rand -base64 48 產生"
+GOOGLE_CLIENT_ID=""
+ADMIN_EMAILS=""

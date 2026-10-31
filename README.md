@@ -196,6 +196,31 @@ npx wrangler pages deploy dist --project-name sw-tick-lab
 
 `vite.config.ts` 已設定 `base: "./"`，可直接部署到任何靜態託管（GitHub Pages、Netlify、Cloudflare Pages）。
 
+## 會員系統與後台（建置中）
+
+後端改由 **Cloudflare Pages Functions + D1** 提供，和靜態網站同一個網域，不需要另外開伺服器。
+
+| 檔案 | 內容 |
+| --- | --- |
+| `functions/api/*` | API 路由（Pages Functions） |
+| `server/*` | 共用的 session、Google token 驗證、D1 存取 |
+| `db/schema.sql` | `users`、`uploads` 資料表 |
+| `wrangler.toml` | Pages 設定、D1 綁定、`ADMIN_EMAILS` |
+
+- **登入方式**：Google Identity Services。前端取得 ID token，Worker 用 Google 公鑰驗證（RS256）後簽發自己的 HttpOnly session cookie（HMAC-SHA256，30 天）。
+- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/google`、`POST /api/auth/logout`。
+- **尚未啟用**：前端登入牆、上傳到 Google Drive、`/admin` 後台。
+- **環境變數**：`GOOGLE_CLIENT_ID`（Pages 變數，公開）、`SESSION_SECRET`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
+- 本機測試後端：
+
+```bash
+npx wrangler d1 execute sw-tick-lab-db --local --file=db/schema.sql
+npm run dev:api   # http://localhost:8788
+```
+
+> 啟用自動上傳後，首頁與隱私說明會改成「未登入：純本機；登入：自動備份到服務擁有者的 Google Drive」。
+
+
 ## 技術結構
 
 ```

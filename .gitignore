@@ -2,6 +2,7 @@ node_modules/
 dist/
 .wrangler/
 .tmp/
+.dev.vars
 *.local
 .DS_Store
 Thumbs.db
