@@ -4,3 +4,7 @@
 SESSION_SECRET="用 openssl rand -base64 48 產生"
 GOOGLE_CLIENT_ID=""
 ADMIN_EMAILS=""
+
+# Google Drive 上傳（業主授權；npm run google:auth 會自動填入 refresh token）
+GOOGLE_OAUTH_CLIENT_SECRET=""
+GOOGLE_REFRESH_TOKEN=""

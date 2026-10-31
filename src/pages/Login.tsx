@@ -42,7 +42,7 @@ export function LoginForm() {
         </button>
       )}
       <div className="tiny dim login-note">
-        <ShieldCheck size={12} /> 登入只用來辨識會員身分；符文計算仍然在你的瀏覽器完成。
+        <ShieldCheck size={12} /> 登入後，你匯入的存檔會自動備份到服務的 Google Drive；解析與計算仍在你的瀏覽器完成。
       </div>
     </div>
   );

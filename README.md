@@ -4,7 +4,7 @@
 
 **線上使用：<https://sw-tick-lab.pages.dev>**　|　**原始碼：<https://github.com/CedricLee2017/sw-tick-lab>**
 
-> 符文與存檔運算都在你的瀏覽器完成。使用 Google 登入時，只會把帳號的 Email、名稱與頭像存到 Cloudflare（會員系統用）；存檔本身目前的版本還不會上傳。
+> 符文與存檔運算都在你的瀏覽器完成。使用 Google 登入後，匯入的原始存檔會自動備份到服務擁有者的 Google Drive（只使用 `drive.file` 範圍，後台可刪除）；未登入無法使用工具。
 
 ## 功能
 
@@ -214,9 +214,22 @@ npx wrangler pages deploy dist --project-name sw-tick-lab
 ```bash
 npx wrangler d1 execute sw-tick-lab-db --remote --command "UPDATE settings SET v='1' WHERE k='force_login'"
 ```
-- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/google`、`POST /api/auth/logout`。
-- **尚未啟用**：上傳到 Google Drive、`/admin` 後台。
-- **環境變數**：`GOOGLE_CLIENT_ID`（Pages 變數，公開）、`SESSION_SECRET`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
+- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/google`、`POST /api/auth/logout`、`POST /api/uploads`。
+- **存檔自動備份**：登入後在「匯入」頁上傳 JSON，瀏覽器解析完會背景呼叫 `POST /api/uploads`；Worker 用業主授權的 refresh token 以 **resumable upload 串流**送進 Google Drive（不把整包存檔讀進記憶體），再寫入 `uploads` 紀錄。
+  - 只申請 `drive.file` 範圍，Worker 僅能存取自己建立的檔案。
+  - 資料夾預設 `SWTickLab 存檔`，第一次上傳自動建立；資料夾 ID 存在 `settings.drive_folder_id`。
+  - 每位會員每 24 小時最多 30 次、單檔上限 25MB。
+  - 示範帳號不會上傳。
+- **尚未啟用**：`/admin` 後台。
+- **環境變數**：`GOOGLE_CLIENT_ID`（Pages 變數，公開）、`SESSION_SECRET`（Pages secret）、`GOOGLE_OAUTH_CLIENT_SECRET`、`GOOGLE_REFRESH_TOKEN`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
+- **取得 Drive 授權（一次性）**：
+
+```bash
+# 1. 在 .dev.vars 填入 GOOGLE_OAUTH_CLIENT_SECRET
+#    並在 OAuth 用戶端加入重新導向 URI：http://localhost:53682/
+npm run google:auth     # 用「要存檔的 Google 帳號」同意授權，refresh token 會寫回 .dev.vars
+npm run google:secret   # 把 secret 與 refresh token 上傳成 Pages Secret
+```
 - 本機測試後端：
 
 ```bash

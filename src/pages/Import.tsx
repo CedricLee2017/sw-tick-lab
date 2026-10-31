@@ -4,6 +4,8 @@ import {
 } from "lucide-react";
 import { monsterOf, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
+import { useAuth } from "../lib/auth";
+import { uploadSave } from "../lib/upload";
 import { Modal, fmt } from "../components/ui";
 import { buildingPct } from "../lib/stats";
 
@@ -24,7 +26,19 @@ export default function ImportPage() {
     setBusy(false);
     setWarnings(res.warnings ?? []);
     setError(res.ok ? null : (res.error ?? "匯入失敗"));
-    if (!res.ok) notify(res.error ?? "匯入失敗", "err");
+    if (!res.ok) {
+      notify(res.error ?? "匯入失敗", "err");
+      return;
+    }
+
+    // 登入後自動把原始存檔備份到 Google Drive（示範帳號除外）；不影響解析流程
+    const acc = useStore.getState().account;
+    const loggedIn = Boolean(useAuth.getState().user);
+    if (acc && loggedIn && !name.startsWith("demo-account")) {
+      void uploadSave(text, name, { wizard: acc.wizard, monsters: acc.units.length, runes: acc.runes.length })
+        .then(() => notify("已自動備份存檔到 Google Drive"))
+        .catch((err) => notify(`存檔備份失敗：${err instanceof Error ? err.message : "未知錯誤"}`, "err"));
+    }
   };
 
   const copyDiagnostics = async () => {
@@ -132,7 +146,7 @@ export default function ImportPage() {
           </div>
 
           <div className="row tiny dim" style={{ marginTop: 12, gap: 6 }}>
-            <ShieldCheck size={13} /> 檔案不會上傳到任何伺服器，全部在你的瀏覽器內解析。
+            <ShieldCheck size={13} /> 解析與計算都在你的瀏覽器完成；登入後匯入的存檔會自動備份一份到 Google Drive。
           </div>
         </div>
       </section>
@@ -228,7 +242,7 @@ export default function ImportPage() {
         <div className="card-head"><div className="card-title">如何使用</div><span className="chip muted">3 步完成</span></div>
         <div className="card-pad grid g3">
           <Step n={1} title="用 SWEX 匯出 JSON" desc="在遊戲內使用 Summoner's War Exporter 攔截資料，匯出成 .json 檔。SWOP 的存檔格式同樣支援。" />
-          <Step n={2} title="拖放到上方" desc="檔案只在瀏覽器解析，不會上傳。載入後可隨時切換頁面分析。" />
+          <Step n={2} title="拖放到上方" desc="解析在瀏覽器完成；登入後會自動備份一份原始 JSON 到 Google Drive。載入後可隨時切換頁面分析。" />
           <Step n={3} title="設定 Tick 目標配符" desc="在配符頁輸入 Tick 5，系統會算出需要 286 總速，並找出能達標的最佳符文組合。" />
         </div>
       </section>
