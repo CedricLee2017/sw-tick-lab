@@ -103,7 +103,7 @@ export default function App() {
   }, [route]);
 
   useEffect(() => {
-    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick") {
+    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "admin") {
       window.location.hash = "#/import";
     }
   }, [ready, account, route]);
