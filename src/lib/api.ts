@@ -10,8 +10,8 @@ export interface ApiUser {
 }
 
 export interface ApiConfig {
-  googleClientId: string;
   forceLogin: boolean;
+  /** Google Drive 備份是否已設定完成 */
   uploads: boolean;
 }
 
@@ -36,7 +36,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   config: () => request<ApiConfig>("/api/config"),
   me: () => request<{ user: ApiUser }>("/api/auth/me"),
-  googleLogin: (credential: string) =>
-    request<{ user: ApiUser }>("/api/auth/google", { method: "POST", body: JSON.stringify({ credential }) }),
+  login: (email: string, verifier: string) =>
+    request<{ user: ApiUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, verifier }) }),
+  register: (email: string, name: string, verifier: string) =>
+    request<{ user: ApiUser }>("/api/auth/register", { method: "POST", body: JSON.stringify({ email, name, verifier }) }),
+  changePassword: (current: string, next: string) =>
+    request<{ ok: true }>("/api/auth/password", { method: "POST", body: JSON.stringify({ current, next }) }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
 };

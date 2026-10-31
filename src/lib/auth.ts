@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, ApiError, type ApiConfig, type ApiUser } from "./api";
+import { deriveVerifier } from "./password";
 
 interface AuthState {
   /** 已經向後端問過一次登入狀態 */
@@ -8,9 +9,12 @@ interface AuthState {
   config: ApiConfig | null;
   error: string | null;
   init: () => Promise<void>;
-  signIn: (credential: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  register: (email: string, name: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
+
+const OFFLINE_CONFIG: ApiConfig = { forceLogin: false, uploads: false };
 
 export const useAuth = create<AuthState>((set) => ({
   ready: false,
@@ -32,14 +36,21 @@ export const useAuth = create<AuthState>((set) => ({
       // 後端還沒部署或離線：仍然讓本機功能可用
       set({
         ready: true,
-        config: { googleClientId: "", forceLogin: false, uploads: false },
+        config: OFFLINE_CONFIG,
         error: err instanceof Error ? err.message : "無法連線到登入服務",
       });
     }
   },
 
-  signIn: async (credential) => {
-    const { user } = await api.googleLogin(credential);
+  signIn: async (email, password) => {
+    const verifier = await deriveVerifier(email, password);
+    const { user } = await api.login(email, verifier);
+    set({ user, error: null });
+  },
+
+  register: async (email, name, password) => {
+    const verifier = await deriveVerifier(email, password);
+    const { user } = await api.register(email, name, verifier);
     set({ user, error: null });
   },
 

@@ -3,6 +3,9 @@ import {
   Building2, Download, Gauge, Info, RefreshCw, RotateCcw, Trash2, Zap, ShieldCheck,
 } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
+import { useAuth } from "../lib/auth";
+import { api } from "../lib/api";
+import { deriveVerifier } from "../lib/password";
 import { BUILDINGS } from "../lib/constants";
 import { defaultBonus, speedForTick } from "../lib/stats";
 import { exportAccount } from "../lib/parse";
@@ -116,6 +119,8 @@ export default function SettingsPage() {
 
   return (
     <>
+      <AccountCard />
+
       <div className="grid g3">
         <div className="card card-pad">
           <div className="row tiny dim" style={{ gap: 7 }}>
@@ -385,5 +390,69 @@ export default function SettingsPage() {
         )}
       </div>
     </>
+  );
+}
+
+/** 設定頁最上方的帳號區：顯示登入身分與修改密碼 */
+function AccountCard() {
+  const { user } = useAuth();
+  const notify = useStore((s) => s.notify);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (!user) return null;
+
+  const submit = async () => {
+    if (next.length < 8) return notify("新密碼至少 8 個字元", "err");
+    if (next !== confirm) return notify("兩次輸入的新密碼不一致", "err");
+    setBusy(true);
+    try {
+      const currentVerifier = current ? await deriveVerifier(user.email, current) : "";
+      const nextVerifier = await deriveVerifier(user.email, next);
+      await api.changePassword(currentVerifier, nextVerifier);
+      notify("密碼已更新");
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "修改密碼失敗", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card card-pad" style={{ marginBottom: 16 }}>
+      <div className="row between wrap" style={{ gap: 10 }}>
+        <div>
+          <div className="card-title">帳號</div>
+          <div className="card-sub">
+            {user.email}
+            {user.isAdmin ? " · 管理員" : ""}
+          </div>
+        </div>
+        <span className="chip green">已登入</span>
+      </div>
+
+      <div className="row wrap" style={{ gap: 8, marginTop: 12, alignItems: "flex-end" }}>
+        <label className="login-field" style={{ width: 170 }}>
+          <span>目前密碼</span>
+          <input className="input" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+        </label>
+        <label className="login-field" style={{ width: 170 }}>
+          <span>新密碼</span>
+          <input className="input" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+        </label>
+        <label className="login-field" style={{ width: 170 }}>
+          <span>確認新密碼</span>
+          <input className="input" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+        </label>
+        <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => void submit()}>
+          {busy ? "更新中…" : "更新密碼"}
+        </button>
+      </div>
+    </div>
   );
 }

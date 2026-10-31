@@ -14,6 +14,7 @@
     "demo": "node scripts/build-demo.mjs",
     "google:auth": "node scripts/google-auth.mjs",
     "google:secret": "node scripts/push-google-secrets.mjs",
+    "set-password": "node scripts/set-password.mjs",
     "test": "node scripts/test-engine.mjs",
     "deploy": "npm run build && npx wrangler pages deploy dist --project-name sw-tick-lab",
     "dev:api": "npm run build && npx wrangler pages dev dist --port 8788"

@@ -1,20 +1,32 @@
--- SW Tick Lab 會員 / 上傳紀錄
--- 套用：npx wrangler d1 execute sw-tick-lab-db --remote --file=db/schema.sql
+-- SW Tick Lab 會員 / 上傳紀錄（Email + 密碼）
+-- 全新環境：npx wrangler d1 execute sw-tick-lab-db --remote --file=db/schema.sql
+-- 舊環境升級：npx wrangler d1 execute sw-tick-lab-db --remote --file=db/migrate-002-email-password.sql
 
 CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  google_sub    TEXT    NOT NULL UNIQUE,
-  email         TEXT    NOT NULL UNIQUE,
-  name          TEXT,
-  picture       TEXT,
-  role          TEXT    NOT NULL DEFAULT 'user',
-  status        TEXT    NOT NULL DEFAULT 'active',
-  created_at    INTEGER NOT NULL,
-  last_login_at INTEGER,
-  consent_at    INTEGER
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  email               TEXT    NOT NULL UNIQUE,
+  name                TEXT,
+  picture             TEXT,
+  role                TEXT    NOT NULL DEFAULT 'user',
+  status              TEXT    NOT NULL DEFAULT 'active',
+  -- 密碼：瀏覽器端 PBKDF2 產生的 verifier，再用隨機 salt 做 SHA-256
+  password_hash       TEXT,
+  password_salt       TEXT,
+  password_updated_at INTEGER,
+  -- 保留欄位：舊的 Google 登入帳號（之後可移除）
+  google_sub          TEXT UNIQUE,
+  created_at          INTEGER NOT NULL,
+  last_login_at       INTEGER,
+  consent_at          INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+  key      TEXT PRIMARY KEY,
+  count    INTEGER NOT NULL,
+  reset_at INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS uploads (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
