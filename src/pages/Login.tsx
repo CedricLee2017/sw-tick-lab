@@ -6,7 +6,7 @@ type Mode = "login" | "register";
 
 /** Email + 密碼表單：登入頁與側邊欄的登入彈窗共用 */
 export function LoginForm() {
-  const { error, signIn, register } = useAuth();
+  const { error, signIn, register, config } = useAuth();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -125,7 +125,10 @@ export function LoginForm() {
       )}
 
       <div className="tiny dim login-note">
-        <ShieldCheck size={12} /> 登入後，你匯入的存檔會自動備份到服務的 Google Drive；解析與計算仍在你的瀏覽器完成。
+        <ShieldCheck size={12} />{" "}
+        {config?.uploads
+          ? "登入後，你匯入的存檔會自動備份到服務的 Google Drive；解析與計算仍在你的瀏覽器完成。"
+          : "登入只用來辨識會員身分；解析與計算仍在你的瀏覽器完成。"}
       </div>
     </div>
   );
