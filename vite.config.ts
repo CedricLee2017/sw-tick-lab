@@ -11,6 +11,12 @@ export default defineConfig({
   define: {
     __BUILD_TIME__: JSON.stringify(buildTime),
   },
+  server: {
+    // 本機：npm run dev（Vite）＋ npm run dev:api（Pages Functions, 8788）
+    proxy: {
+      "/api": "http://127.0.0.1:8788",
+    },
+  },
   build: {
     target: "es2022",
     chunkSizeWarningLimit: 1600,

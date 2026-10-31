@@ -1,8 +1,11 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut,
 } from "lucide-react";
 import { useStore } from "./store";
+import { useAuth } from "./lib/auth";
+import { Modal } from "./components/ui";
+import LoginPage, { LoginForm } from "./pages/Login";
 import ImportPage from "./pages/Import";
 import OverviewPage from "./pages/Overview";
 import MonstersPage from "./pages/Monsters";
@@ -71,10 +74,20 @@ export default function App() {
   /** 已經開過的頁面：切換頁籤時只隱藏、不卸載，設定才不會消失 */
   const [visited, setVisited] = useState<Set<RouteKey>>(() => new Set([currentRoute()]));
   const { hydrate, ready, account, toasts, settings } = useStore();
+  const { ready: authReady, user, config, init: initAuth, signOut } = useAuth();
+  const [loginOpen, setLoginOpen] = useState(false);
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    void initAuth();
+  }, [initAuth]);
+
+  useEffect(() => {
+    if (user) setLoginOpen(false);
+  }, [user]);
 
   useEffect(() => {
     const onHash = () => setRoute(currentRoute());
@@ -115,6 +128,10 @@ export default function App() {
     </>
   );
 
+  // 等登入狀態確認後才決定要不要顯示登入牆，避免閃一下內容
+  if (!authReady) return <div className="boot-screen">載入中…</div>;
+  if (config?.forceLogin && !user) return <LoginPage />;
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -149,6 +166,26 @@ export default function App() {
         </nav>
 
         <div className="sidebar-foot">
+          {user ? (
+            <div className="account-row">
+              {user.picture ? (
+                <img className="account-avatar" src={user.picture} alt="" referrerPolicy="no-referrer" />
+              ) : (
+                <span className="account-avatar account-avatar-fallback">{(user.name || user.email).slice(0, 1).toUpperCase()}</span>
+              )}
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="account-name">{user.name || user.email}</div>
+                <div className="account-mail">{user.email}</div>
+              </div>
+              <button type="button" className="rune-flag" title="登出" onClick={() => void signOut()}>
+                <LogOut size={12} />
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="btn btn-sm" style={{ width: "100%" }} onClick={() => setLoginOpen(true)}>
+              <LogIn size={13} /> 使用 Google 登入
+            </button>
+          )}
           {account ? (
             <div className="card" style={{ padding: 11 }}>
               <div className="row" style={{ gap: 8 }}>
@@ -215,6 +252,12 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      {loginOpen && !user && (
+        <Modal title="使用 Google 登入" onClose={() => setLoginOpen(false)} width={400}>
+          <LoginForm />
+        </Modal>
+      )}
     </div>
   );
 }

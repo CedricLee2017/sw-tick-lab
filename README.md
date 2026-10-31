@@ -4,7 +4,7 @@
 
 **線上使用：<https://sw-tick-lab.pages.dev>**　|　**原始碼：<https://github.com/CedricLee2017/sw-tick-lab>**
 
-> 所有運算都在你的瀏覽器完成，帳號資料不會上傳到任何伺服器。
+> 符文與存檔運算都在你的瀏覽器完成。使用 Google 登入時，只會把帳號的 Email、名稱與頭像存到 Cloudflare（會員系統用）；存檔本身目前的版本還不會上傳。
 
 ## 功能
 
@@ -208,15 +208,24 @@ npx wrangler pages deploy dist --project-name sw-tick-lab
 | `wrangler.toml` | Pages 設定、D1 綁定、`ADMIN_EMAILS` |
 
 - **登入方式**：Google Identity Services。前端取得 ID token，Worker 用 Google 公鑰驗證（RS256）後簽發自己的 HttpOnly session cookie（HMAC-SHA256，30 天）。
+- **登入介面**：登入頁（強制登入時整頁顯示）與側邊欄「使用 Google 登入」彈窗共用同一個元件；登入後側邊欄顯示頭像、名稱與登出。
+- **強制登入開關**：`settings` 資料表的 `force_login`（`0` / `1`）。改一行 SQL 就生效，不必重新部署：
+
+```bash
+npx wrangler d1 execute sw-tick-lab-db --remote --command "UPDATE settings SET v='1' WHERE k='force_login'"
+```
 - **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/google`、`POST /api/auth/logout`。
-- **尚未啟用**：前端登入牆、上傳到 Google Drive、`/admin` 後台。
+- **尚未啟用**：上傳到 Google Drive、`/admin` 後台。
 - **環境變數**：`GOOGLE_CLIENT_ID`（Pages 變數，公開）、`SESSION_SECRET`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
 - 本機測試後端：
 
 ```bash
 npx wrangler d1 execute sw-tick-lab-db --local --file=db/schema.sql
-npm run dev:api   # http://localhost:8788
+npm run dev:api   # http://localhost:8788（已建置的版本）
 ```
+
+> 本機同時要 HMR 時：開一個終端機跑 `npm run dev:api`，另一個跑 `npm run dev`（Vite 會把 `/api` 代理到 8788）。
+> Google 登入需要把 `http://localhost:5173`、`http://localhost:8788` 加進 OAuth 用戶端的「已授權的 JavaScript 來源」。
 
 > 啟用自動上傳後，首頁與隱私說明會改成「未登入：純本機；登入：自動備份到服務擁有者的 Google Drive」。
 

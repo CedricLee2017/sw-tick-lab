@@ -33,3 +33,12 @@ CREATE TABLE IF NOT EXISTS uploads (
 
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_uploads_created ON uploads(created_at DESC);
+
+-- 執行期開關（例如 force_login），改一行 SQL 就能生效，不必重新部署
+CREATE TABLE IF NOT EXISTS settings (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL
+);
+
+INSERT INTO settings (k, v) VALUES ('force_login', '0')
+ON CONFLICT(k) DO NOTHING;
