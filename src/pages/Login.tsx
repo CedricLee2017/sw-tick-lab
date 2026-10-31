@@ -127,7 +127,7 @@ export function LoginForm() {
       <div className="tiny dim login-note">
         <ShieldCheck size={12} />{" "}
         {config?.uploads
-          ? "登入後，你匯入的存檔會自動備份到服務的 Google Drive；解析與計算仍在你的瀏覽器完成。"
+          ? "登入後，你匯入的存檔會自動備份到伺服器（Cloudflare R2）；解析與計算仍在你的瀏覽器完成。"
           : "登入只用來辨識會員身分；解析與計算仍在你的瀏覽器完成。"}
       </div>
     </div>

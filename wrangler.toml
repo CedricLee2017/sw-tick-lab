@@ -7,8 +7,10 @@ binding = "DB"
 database_name = "sw-tick-lab-db"
 database_id = "4e38d54d-c452-4f3c-ad67-c24dc2c45e5f"
 
+[[r2_buckets]]
+binding = "SAVES"
+bucket_name = "swticklab-saves"
+
 [vars]
-# 管理員的 Google 帳號（逗號分隔）。登入時符合的帳號會自動取得 admin 角色。
+# 管理員的 Email（逗號分隔）。登入時符合的帳號會自動取得 admin 角色。
 ADMIN_EMAILS = "leechungkit2011@gmail.com"
-# Google OAuth 用戶端 ID（公開資訊，可以放在版本控制）
-GOOGLE_CLIENT_ID = "773255211923-vpevh0lbjtj6lcikou0gqevf3bmkrh87.apps.googleusercontent.com"

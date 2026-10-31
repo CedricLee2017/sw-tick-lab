@@ -1,7 +1,6 @@
 import type { Env } from "../../server/env";
 import { bad, json, sameOrigin } from "../../server/http";
 import { currentUser } from "../../server/auth";
-import { driveConfigured, uploadToDrive } from "../../server/drive";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const DAILY_LIMIT = 30;
@@ -20,7 +19,7 @@ function stamp(now = new Date()): string {
 
 /**
  * POST /api/uploads
- * 直接把原始 JSON 當 body 串流到 Google Drive（不在 Worker 解析存檔）。
+ * 把原始 JSON 串流寫進 R2，並在 D1 記一筆。
  * 選填標頭：x-sw-file-name / x-sw-wizard / x-sw-monsters / x-sw-runes
  */
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
@@ -28,7 +27,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   const user = await currentUser(request, env);
   if (!user) return bad(401, "請先登入");
-  if (!driveConfigured(env)) return bad(503, "上傳服務尚未設定完成");
+  if (!env.SAVES) return bad(503, "上傳服務尚未設定完成");
 
   const size = Number(request.headers.get("content-length") ?? 0);
   if (!size) return bad(411, "缺少檔案大小");
@@ -43,37 +42,34 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   let name = "save.json";
   try {
-    const raw = decodeURIComponent(request.headers.get("x-sw-file-name") ?? "save.json");
-    name = safeName(raw);
+    name = safeName(decodeURIComponent(request.headers.get("x-sw-file-name") ?? "save.json"));
   } catch {
     /* 保留預設檔名 */
   }
 
-  const driveName = `${stamp()}_u${user.id}_${name}`;
   const now = Math.floor(Date.now() / 1000);
+  const key = `saves/u${user.id}/${stamp()}-${name}`;
   const wizard = (request.headers.get("x-sw-wizard") ?? "").slice(0, 80) || null;
   const monsters = Number(request.headers.get("x-sw-monsters") ?? 0) || null;
   const runes = Number(request.headers.get("x-sw-runes") ?? 0) || null;
 
   try {
-    const file = await uploadToDrive(env, {
-      name: driveName,
-      size,
-      body: request.body,
-      contentType: "application/json",
+    await env.SAVES.put(key, request.body, {
+      httpMetadata: { contentType: "application/json" },
+      customMetadata: { userId: String(user.id), fileName: name },
     });
 
     await env.DB.batch([
       env.DB.prepare(
-        `INSERT INTO uploads (user_id, file_id, file_name, size, wizard, monster_count, rune_count, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
-      ).bind(user.id, file.id, file.name, size, wizard, monsters, runes, now),
+        `INSERT INTO uploads (user_id, file_id, object_key, storage, file_name, size, wizard, monster_count, rune_count, created_at)
+         VALUES (?1, NULL, ?2, 'r2', ?3, ?4, ?5, ?6, ?7, ?8)`,
+      ).bind(user.id, key, name, size, wizard, monsters, runes, now),
       env.DB.prepare("UPDATE users SET consent_at = COALESCE(consent_at, ?1) WHERE id = ?2").bind(now, user.id),
     ]);
 
-    return json({ ok: true, fileId: file.id, name: file.name });
+    return json({ ok: true, key, name });
   } catch (err) {
     console.error("upload failed", err instanceof Error ? err.message : err);
-    return bad(502, "上傳到 Google Drive 失敗，請稍後再試");
+    return bad(502, "存檔上傳失敗，請稍後再試");
   }
 };

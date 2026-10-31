@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS uploads (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id       INTEGER NOT NULL,
   file_id       TEXT,
+  object_key    TEXT,
+  storage       TEXT    NOT NULL DEFAULT 'r2',
   file_name     TEXT    NOT NULL,
   size          INTEGER NOT NULL DEFAULT 0,
   sha256        TEXT,

@@ -32,12 +32,12 @@ export default function ImportPage() {
       return;
     }
 
-    // 登入後自動把原始存檔備份到 Google Drive（示範帳號、或備份尚未開通時略過）
+    // 登入後自動把原始存檔備份到 R2（示範帳號、或備份尚未開通時略過）
     const acc = useStore.getState().account;
     const auth = useAuth.getState();
     if (acc && auth.user && auth.config?.uploads && !name.startsWith("demo-account")) {
       void uploadSave(text, name, { wizard: acc.wizard, monsters: acc.units.length, runes: acc.runes.length })
-        .then(() => notify("已自動備份存檔到 Google Drive"))
+        .then(() => notify("已自動備份存檔"))
         .catch((err) => notify(`存檔備份失敗：${err instanceof Error ? err.message : "未知錯誤"}`, "err"));
     }
   };
@@ -149,7 +149,7 @@ export default function ImportPage() {
           <div className="row tiny dim" style={{ marginTop: 12, gap: 6 }}>
             <ShieldCheck size={13} />{" "}
             {uploadsEnabled
-              ? "解析與計算都在你的瀏覽器完成；登入後匯入的存檔會自動備份一份到 Google Drive。"
+              ? "解析與計算都在你的瀏覽器完成；登入後匯入的存檔會自動備份一份到 Cloudflare R2（只有管理員能下載）。"
               : "解析與計算都在你的瀏覽器完成，檔案不會離開你的瀏覽器。"}
           </div>
         </div>
@@ -251,7 +251,7 @@ export default function ImportPage() {
             title="拖放到上方"
             desc={
               uploadsEnabled
-                ? "解析在瀏覽器完成；登入後會自動備份一份原始 JSON 到 Google Drive。載入後可隨時切換頁面分析。"
+                ? "解析在瀏覽器完成；登入後會自動備份一份原始 JSON 到 Cloudflare R2。載入後可隨時切換頁面分析。"
                 : "檔案只在瀏覽器解析，不會上傳。載入後可隨時切換頁面分析。"
             }
           />

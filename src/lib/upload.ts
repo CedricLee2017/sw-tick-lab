@@ -1,12 +1,12 @@
 /**
- * 把匯入的存檔原文送到 Worker，再由 Worker 串流上傳到服務擁有者的 Google Drive。
+ * 把匯入的存檔原文送到 Worker，由 Worker 串流寫入 Cloudflare R2。
  * 呼叫端不需要等待（背景執行），成功與失敗都只用 toast 提示。
  */
 export async function uploadSave(
   text: string,
   fileName: string,
   meta: { wizard?: string; monsters?: number; runes?: number },
-): Promise<{ ok: true; fileId: string; name: string }> {
+): Promise<{ ok: true; key: string; name: string }> {
   const body = new Blob([text], { type: "application/json" });
   const res = await fetch("/api/uploads", {
     method: "POST",
@@ -20,7 +20,7 @@ export async function uploadSave(
     },
     body,
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: string; fileId?: string; name?: string };
+  const data = (await res.json().catch(() => ({}))) as { error?: string; key?: string; name?: string };
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return { ok: true, fileId: data.fileId ?? "", name: data.name ?? fileName };
+  return { ok: true, key: data.key ?? "", name: data.name ?? fileName };
 }

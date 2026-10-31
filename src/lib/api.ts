@@ -11,7 +11,7 @@ export interface ApiUser {
 
 export interface ApiConfig {
   forceLogin: boolean;
-  /** Google Drive 備份是否已設定完成 */
+  /** 存檔備份（R2）是否可用 */
   uploads: boolean;
 }
 

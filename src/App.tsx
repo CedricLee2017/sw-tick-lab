@@ -19,12 +19,13 @@ import DecksPage from "./pages/Decks";
 import SpeedTickPage from "./pages/SpeedTick";
 import OptimizerPage from "./pages/Optimizer";
 import TeamOptimizerPage from "./pages/TeamOptimizer";
+import AdminPage from "./pages/Admin";
 import RunesPage from "./pages/Runes";
 import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 
-type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "settings";
+type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -42,6 +43,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "summonlog", label: "魔靈召喚記錄", icon: <ScrollText size={17} />, title: "魔靈召喚記錄", sub: "原4 / 原5 魔靈的取得時間軸" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
   { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },
+  { key: "admin", label: "後台", icon: <ShieldCheck size={17} />, title: "管理後台", sub: "會員、上傳紀錄與容量" },
   { key: "settings", label: "設定", icon: <SettingsIcon size={17} />, title: "設定", sub: "建築、隊長技與進階選項" },
 ];
 
@@ -66,6 +68,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   summonlog: SummonLogPage,
   runes: RunesPage,
   artifacts: ArtifactsPage,
+  admin: AdminPage,
   settings: SettingsPage,
 };
 
@@ -151,7 +154,7 @@ export default function App() {
             </button>
           ))}
           <div className="nav-label">分析</div>
-          {ROUTES.slice(1, -1).map((r) => (
+          {ROUTES.slice(1, -1).filter((r) => r.key !== "admin" || user?.isAdmin).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
               {!account && <span className="dim" style={{ marginLeft: "auto", fontSize: 10 }}>—</span>}
@@ -237,7 +240,7 @@ export default function App() {
       </div>
 
       <nav className="mobile-nav">
-        {ROUTES.filter((r) => ["import", "overview", "speed", "speedtick", "rta", "optimizer", "team-opt", "artifact-opt", "artifact-ad", "builds", "decks", "summonlog", "runes", "artifacts"].includes(r.key)).map((r) => (
+        {ROUTES.filter((r) => ["import", "overview", "speed", "speedtick", "rta", "optimizer", "team-opt", "artifact-opt", "artifact-ad", "builds", "decks", "summonlog", "runes", "artifacts", ...(user?.isAdmin ? ["admin"] : [])].includes(r.key)).map((r) => (
           <button key={r.key} className={route === r.key ? "active" : ""} onClick={() => go(r.key)}>
             {r.icon}
             <span>{r.label}</span>

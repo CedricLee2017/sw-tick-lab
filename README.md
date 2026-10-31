@@ -4,7 +4,7 @@
 
 **線上使用：<https://sw-tick-lab.pages.dev>**　|　**原始碼：<https://github.com/CedricLee2017/sw-tick-lab>**
 
-> 符文與存檔運算都在你的瀏覽器完成。登入後，匯入的原始存檔會自動備份到服務擁有者的 Google Drive（只使用 `drive.file` 範圍，後台可刪除）；未登入無法使用工具。
+> 符文與存檔運算都在你的瀏覽器完成。登入後，匯入的原始存檔會自動備份到 Cloudflare R2（只有管理員能下載或刪除）；未登入無法使用工具。
 
 ## 功能
 
@@ -196,16 +196,16 @@ npx wrangler pages deploy dist --project-name sw-tick-lab
 
 `vite.config.ts` 已設定 `base: "./"`，可直接部署到任何靜態託管（GitHub Pages、Netlify、Cloudflare Pages）。
 
-## 會員系統與後台（建置中）
+## 會員系統與後台
 
-後端改由 **Cloudflare Pages Functions + D1** 提供，和靜態網站同一個網域，不需要另外開伺服器。
+後端由 **Cloudflare Pages Functions + D1 + R2** 提供，和靜態網站同一個網域，不需要另外開伺服器。
 
 | 檔案 | 內容 |
 | --- | --- |
 | `functions/api/*` | API 路由（Pages Functions） |
-| `server/*` | session、密碼雜湊、Drive 上傳、D1 存取 |
+| `server/*` | session、密碼雜湊、R2 上傳、D1 存取 |
 | `db/schema.sql` | `users`、`uploads`、`login_attempts`、`settings` |
-| `wrangler.toml` | Pages 設定、D1 綁定、`ADMIN_EMAILS` |
+| `wrangler.toml` | Pages 設定、D1 / R2 綁定、`ADMIN_EMAILS` |
 
 - **登入方式**：Email + 密碼。密碼先在瀏覽器做 **PBKDF2-SHA256（21 萬次）**，只把推導出的 verifier 送到 Worker；Worker 再用隨機 salt 做一次 SHA-256 存進 D1，並簽發 HttpOnly session cookie（HMAC-SHA256，30 天）。這樣免費方案的 10ms CPU 也不會超時，離線破解成本仍等同 PBKDF2。
 - **登入介面**：登入／註冊分頁（整頁登入牆），側邊欄也有登入彈窗；登入後顯示 Email 與登出。
@@ -214,33 +214,24 @@ npx wrangler pages deploy dist --project-name sw-tick-lab
 ```bash
 npx wrangler d1 execute sw-tick-lab-db --remote --command "UPDATE settings SET v='1' WHERE k='force_login'"
 ```
-- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/logout`、`POST /api/uploads`。
+- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/logout`、`POST /api/uploads`，以及 `/api/admin/*`。
 - **重設密碼**：管理員可在本機執行 `npm run set-password -- email`（互動輸入），或加上 `--generate` 產生臨時密碼；寫入的是同一套 PBKDF2 verifier 格式，網站可直接登入。
-- **存檔自動備份**：登入後在「匯入」頁上傳 JSON，瀏覽器解析完會背景呼叫 `POST /api/uploads`；Worker 用業主授權的 refresh token 以 **resumable upload 串流**送進 Google Drive（不把整包存檔讀進記憶體），再寫入 `uploads` 紀錄。
-  - 只申請 `drive.file` 範圍，Worker 僅能存取自己建立的檔案。
-  - 資料夾預設 `SWTickLab 存檔`，第一次上傳自動建立；資料夾 ID 存在 `settings.drive_folder_id`。
-  - 每位會員每 24 小時最多 30 次、單檔上限 25MB。
-  - 示範帳號不會上傳。
-- **尚未啟用**：`/admin` 後台。
-- **環境變數**：`SESSION_SECRET`（Pages secret）、`GOOGLE_CLIENT_ID`（Pages 變數，只有 Drive 上傳用）、`GOOGLE_OAUTH_CLIENT_SECRET`、`GOOGLE_REFRESH_TOKEN`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
-- **取得 Drive 授權（一次性；與會員登入無關）**：
-
-```bash
-# 1. 在 .dev.vars 填入 GOOGLE_OAUTH_CLIENT_SECRET
-#    並在 OAuth 用戶端加入重新導向 URI：http://localhost:53682/
-npm run google:auth     # 用「要存檔的 Google 帳號」同意授權，refresh token 會寫回 .dev.vars
-npm run google:secret   # 把 secret 與 refresh token 上傳成 Pages Secret
-```
+- **存檔自動備份（Cloudflare R2）**：登入後在「匯入」頁上傳 JSON，瀏覽器解析完會背景呼叫 `POST /api/uploads`；Worker 把原始 JSON 串流寫進 R2（`saves/u{會員}/…`），再於 D1 記一筆（檔名、大小、魔靈數、符文數）。
+  - 每位會員每 24 小時最多 30 次、單檔上限 25MB；示範帳號不會上傳。
+  - 免費額度 10GB／月，下載不計流量費。
+  - 建立 bucket：`npx wrangler r2 bucket create swticklab-saves`（`wrangler.toml` 已綁定 `SAVES`）。
+- **後台 `/admin`**（出現在側邊欄的「後台」）：會員列表、搜尋、停用／啟用、設為管理員；上傳紀錄、下載原始 JSON、刪除（同步刪 R2）、容量統計。
+- **環境變數**：`SESSION_SECRET`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
 - 本機測試後端：
 
 ```bash
 npx wrangler d1 execute sw-tick-lab-db --local --file=db/schema.sql
-npm run dev:api   # http://localhost:8788（已建置的版本）
+npm run dev:api   # http://localhost:8788（已建置的版本；R2 會用本機模擬）
 ```
 
 > 本機同時要 HMR 時：開一個終端機跑 `npm run dev:api`，另一個跑 `npm run dev`（Vite 會把 `/api` 代理到 8788）。
 
-> 啟用自動上傳後，首頁與隱私說明會改成「未登入：純本機；登入：自動備份到服務擁有者的 Google Drive」。
+> 隱私：登入後匯入的存檔會備份到服務擁有者的 R2，只有管理員能下載或刪除；不登入無法使用工具。之後可再加保存期限自動清理。
 
 
 ## 技術結構
