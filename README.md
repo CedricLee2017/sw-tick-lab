@@ -216,11 +216,11 @@ npx wrangler d1 execute sw-tick-lab-db --remote --command "UPDATE settings SET v
 ```
 - **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/logout`、`POST /api/uploads`，以及 `/api/admin/*`。
 - **重設密碼**：管理員可在本機執行 `npm run set-password -- email`（互動輸入），或加上 `--generate` 產生臨時密碼；寫入的是同一套 PBKDF2 verifier 格式，網站可直接登入。
-- **存檔自動備份（Cloudflare R2）**：登入後在「匯入」頁上傳 JSON，瀏覽器解析完會背景呼叫 `POST /api/uploads`；Worker 把原始 JSON 串流寫進 R2（`saves/u{會員}/…`），再於 D1 記一筆（檔名、大小、魔靈數、符文數）。
+- **存檔自動備份（Cloudflare R2）**：登入後在「匯入」頁上傳 JSON，瀏覽器解析完會背景呼叫 `POST /api/uploads`；Worker 把原始 JSON 串流寫進 R2（`saves/u{會員}/…`），再於 D1 記一筆（玩家遊戲 ID、檔名、大小、魔靈數、符文數）。R2 的 object key 與後台下載檔名都會帶上玩家遊戲 ID，方便辨識。
   - 每位會員每 24 小時最多 30 次、單檔上限 25MB；示範帳號不會上傳。
   - 免費額度 10GB／月，下載不計流量費。
   - 建立 bucket：`npx wrangler r2 bucket create swticklab-saves`（`wrangler.toml` 已綁定 `SAVES`）。
-- **後台 `/admin`**（出現在側邊欄的「後台」）：會員列表、搜尋、停用／啟用、設為管理員；上傳紀錄、下載原始 JSON、刪除（同步刪 R2）、容量統計。
+- **後台 `/admin`**（出現在側邊欄的「後台」）：會員列表、搜尋、停用／啟用、設為管理員；上傳紀錄會顯示玩家遊戲 ID（`wizard_info` 的暱稱，沒有暱稱時用 `wizard_id`）、原始檔名、下載原始 JSON、刪除（同步刪 R2）、容量統計。
 - **環境變數**：`SESSION_SECRET`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
 - 本機測試後端：
 

@@ -463,7 +463,8 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     warnings.push("找不到建築資料，速度圖騰預設為 15%。");
   }
 
-  const wizard = body.wizard_info?.wizard_name ?? body.wizard_info?.wizard_id ?? "";
+  // 以遊戲內暱稱為主；沒有暱稱時退回 wizard_id（玩家遊戲 ID）。
+  const wizard = String(body.wizard_info?.wizard_name || body.wizard_info?.wizard_id || "");
   const version = body.unit_list ? (body.runes?.[0]?.ancient !== undefined ? "SWEX / SWOP" : "SWEX") : "未知";
 
   // RTA（世界競技場）：一般與 RTA 共用符文 / 神器庫，但裝備配置是兩套獨立清單。

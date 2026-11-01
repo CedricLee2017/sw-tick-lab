@@ -7,9 +7,29 @@ const DAILY_LIMIT = 30;
 
 function safeName(raw: string): string {
   const base = raw.split(/[\\/]/).pop() ?? "save.json";
-  const cleaned = base.replace(/[^\w.\-]+/g, "_").replace(/^_+|_+$/g, "");
+  // 保留中文與空白，只清掉路徑／控制字元；開頭的點避免變成隱藏檔或 ".."。
+  const cleaned = base
+    .replace(/[\u0000-\u001f<>:"|?*]+/g, "_")
+    .replace(/^\.+/, "")
+    .trim()
+    .slice(0, 120);
   const withExt = cleaned.toLowerCase().endsWith(".json") ? cleaned : `${cleaned || "save"}.json`;
   return withExt.slice(0, 120);
+}
+
+/** 標頭值由前端 encodeURIComponent 送出；舊版沒解碼就直接存進 D1。 */
+function decodeHeader(raw: string | null): string {
+  if (!raw) return "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** 保留中文，只去掉 R2 key 不能出現的路徑／控制字元。 */
+function safeSegment(raw: string): string {
+  return raw.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 60);
 }
 
 function stamp(now = new Date()): string {
@@ -48,8 +68,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const key = `saves/u${user.id}/${stamp()}-${name}`;
-  const wizard = (request.headers.get("x-sw-wizard") ?? "").slice(0, 80) || null;
+  const wizard = decodeHeader(request.headers.get("x-sw-wizard")).trim().slice(0, 80) || null;
+  const who = wizard ? `${safeSegment(wizard)}-` : "";
+  const key = `saves/u${user.id}/${who}${stamp()}-${name}`;
   const monsters = Number(request.headers.get("x-sw-monsters") ?? 0) || null;
   const runes = Number(request.headers.get("x-sw-runes") ?? 0) || null;
 

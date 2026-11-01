@@ -29,6 +29,19 @@ interface AdminUpload {
 
 const when = (seconds: number | null) => (seconds ? new Date(seconds * 1000).toLocaleString("zh-TW") : "—");
 
+/** 舊資料的 wizard 曾用 encodeURIComponent 傳送，顯示前先解碼。 */
+function displayWizard(raw: string | null): string {
+  if (!raw) return "";
+  if (/%[0-9A-Fa-f]{2}/.test(raw)) {
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      /* 不是合法的編碼字串，直接顯示原值 */
+    }
+  }
+  return raw;
+}
+
 function sizeText(n: number): string {
   if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   if (n >= 1024) return `${Math.round(n / 1024)} KB`;
@@ -112,7 +125,8 @@ export default function AdminPage() {
   };
 
   const removeUpload = async (item: AdminUpload) => {
-    if (!confirm(`確定要刪除「${item.file_name}」？刪除後無法復原。`)) return;
+    const label = displayWizard(item.wizard) || item.file_name;
+    if (!confirm(`確定要刪除「${label}」？刪除後無法復原。`)) return;
     try {
       const res = await fetch(`/api/admin/uploads/${item.id}`, { method: "DELETE", credentials: "same-origin" });
       if (!res.ok) {
@@ -253,7 +267,8 @@ export default function AdminPage() {
                 <tr>
                   <th>時間</th>
                   <th>會員</th>
-                  <th>檔名</th>
+                  <th>玩家（遊戲 ID）</th>
+                  <th>存檔檔名</th>
                   <th className="num">大小</th>
                   <th className="num">魔靈</th>
                   <th className="num">符文</th>
@@ -265,7 +280,10 @@ export default function AdminPage() {
                   <tr key={up.id}>
                     <td className="tiny dim">{when(up.created_at)}</td>
                     <td>{up.email}</td>
-                    <td className="mono" style={{ fontSize: 11.5 }}>{up.file_name}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {displayWizard(up.wizard) || <span className="dim">—</span>}
+                    </td>
+                    <td className="mono tiny dim" style={{ fontSize: 11.5 }}>{up.file_name}</td>
                     <td className="num mono">{sizeText(up.size)}</td>
                     <td className="num mono">{up.monster_count ?? "—"}</td>
                     <td className="num mono">{up.rune_count ?? "—"}</td>
@@ -291,7 +309,7 @@ export default function AdminPage() {
                   </tr>
                 ))}
                 {uploads.length === 0 && !loading && (
-                  <tr><td colSpan={7} className="tiny dim" style={{ textAlign: "center", padding: 18 }}>還沒有上傳紀錄</td></tr>
+                  <tr><td colSpan={8} className="tiny dim" style={{ textAlign: "center", padding: 18 }}>還沒有上傳紀錄</td></tr>
                 )}
               </tbody>
             </table>
