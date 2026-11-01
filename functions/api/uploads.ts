@@ -37,6 +37,51 @@ function stamp(now = new Date()): string {
   return `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}-${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
 }
 
+interface MyUploadRow {
+  id: number;
+  file_name: string;
+  size: number;
+  wizard: string | null;
+  monster_count: number | null;
+  rune_count: number | null;
+  created_at: number;
+}
+
+/**
+ * GET /api/uploads?limit=
+ * 目前登入會員自己的上傳紀錄（新到舊），用來顯示「雲端存檔」。
+ */
+export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
+  const user = await currentUser(request, env);
+  if (!user) return bad(401, "請先登入");
+
+  const url = new URL(request.url);
+  const raw = Number(url.searchParams.get("limit") ?? 10);
+  const limit = Number.isFinite(raw) ? Math.min(30, Math.max(1, Math.floor(raw))) : 10;
+
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT id, file_name, size, wizard, monster_count, rune_count, created_at
+       FROM uploads
+       WHERE user_id = ?1 AND deleted_at IS NULL
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?2`,
+    )
+      .bind(user.id, limit)
+      .all<MyUploadRow>();
+
+    return json({
+      uploads: (rows.results ?? []).map((row) => ({
+        ...row,
+        wizard: decodeHeader(row.wizard),
+      })),
+    });
+  } catch (err) {
+    console.error("list uploads failed", err instanceof Error ? err.message : err);
+    return bad(502, "讀取雲端存檔失敗");
+  }
+};
+
 /**
  * POST /api/uploads
  * 把原始 JSON 串流寫進 R2，並在 D1 記一筆。

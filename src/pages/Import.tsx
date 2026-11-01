@@ -1,17 +1,25 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  UploadCloud, FileJson, Gauge, Wand2, ShieldCheck, Sparkles, BookOpen, ClipboardPaste, Trash2, Zap,
+  UploadCloud, FileJson, Gauge, Wand2, ShieldCheck, Sparkles, BookOpen, ClipboardPaste, Trash2, Zap, CloudDownload,
 } from "lucide-react";
 import { monsterOf, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { useAuth } from "../lib/auth";
 import { uploadSave } from "../lib/upload";
+import { formatCloudTime, listMyUploads, loadLatestSave, type CloudUpload } from "../lib/cloudSave";
 import { Modal, fmt } from "../components/ui";
 import { buildingPct } from "../lib/stats";
+
+function fileSize(bytes: number): string {
+  if (!bytes) return "大小不明";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 export default function ImportPage() {
   const { account, importText, notify, clearAccount } = useStore();
   const uploadsEnabled = useAuth((s) => s.config?.uploads ?? false);
+  const user = useAuth((s) => s.user);
   const summary = useSummary();
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -19,7 +27,51 @@ export default function ImportPage() {
   const [pasteText, setPasteText] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [cloud, setCloud] = useState<CloudUpload[] | null>(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 登入後讀取自己的雲端存檔清單（只用來顯示，不會自動覆蓋本機）
+  useEffect(() => {
+    if (!uploadsEnabled || !user) {
+      setCloud(null);
+      return;
+    }
+    let cancelled = false;
+    listMyUploads(5)
+      .then((list) => {
+        if (!cancelled) setCloud(list);
+      })
+      .catch(() => {
+        if (!cancelled) setCloud([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [uploadsEnabled, user, account]);
+
+  const loadCloud = async () => {
+    setCloudBusy(true);
+    try {
+      const save = await loadLatestSave();
+      if (!save) {
+        notify("雲端還沒有存檔，請先匯入一次 JSON", "err");
+        return;
+      }
+      const res = importText(save.text, save.fileName);
+      setWarnings(res.warnings ?? []);
+      setError(res.ok ? null : (res.error ?? "匯入失敗"));
+      if (res.ok) {
+        notify(`已載入雲端存檔：${save.fileName}（${formatCloudTime(save.createdAt)}）`);
+      } else {
+        notify(res.error ?? "匯入失敗", "err");
+      }
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "讀取雲端存檔失敗", "err");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
 
   const load = async (text: string, name: string) => {
     setBusy(true);
@@ -154,6 +206,60 @@ export default function ImportPage() {
           </div>
         </div>
       </section>
+
+      {uploadsEnabled && (
+        <section className="card" style={{ marginTop: 16 }}>
+          <div className="card-head">
+            <div>
+              <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <CloudDownload size={15} /> 雲端存檔
+              </div>
+              <div className="card-sub">登入後自動備份存檔與儲存庫，換手機或電腦也能接續</div>
+            </div>
+            {user && cloud && cloud.length > 0 && <span className="chip gold">最近 {cloud.length} 筆</span>}
+          </div>
+          <div className="card-pad">
+            {!user ? (
+              <div className="tiny dim" style={{ lineHeight: 1.75 }}>
+                登入後，匯入的 JSON 會自動備份到雲端；下次登入（包含其他裝置）會自動載回上次的存檔，
+                「儲存庫」的配裝與預設隊也會一起還原。
+              </div>
+            ) : cloud === null ? (
+              <div className="tiny dim">讀取雲端存檔中…</div>
+            ) : cloud.length === 0 ? (
+              <div className="tiny dim" style={{ lineHeight: 1.75 }}>
+                這個帳號還沒有雲端存檔。匯入一次 JSON 後會自動備份，下次登入就能自動還原。
+              </div>
+            ) : (
+              <>
+                <div className="row between wrap" style={{ gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {cloud[0].wizard ? `${cloud[0].wizard} · ` : ""}{cloud[0].fileName}
+                    </div>
+                    <div className="tiny dim">
+                      {formatCloudTime(cloud[0].createdAt)} · {cloud[0].monsterCount} 魔靈 / {cloud[0].runeCount} 符文 · {fileSize(cloud[0].size)}
+                    </div>
+                  </div>
+                  <button className="btn btn-sm btn-primary" disabled={cloudBusy} onClick={() => void loadCloud()}>
+                    <CloudDownload size={13} /> {cloudBusy ? "載入中…" : "載入雲端存檔"}
+                  </button>
+                </div>
+                <div className="tiny dim" style={{ marginTop: 10, lineHeight: 1.7 }}>
+                  本機沒有存檔時，登入後會自動載入最新一筆；按上方按鈕可隨時手動重新載入。
+                  {cloud.length > 1 && (
+                    <>
+                      <br />
+                      較舊的備份：
+                      {cloud.slice(1).map((u) => ` ${u.fileName}（${new Date(u.createdAt * 1000).toLocaleDateString("zh-TW")}）`).join("、")}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+      )}
 
       {error && (
         <div className="alert err" style={{ marginTop: 14 }}>

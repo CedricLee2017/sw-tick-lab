@@ -1,8 +1,8 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut,
 } from "lucide-react";
-import { useStore } from "./store";
+import { ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
 import { Modal } from "./components/ui";
 import LoginPage, { LoginForm } from "./pages/Login";
@@ -25,6 +25,7 @@ import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 import { InstallAppButton } from "./components/InstallApp";
+import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
 type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "admin" | "settings";
 
@@ -77,9 +78,11 @@ export default function App() {
   const [route, setRoute] = useState<RouteKey>(currentRoute());
   /** 已經開過的頁面：切換頁籤時只隱藏、不卸載，設定才不會消失 */
   const [visited, setVisited] = useState<Set<RouteKey>>(() => new Set([currentRoute()]));
-  const { hydrate, ready, account, toasts, settings } = useStore();
+  const { hydrate, ready, account, toasts, settings, importText, notify, syncLibrary } = useStore();
   const { ready: authReady, user, config, init: initAuth, signOut } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
+  /** 自動還原雲端存檔只嘗試一次，避免每次重新渲染都重打 API */
+  const cloudTried = useRef(false);
 
   useEffect(() => {
     void hydrate();
@@ -88,6 +91,40 @@ export default function App() {
   useEffect(() => {
     void initAuth();
   }, [initAuth]);
+
+  // 登入且本機沒有任何存檔時，自動把上次上傳到雲端的 JSON 載回來。
+  // 本機已有存檔就不覆蓋，避免蓋掉剛上符的符文配置。
+  useEffect(() => {
+    if (!ready || !authReady || !user || !config?.uploads) return;
+    if (cloudTried.current) return;
+    cloudTried.current = true;
+
+    void (async () => {
+      try {
+        const switched = await ensureOwner(user.id);
+        if (switched) notify("偵測到不同帳號登入，已清除這台裝置的舊資料，改從雲端還原");
+        // 本機已有存檔就不覆蓋（換帳號時上面已經清空）
+        if (useStore.getState().account) return;
+
+        const save = await loadLatestSave();
+        if (!save) return;
+        // 期間可能已登出或手動匯入，這時不要再覆蓋
+        if (!useAuth.getState().user || useStore.getState().account) return;
+        const res = importText(save.text, save.fileName);
+        if (res.ok) {
+          notify(`已自動載入雲端存檔：${save.fileName}（${formatCloudTime(save.createdAt)}）`);
+        }
+      } catch (err) {
+        console.warn("雲端存檔還原失敗", err);
+      }
+    })();
+  }, [ready, authReady, user, config?.uploads, account, importText, notify]);
+
+  // 登入後合併本機與雲端的儲存庫（配裝 / 預設隊）。
+  useEffect(() => {
+    if (!ready || !authReady || !user || !config?.uploads) return;
+    void syncLibrary();
+  }, [ready, authReady, user, config?.uploads, syncLibrary]);
 
   useEffect(() => {
     if (user) setLoginOpen(false);

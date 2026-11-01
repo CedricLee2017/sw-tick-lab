@@ -3,6 +3,8 @@ import { del, get, set } from "idb-keyval";
 import monstersJson from "./data/monsters.json";
 import { PARSE_VERSION, parseAccountJSON } from "./lib/parse";
 import { defaultBonus } from "./lib/stats";
+import { useAuth } from "./lib/auth";
+import { mergeLibrary, pullLibrary, pushLibrary } from "./lib/librarySync";
 import type { Account, BonusConfig, FocusEntry, Monster, Rune, Stats } from "./lib/types";
 
 export const MONSTERS = monstersJson as unknown as Monster[];
@@ -86,6 +88,8 @@ const ACCOUNT_KEY = "swtick:account";
 const SETTINGS_KEY = "swtick:settings";
 const LOADOUT_KEY = "swtick:loadouts";
 const DECK_FAV_KEY = "swtick:deckfavorites";
+/** 這台裝置的本機資料屬於哪個會員，用來避免換帳號時把別人的資料帶過去 */
+const OWNER_KEY = "swtick:owner";
 
 interface Toast {
   id: number;
@@ -122,6 +126,10 @@ interface Store {
   /** 儲存整隊預設隊到預設隊儲存庫 */
   saveDeckFav: (d: Omit<DeckFav, "id" | "createdAt">) => void;
   removeDeckFav: (id: string) => void;
+  /** 登入後把本機與雲端儲存庫合併（本機優先），必要時回寫雲端 */
+  syncLibrary: () => Promise<void>;
+  /** 換帳號時清掉前一個會員留在這台裝置的存檔與儲存庫 */
+  resetForNewAccount: () => Promise<void>;
   notify: (msg: string, kind?: "ok" | "err") => void;
 }
 
@@ -366,6 +374,7 @@ export const useStore = create<Store>((setState, getState) => ({
     const loadouts = [loadout, ...getState().loadouts].slice(0, 60);
     setState({ loadouts });
     void set(LOADOUT_KEY, loadouts);
+    scheduleLibraryPush();
     getState().notify("已儲存配裝");
   },
 
@@ -384,6 +393,7 @@ export const useStore = create<Store>((setState, getState) => ({
     const deckFavs = [fav, ...prev.filter((x) => x.id !== fav.id)].slice(0, 60);
     setState({ deckFavs });
     void set(DECK_FAV_KEY, deckFavs);
+    scheduleLibraryPush();
     getState().notify(existing ? "已更新預設隊" : "已儲存預設隊");
   },
 
@@ -391,12 +401,47 @@ export const useStore = create<Store>((setState, getState) => ({
     const loadouts = getState().loadouts.filter((x) => x.id !== id);
     setState({ loadouts });
     void set(LOADOUT_KEY, loadouts);
+    scheduleLibraryPush();
   },
 
   removeDeckFav: (id) => {
     const deckFavs = getState().deckFavs.filter((x) => x.id !== id);
     setState({ deckFavs });
     void set(DECK_FAV_KEY, deckFavs);
+    scheduleLibraryPush();
+  },
+
+  syncLibrary: async () => {
+    const { user, config } = useAuth.getState();
+    if (!user || !config?.uploads) return;
+
+    await ensureOwner(user.id);
+    const local = { loadouts: getState().loadouts, deckFavs: getState().deckFavs };
+    try {
+      const remote = await pullLibrary();
+      const loadouts = mergeLibrary(local.loadouts, remote.loadouts);
+      const deckFavs = mergeLibrary(local.deckFavs, remote.deckFavs);
+      const grew = loadouts.length !== local.loadouts.length || deckFavs.length !== local.deckFavs.length;
+
+      if (grew) {
+        setState({ loadouts, deckFavs });
+        void set(LOADOUT_KEY, loadouts);
+        void set(DECK_FAV_KEY, deckFavs);
+      }
+
+      // 本機有雲端沒有的項目（或雲端還是空的）就回寫，避免只存在這台裝置
+      const needsPush = loadouts.length > remote.loadouts.length || deckFavs.length > remote.deckFavs.length;
+      if (needsPush) await pushLibrary({ loadouts, deckFavs });
+    } catch (err) {
+      console.warn("儲存庫同步失敗", err);
+    }
+  },
+
+  resetForNewAccount: async () => {
+    const settings = { ...getState().settings, lockedRunes: [], excludedRunes: [], includedRunes: [] };
+    setState({ account: null, runeMap: new Map(), settings, loadouts: [], deckFavs: [] });
+    void set(SETTINGS_KEY, settings);
+    await Promise.all([del(ACCOUNT_KEY), del(LOADOUT_KEY), del(DECK_FAV_KEY)]);
   },
 
   notify: (msg, kind = "ok") => {
@@ -405,3 +450,41 @@ export const useStore = create<Store>((setState, getState) => ({
     setTimeout(() => setState({ toasts: getState().toasts.filter((t) => t.id !== id) }), 3200);
   },
 }));
+
+/** 儲存庫變更後延遲回寫雲端，避免連續操作打出多次請求。 */
+let libraryPushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleLibraryPush(): void {
+  const { user, config } = useAuth.getState();
+  if (!user || !config?.uploads) return;
+  if (libraryPushTimer) clearTimeout(libraryPushTimer);
+  libraryPushTimer = setTimeout(() => {
+    libraryPushTimer = null;
+    const { loadouts, deckFavs } = useStore.getState();
+    void pushLibrary({ loadouts, deckFavs }).catch((err) => console.warn("儲存庫上傳失敗", err));
+  }, 1200);
+}
+
+let ownerCheckedFor: number | null = null;
+let ownerPromise: Promise<boolean> | null = null;
+
+/**
+ * 確認這台裝置的本機資料屬於目前登入的會員。
+ * 換帳號時先清掉前一個會員的存檔與儲存庫，避免把別人的資料同步到新帳號。
+ * 同一個會員只會檢查一次；回傳 true 代表剛剛清空過本機資料。
+ */
+export function ensureOwner(userId: number): Promise<boolean> {
+  if (ownerCheckedFor === userId && ownerPromise) return ownerPromise;
+  ownerCheckedFor = userId;
+  ownerPromise = (async () => {
+    const owner = await get<number>(OWNER_KEY);
+    const switched = typeof owner === "number" && owner !== userId;
+    if (switched) await useStore.getState().resetForNewAccount();
+    if (owner !== userId) await set(OWNER_KEY, userId);
+    return switched;
+  })().catch((err) => {
+    console.warn("無法確認本機資料擁有者", err);
+    return false;
+  });
+  return ownerPromise;
+}

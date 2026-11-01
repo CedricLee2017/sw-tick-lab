@@ -14,6 +14,7 @@
   - 使用 sw-exporter 官方 stat / set ID（速度 = 8、暴走 = 13、意志 = 15…），並正確換算遠古符文（`class` / `rank` +10）。
   - 容忍多層包裝（`data` / `save` / `swop`）、以 id 為 key 的物件格式，以及字串形式的套裝 / 屬性名稱。
 - **安裝成 App（PWA）**：側邊欄與手機頂部都有「安裝成 App」按鈕。Chrome / Edge / Android 會叫用瀏覽器原生的安裝提示；iPhone / iPad 的 Safari 會顯示「分享 → 加入主畫面」圖解步驟。安裝後以獨立視窗開啟，Service Worker 會快取介面，短暫離線也能開啟（API 與存檔上傳仍需要網路）。
+- **自動還原雲端存檔**：登入後如果本機沒有存檔，會自動載回上次上傳的 JSON（換手機、換電腦都一樣）；「匯入」頁的「雲端存檔」卡片也能手動重新載入。本機已有存檔時不自動覆蓋。
 - **帳號總覽**：魔靈數量、符文數量、Speed Tick 分布、一速排名、套裝統計。
 - **速度實驗室**：Tick ↔ 速度雙向換算、各 Tick 門檻表、建築與隊長技加成試算、隊伍出手順序模擬。
 - **RTA 世界競技場**：使用存檔的 `favorite_unit_list`（我的最愛）列出常用魔靈，依 RTA 獨立配裝的速度由高到低排序。
@@ -216,12 +217,15 @@ npx wrangler pages deploy dist --project-name sw-tick-lab
 ```bash
 npx wrangler d1 execute sw-tick-lab-db --remote --command "UPDATE settings SET v='1' WHERE k='force_login'"
 ```
-- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/logout`、`POST /api/uploads`，以及 `/api/admin/*`。
+- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/logout`、`GET /api/uploads`（自己的上傳紀錄）、`POST /api/uploads`、`GET /api/uploads/latest`（最新存檔原文）、`GET|PUT /api/library`（儲存庫同步），以及 `/api/admin/*`。
 - **重設密碼**：管理員可在本機執行 `npm run set-password -- email`（互動輸入），或加上 `--generate` 產生臨時密碼；寫入的是同一套 PBKDF2 verifier 格式，網站可直接登入。
 - **存檔自動備份（Cloudflare R2）**：登入後在「匯入」頁上傳 JSON，瀏覽器解析完會背景呼叫 `POST /api/uploads`；Worker 把原始 JSON 串流寫進 R2（`saves/u{會員}/…`），再於 D1 記一筆（玩家遊戲 ID、檔名、大小、魔靈數、符文數）。R2 的 object key 與後台下載檔名都會帶上玩家遊戲 ID，方便辨識。
   - 每位會員每 24 小時最多 30 次、單檔上限 25MB；示範帳號不會上傳。
   - 免費額度 10GB／月，下載不計流量費。
   - 建立 bucket：`npx wrangler r2 bucket create swticklab-saves`（`wrangler.toml` 已綁定 `SAVES`）。
+- **雲端存檔還原**：登入後如果本機還沒有任何存檔，App 會自動呼叫 `GET /api/uploads/latest` 把最新一筆存檔載回來（含換手機／換電腦）。本機已有存檔時不會自動覆蓋，避免蓋掉剛上符的配置；需要時可在「匯入」頁的「雲端存檔」卡片按「載入雲端存檔」手動還原。`importText` 只在本機解析，不會因此重複上傳。
+- **儲存庫同步**：登入後把「配裝儲存庫」與「預設隊儲存庫」同步到 R2 的 `library/u{會員}.json`（沿用 `SAVES` bucket，不需要新的 D1 資料表）。登入時先以 `id` 取聯集合併本機與雲端資料（本機優先，上限各 60 筆），本機有雲端沒有的項目就回寫；之後每次儲存／刪除配裝或預設隊都會延遲 1.2 秒自動上傳。
+- **換帳號保護**：IndexedDB 會記住本機資料屬於哪個會員（`swtick:owner`）。同一個瀏覽器換帳號登入時，會先清掉前一個會員的存檔與儲存庫，再從新帳號的雲端還原，避免把別人的資料同步進新帳號。
 - **後台 `/admin`**（出現在側邊欄的「後台」）：會員列表、搜尋、停用／啟用、設為管理員；上傳紀錄會顯示玩家遊戲 ID（`wizard_info` 的暱稱，沒有暱稱時用 `wizard_id`）、原始檔名、下載原始 JSON、刪除（同步刪 R2）、容量統計。
 - **環境變數**：`SESSION_SECRET`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
 - 本機測試後端：
@@ -256,6 +260,8 @@ src/
     teamSpeed.ts        一鍵配隊的面板速度、提條、速度強化與接速計算
     accountStats.ts     帳號統計
     pwa.ts              PWA 安裝提示、Service Worker 註冊
+    cloudSave.ts        雲端存檔清單與最新存檔下載
+    librarySync.ts      儲存庫（配裝 / 預設隊）雲端同步與合併
   components/ui.tsx     共用 UI（魔靈圖示、符文卡、神器卡、Tick 徽章、Modal）
   components/InstallApp.tsx 「安裝成 App」按鈕與 iOS / Android 安裝說明
   components/MonsterPicker.tsx 共用的魔靈選擇器（搜尋、元素／胎生星級篩選）
