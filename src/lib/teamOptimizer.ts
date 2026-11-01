@@ -339,7 +339,7 @@ export function optimizeTeam(
   const members = req.members;
   const n = members.length;
   if (n < 1) return { ok: false, error: "請至少選擇 1 隻魔靈" };
-  if (n > 5) return { ok: false, error: "一隊最多 5 隻魔靈" };
+  if (n > 15) return { ok: false, error: "一次最多 15 隻魔靈（3 隊 × 5 人）" };
 
   const runeById = new Map(req.runes.map((r) => [r.id, r]));
   const topK = Math.max(4, Math.min(300, Math.round(req.topK || 60)));

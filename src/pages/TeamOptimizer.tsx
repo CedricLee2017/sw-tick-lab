@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Check, Copy, Gauge, Layers, Loader2, Lock, Pin, Save, Search,
   Shirt, Trash2, Users, Wand2, Zap,
@@ -182,13 +182,18 @@ const STORAGE_KEY = "swtick:team-opt:v1";
 const CONTEXTS: DeckContext[] = ["arena", "guild", "dungeon"];
 const BUDGET_KEYS: BudgetKey[] = ["fast", "standard", "full"];
 
+/** 一次配幾隊（每隊 3～5 人，合計最多 15 隻） */
+type TeamCount = 1 | 2 | 3;
+
 /** 頁面關掉 / 換頁再回來（或重新整理）時要保留的設定與結果 */
 interface SavedState {
   templateId: string;
   size: Size;
+  teams: TeamCount;
   content: DeckContext;
   members: MemberDraft[];
-  leadPct: number;
+  /** 每隊的速度隊長技 %（長度 3，用不到的隊伍保留 0） */
+  leadPcts: number[];
   budgetKey: BudgetKey;
   oppSpd: number;
   plan: TeamPlan | null;
@@ -197,29 +202,40 @@ interface SavedState {
   importedAt: number | null;
 }
 
+const clampPct = (n: unknown): number => Math.max(0, Math.min(50, Number(n) || 0));
+
 function loadSaved(): SavedState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const v = JSON.parse(raw) as Partial<SavedState>;
+    const v = JSON.parse(raw) as Partial<SavedState> & { leadPct?: number };
     const templateId = TEAM_TEMPLATES.some((t) => t.id === v.templateId) ? (v.templateId as string) : "guild-speed";
     const size: Size = v.size === 4 || v.size === 5 ? v.size : 3;
+    const teams: TeamCount = v.teams === 2 || v.teams === 3 ? v.teams : 1;
     const content: DeckContext = CONTEXTS.includes(v.content as DeckContext) ? (v.content as DeckContext) : "guild";
     const budgetKey: BudgetKey = BUDGET_KEYS.includes(v.budgetKey as BudgetKey) ? (v.budgetKey as BudgetKey) : "standard";
-    const fallback = templateMembers(teamTemplateOf(templateId), size).map((t) => draftFromTemplate(t));
+    const total = teams * size;
+    const slots = templateMembers(teamTemplateOf(templateId), size);
+    const fallback = Array.from({ length: total }, (_, i) => draftFromTemplate(slots[i % size]));
     const members =
-      Array.isArray(v.members) && v.members.length === size
-        ? v.members.map((m, i) => ({ ...fallback[i], ...(m as MemberDraft) }))
+      Array.isArray(v.members) && v.members.length > 0
+        ? v.members.slice(0, total).map((m, i) => ({ ...fallback[i], ...(m as MemberDraft) }))
         : fallback;
+    while (members.length < total) members.push(draftFromTemplate(slots[members.length % size]));
+    // 舊版只有單一 leadPct，升級成每隊一組
+    const leadPcts = Array.isArray(v.leadPcts)
+      ? [0, 1, 2].map((i) => clampPct(v.leadPcts![i] ?? 0))
+      : [clampPct(v.leadPct), 0, 0];
     const plan =
       v.plan && Array.isArray(v.plan.members) && Array.isArray(v.plan.alternatives) ? (v.plan as TeamPlan) : null;
     const altIndex = plan && typeof v.altIndex === "number" ? Math.max(0, Math.min(plan.alternatives.length, Math.round(v.altIndex))) : 0;
     return {
       templateId,
       size,
+      teams,
       content,
       members,
-      leadPct: typeof v.leadPct === "number" ? v.leadPct : 0,
+      leadPcts,
       budgetKey,
       oppSpd: typeof v.oppSpd === "number" ? v.oppSpd : 0,
       plan,
@@ -248,10 +264,12 @@ export default function TeamOptimizerPage() {
   const [saved] = useState(loadSaved);
   const [templateId, setTemplateId] = useState(saved?.templateId ?? "guild-speed");
   const [size, setSize] = useState<Size>(saved?.size ?? 3);
+  /** 一次配幾隊；每隊 size 隻 */
+  const [teams, setTeams] = useState<TeamCount>(saved?.teams ?? 1);
   const [content, setContent] = useState<DeckContext>(saved?.content ?? "guild");
   const [members, setMembers] = useState<MemberDraft[]>(saved?.members ?? initialMembers);
-  /** 全隊速度隊長技 %（0 = 沒有）；每隻可在卡片上個別覆寫 */
-  const [leadPct, setLeadPct] = useState(saved?.leadPct ?? 0);
+  /** 每隊的速度隊長技 %；個別成員可在卡片上覆寫 */
+  const [leadPcts, setLeadPcts] = useState<number[]>(saved?.leadPcts ?? [0, 0, 0]);
   const [budgetKey, setBudgetKey] = useState<BudgetKey>(saved?.budgetKey ?? "standard");
 
   const [running, setRunning] = useState(false);
@@ -319,7 +337,7 @@ export default function TeamOptimizerPage() {
   // 設定與結果存到瀏覽器：跳去其他頁面再回來、或重新整理都不會不見
   useEffect(() => {
     const data: SavedState = {
-      templateId, size, content, members, leadPct, budgetKey, oppSpd, plan, altIndex,
+      templateId, size, teams, content, members, leadPcts, budgetKey, oppSpd, plan, altIndex,
       importedAt: account?.importedAt ?? null,
     };
     try {
@@ -327,7 +345,7 @@ export default function TeamOptimizerPage() {
     } catch {
       /* 忽略儲存失敗（例如容量不足） */
     }
-  }, [templateId, size, content, members, leadPct, budgetKey, oppSpd, plan, altIndex, account?.importedAt]);
+  }, [templateId, size, teams, content, members, leadPcts, budgetKey, oppSpd, plan, altIndex, account?.importedAt]);
 
   // 隊長技全部由數值欄位決定，不再依魔靈自動判斷
 
@@ -412,44 +430,80 @@ export default function TeamOptimizerPage() {
 
   const applyTemplate = async (id: string, nextSize?: Size) => {
     const t = teamTemplateOf(id);
-    const s = nextSize ?? t.size;
+    const s = nextSize ?? size;
     const slots = templateMembers(t, s);
-    const drafts = slots.map((tm, i) => {
-      const d = draftFromTemplate(tm, members[i]?.unitId ?? 0);
-      // 神器速度增加效果是跟著魔靈走的，換隊型時保留已自動帶入的數值
-      if (members[i]?.unitId && members[i].unitId === d.unitId) d.artifactPct = members[i].artifactPct;
-      return d;
-    });
     const skills = await ensureSkills();
-    const auto = withAutoRoles(drafts, t.content, slots.map((tm) => tm.role), skills);
+
+    const nextMembers: MemberDraft[] = [];
+    const nextLead = [...leadPcts];
+    for (let team = 0; team < teams; team++) {
+      const start = team * s;
+      const drafts = slots.map((tm, k) => {
+        const existing = members[start + k];
+        const d = draftFromTemplate(tm, existing?.unitId ?? 0);
+        // 神器速度增加效果是跟著魔靈走的，換隊型時保留已自動帶入的數值
+        if (existing?.unitId && existing.unitId === d.unitId) d.artifactPct = existing.artifactPct;
+        return d;
+      });
+      const auto = withAutoRoles(drafts, t.content, slots.map((tm) => tm.role), skills);
+      if (auto) {
+        nextMembers.push(...auto.members);
+        nextLead[team] = auto.leadPct;
+      } else {
+        nextMembers.push(...drafts);
+      }
+    }
 
     setTemplateId(id);
     setSize(s);
     setContent(t.content);
-    if (auto) {
-      setMembers(auto.members);
-      setLeadPct(auto.leadPct);
-      notify(
-        `已依技能安排定位：${roleSummary(auto.members)}${auto.leadPct > 0 ? `（速度隊長技 +${auto.leadPct}%）` : ""}`,
-      );
-    } else {
-      setMembers(drafts);
-    }
+    setLeadPcts(nextLead);
+    setMembers(nextMembers);
+    setPlan(null);
+    setError(null);
+    notify(
+      teams > 1
+        ? `已套用隊型到 ${teams} 隊（共 ${teams * s} 隻）${nextLead.some((p) => p > 0) ? `，速度隊長技 ${nextLead.slice(0, teams).map((p) => `${p}%`).join(" / ")}` : ""}`
+        : `已依技能安排定位：${roleSummary(nextMembers)}${nextLead[0] > 0 ? `（速度隊長技 +${nextLead[0]}%）` : ""}`,
+    );
+  };
+
+  /** 改變隊數 / 每隊人數：保留每一隊已選的魔靈，不足的用隊型預設補滿 */
+  const changeShape = (nextTeams: TeamCount, nextSize: Size) => {
+    const prevSize = size;
+    const defaults = templateMembers(teamTemplateOf(templateId), nextSize);
+    setMembers((prev) => {
+      const next: MemberDraft[] = [];
+      for (let t = 0; t < nextTeams; t++) {
+        const kept = prev
+          .slice(t * prevSize, (t + 1) * prevSize)
+          .slice(0, nextSize)
+          .map((m) => ({ ...m, order: Math.max(1, Math.min(nextSize, m.order)) }));
+        while (kept.length < nextSize) kept.push(draftFromTemplate(defaults[kept.length % nextSize]));
+        next.push(...kept);
+      }
+      return next;
+    });
+    setTeams(nextTeams);
+    setSize(nextSize);
     setPlan(null);
     setError(null);
   };
 
-  const changeSize = (s: Size) => {
-    setSize(s);
-    setMembers((prev) => {
-      const next = prev.slice(0, s).map((m) => ({ ...m }));
-      const t = teamTemplateOf(templateId);
-      const defaults = templateMembers(t, s);
-      while (next.length < s) next.push(draftFromTemplate(defaults[next.length]));
-      return next;
-    });
+  /** 只重新安排某一隊的定位（依技能） */
+  const autoAssignTeam = async (team: number) => {
+    const start = team * size;
+    const drafts = members.slice(start, start + size).map((m) => ({ ...m }));
+    if (drafts.length === 0 || drafts.some((m) => !m.unitId)) {
+      return notify(`第 ${team + 1} 隊還有位置未選擇魔靈`, "err");
+    }
+    const skills = await ensureSkills();
+    const auto = withAutoRoles(drafts, content, drafts.map((m) => m.role), skills);
+    if (!auto) return notify("這個隊型沒有速隊長或提條，無法自動安排定位", "err");
+    setMembers((prev) => prev.map((m, i) => (i >= start && i < start + size ? auto.members[i - start] : m)));
+    setLeadPcts((prev) => prev.map((p, k) => (k === team ? auto.leadPct : p)));
     setPlan(null);
-    setError(null);
+    notify(`已依技能安排第 ${team + 1} 隊的定位：${roleSummary(auto.members)}`);
   };
 
   /** 從預設隊儲存庫載入整隊（可選擇固定當時的符文），並依技能自動安排角色 */
@@ -490,10 +544,11 @@ export default function TeamOptimizerPage() {
     const auto = withAutoRoles(next, ctx, slots.map((tm) => tm.role), skills);
 
     setSize(nextSize);
+    setTeams(1);
     setContent(ctx);
+    setLeadPcts((prev) => [auto?.leadPct ?? prev[0], prev[1], prev[2]]);
     if (auto) {
       setMembers(auto.members);
-      setLeadPct(auto.leadPct);
     } else {
       setMembers(next);
     }
@@ -511,7 +566,7 @@ export default function TeamOptimizerPage() {
 
   /** 把某一隻的面板速度設成即時算出的接速下限 */
   const applyFollowFloor = (index: number) => {
-    const r = followPlan[index];
+    const r = followRowOf(index);
     const m = members[index];
     const v = m ? viewOf(m.unitId) : undefined;
     if (!r || !v || !Number.isFinite(r.minSpeed)) return;
@@ -522,11 +577,12 @@ export default function TeamOptimizerPage() {
     notify(`已將 ${monsterLabel(v.monster.id)} 的面板速度設為接速下限 ${r.minSpeed}`);
   };
 
-  /** 一次把整隊的面板速度設成接速下限 */
+  /** 一次把每一隊的面板速度設成接速下限 */
   const applyAllFollow = () => {
     let count = 0;
+    const rows = new Map(followInfo.flatMap((info) => info.rows).map((r) => [r.index, r]));
     const next = members.map((m, i) => {
-      const r = followPlan[i];
+      const r = rows.get(i);
       const v = viewOf(m.unitId);
       if (!r || !v || !Number.isFinite(r.minSpeed)) return m;
       count++;
@@ -604,11 +660,12 @@ export default function TeamOptimizerPage() {
     notify(`已儲存定位「${saved.name}」，之後可從「定位」選單直接套用`);
   };
 
-  /** 把這一隻提供的提條 % 與速度強化帶入後面出手的成員（來源自己不套用） */
+  /** 把這一隻提供的提條 % 與速度強化帶入「同一隊」後面出手的成員（來源自己不套用） */
   const propagateBoost = (index: number) => {
     const src = members[index];
     if (!src) return;
-    const later = members.map((m, j) => j !== index && m.order > src.order);
+    const team = teamOfIndex(index);
+    const later = members.map((m, j) => j !== index && teamOfIndex(j) === team && m.order > src.order);
     const count = later.filter(Boolean).length;
     if (count === 0) return notify("後面沒有其他出手成員", "err");
     setMembers((prev) =>
@@ -640,68 +697,84 @@ export default function TeamOptimizerPage() {
     setPlan(null);
   };
 
-  /** 每隻實際套用的速度隊長技 %（卡片留空 = 跟隨全隊數值） */
-  const leadPctOf = (m: MemberDraft) => Math.max(0, m.leadPct ?? leadPct);
+  /** 每隻所屬的隊伍（0-based；成員依隊伍順序排列） */
+  const teamOfIndex = (index: number) => Math.min(teams - 1, Math.floor(index / size));
+
+  /** 每隻實際套用的速度隊長技 %（卡片留空 = 跟隨該隊數值） */
+  const leadPctOf = (index: number) => {
+    const m = members[index];
+    if (!m) return 0;
+    return Math.max(0, m.leadPct ?? leadPcts[teamOfIndex(index)] ?? 0);
+  };
 
   const selected = members.filter((m) => m.unitId > 0);
   const teamIds = selected.map((m) => m.unitId);
 
-  /** 即時接速試算：依攻擊順序串接，並以鏡像對手在該 Tick 的攻擊條當門檻 */
-  const followPlan = useMemo(() => {
+  /** 即時接速試算：每隊各自依攻擊順序串接，並以鏡像對手在該 Tick 的攻擊條當門檻 */
+  const followInfo = useMemo(() => {
     const rate = rta ? 1.5 : 7;
-    return computeFollowPlan(
-      members.map((m, index) => {
-        const v = viewOf(m.unitId);
-        return {
-          index,
-          order: m.order,
-          mode: m.speedMode === "tick" ? "tick" : "panel",
-          baseSpd: v?.base.spd ?? 0,
-          panelExtra: m.panelExtra,
-          tick: m.tick,
-          boostPct: m.boostPct,
-          speedBuff: m.speedBuff,
-          artifactPct: m.artifactPct,
-          leadPct: leadPctOf(m),
-          currentSpd: v?.stats.spd ?? 0,
-        };
-      }),
-      rate,
-      { opponentSpeed: oppSpd },
-    );
-  }, [members, summary, rta, oppSpd, leadPct]);
+    return Array.from({ length: teams }, (_, t) => {
+      const rows = computeFollowPlan(
+        members
+          .map((m, index) => ({ m, index }))
+          .filter(({ index }) => Math.floor(index / size) === t)
+          .map(({ m, index }) => {
+            const v = viewOf(m.unitId);
+            return {
+              index,
+              order: m.order,
+              mode: (m.speedMode === "tick" ? "tick" : "panel") as "tick" | "panel",
+              baseSpd: v?.base.spd ?? 0,
+              panelExtra: m.panelExtra,
+              tick: m.tick,
+              boostPct: m.boostPct,
+              speedBuff: m.speedBuff,
+              artifactPct: m.artifactPct,
+              leadPct: Math.max(0, m.leadPct ?? leadPcts[t] ?? 0),
+              currentSpd: v?.stats.spd ?? 0,
+            };
+          }),
+        rate,
+        { opponentSpeed: oppSpd },
+      );
 
-  /** 鏡像對戰的實際出手順序：只顯示到「對手第一次出手」為止，最多一個循環 */
-  const mirrorSteps = useMemo(() => {
-    const all = mirrorTimeline(followPlan, rta ? 1.5 : 7, 16);
-    const firstOpp = all.findIndex((s) => s.team === "opponent");
-    return firstOpp >= 0 ? all.slice(0, firstOpp + 1) : all.slice(0, 6);
-  }, [followPlan, rta]);
+      const all = mirrorTimeline(rows, rate, 16);
+      const firstOppIndex = all.findIndex((s) => s.team === "opponent");
+      const steps = firstOppIndex >= 0 ? all.slice(0, firstOppIndex + 1) : all.slice(0, 6);
+      const opener = rows.find((r) => r.position === 0);
+      const ticks = rows.filter((r) => r.position > 0 && r.targetTick != null).map((r) => r.targetTick as number);
+      const lastTick = ticks.length ? Math.max(...ticks) : null;
+      const failing = rows.filter((r) => r.position > 0 && r.met === false);
+      const firstOpp = steps.find((s) => s.team === "opponent") ?? null;
 
-  const openerFollow = followPlan.find((r) => r.position === 0);
-  const autoOppSpd = openerFollow?.panelSpd ?? openerFollow?.currentSpd ?? 0;
+      let verdict: "idle" | "safe" | "cut" = "idle";
+      if (rows.some((r) => r.position > 0)) {
+        if (failing.length) verdict = "cut";
+        else if (firstOpp && lastTick != null && firstOpp.tick <= lastTick) verdict = "cut";
+        else verdict = "safe";
+      }
 
-  /** 最後一隻接速成員預計出手的 Tick */
-  const lastFollowTick = useMemo(() => {
-    const ticks = followPlan
-      .filter((r) => r.position > 0 && r.targetTick != null)
-      .map((r) => r.targetTick as number);
-    return ticks.length ? Math.max(...ticks) : null;
-  }, [followPlan]);
+      return {
+        rows,
+        steps,
+        verdict,
+        failing,
+        firstOpp,
+        lastTick,
+        autoOpp: opener?.panelSpd ?? opener?.currentSpd ?? 0,
+        ordered: [...rows].sort((a, b) => a.position - b.position),
+      };
+    });
+  }, [members, teams, size, summary, rta, oppSpd, leadPcts]);
 
-  /** 鏡像檢查結論：有沒有接速成員在目標 Tick 輸給對手 */
-  const mirrorVerdict = useMemo(() => {
-    const failing = followPlan.filter((r) => r.position > 0 && r.met === false);
-    const firstOpp = mirrorSteps.find((s) => s.team === "opponent") ?? null;
-    if (!followPlan.some((r) => r.position > 0)) {
-      return { status: "idle" as const, firstOpp: null, failing };
+  /** 用全域索引找接速資料（套用下限用） */
+  const followRowOf = (index: number) => {
+    for (const info of followInfo) {
+      const row = info.rows.find((r) => r.index === index);
+      if (row) return row;
     }
-    if (failing.length) return { status: "cut" as const, firstOpp, failing };
-    if (firstOpp && lastFollowTick != null && firstOpp.tick <= lastFollowTick) {
-      return { status: "cut" as const, firstOpp, failing };
-    }
-    return { status: "safe" as const, firstOpp, failing };
-  }, [followPlan, mirrorSteps, lastFollowTick]);
+    return undefined;
+  };
 
   /** 全域「包括」符文：分配給目前裝備它的隊員（不在隊上的忽略） */
   const globalIncludes = useMemo(() => {
@@ -748,7 +821,8 @@ export default function TeamOptimizerPage() {
   const buildRequest = (): TeamRequest | null => {
     if (!account || !summary) return null;
     const specs: TeamMemberSpec[] = [];
-    for (const m of members) {
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i];
       const v = viewOf(m.unitId);
       if (!v) return null;
       const sets: { set: number; count: number }[] = [];
@@ -759,7 +833,7 @@ export default function TeamOptimizerPage() {
       // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度與隊長技以外的額外速度」
       const panelSpd =
         m.speedMode !== "tick" && m.panelExtra > 0
-          ? v.base.spd + leadBonus(v.base.spd, leadPctOf(m)) + m.panelExtra
+          ? v.base.spd + leadBonus(v.base.spd, leadPctOf(i)) + m.panelExtra
           : 0;
       if (panelSpd > 0) min.spd = panelSpd;
       else if (m.speedMode === "tick" && m.tick > 0) min.spd = speedForTick(m.tick, rta);
@@ -792,7 +866,7 @@ export default function TeamOptimizerPage() {
         min,
         focus: m.focus,
         includeRunes: [...bySlot.values()],
-        leadSpd: leadPctOf(m),
+        leadSpd: leadPctOf(i),
         objective: skill
           ? "skill"
           : m.objectiveMode === "role"
@@ -822,7 +896,7 @@ export default function TeamOptimizerPage() {
 
   const run = () => {
     if (!account) return notify("請先匯入存檔", "err");
-    if (members.length !== size) return notify("隊伍人數不一致，請重新選擇", "err");
+    if (members.length !== teams * size) return notify("隊伍人數不一致，請重新選擇", "err");
     if (members.some((m) => !m.unitId)) return notify("還有位置未選擇魔靈", "err");
     if (new Set(members.map((m) => m.unitId)).size !== members.length) {
       return notify("同一隻魔靈不能重複加入隊伍", "err");
@@ -859,7 +933,7 @@ export default function TeamOptimizerPage() {
       workerRef.current = null;
       setRunning(false);
       setProgress(null);
-      setError("配隊運算超過 90 秒，已停止。請把搜尋預算改成「快速」、放寬條件，或減少隊伍人數。");
+      setError("配隊運算超過 90 秒，已停止。請把搜尋預算改成「快速」、放寬條件，或減少隊伍數／人數。");
     }, 90_000);
 
     const done = () => {
@@ -918,10 +992,6 @@ export default function TeamOptimizerPage() {
   };
 
   const activePlan = plan ? (altIndex === 0 ? plan : plan.alternatives[altIndex - 1] ?? plan) : null;
-  const planSpeedOrder = useMemo(
-    () => (activePlan ? [...activePlan.members].sort((a, b) => b.stats.spd - a.stats.spd) : []),
-    [activePlan],
-  );
 
   const pinMember = (unitId: number) => {
     const b = activePlan?.members.find((m) => m.unitId === unitId);
@@ -957,25 +1027,34 @@ export default function TeamOptimizerPage() {
 
   const savePlan = () => {
     if (!activePlan) return;
-    saveDeckFav({
-      name: `一鍵配隊 · ${activePlan.members.map((m) => monsterLabel(m.master)).join(" / ")}`,
-      type: 0,
-      seq: 1,
-      units: activePlan.members.map((m) => {
-        const u = account?.units.find((x) => x.id === m.unitId);
-        return { unitId: m.unitId, master: m.master, runeIds: m.runeIds, artifactIds: u?.artifacts ?? [] };
-      }),
-    });
+    for (let t = 0; t < teams; t++) {
+      const builds = activePlan.members.slice(t * size, (t + 1) * size);
+      if (builds.length === 0) continue;
+      saveDeckFav(
+        {
+          name: `一鍵配隊 · 第 ${t + 1} 隊 · ${builds.map((m) => monsterLabel(m.master)).join(" / ")}`,
+          type: 0,
+          seq: 1,
+          units: builds.map((m) => {
+            const u = account?.units.find((x) => x.id === m.unitId);
+            return { unitId: m.unitId, master: m.master, runeIds: m.runeIds, artifactIds: u?.artifacts ?? [] };
+          }),
+        },
+        { silent: true },
+      );
+    }
+    notify(teams > 1 ? `已儲存 ${teams} 隊到儲存庫` : "已儲存到儲存庫");
   };
 
   const copyPlan = () => {
     if (!activePlan) return;
-    const lines = activePlan.members.map((m) => {
+    const lines = activePlan.members.map((m, i) => {
       const sets = setSummary(m.sets);
-      return `${monsterLabel(m.master)}  SPD ${m.stats.spd} (T${m.stats.tick})  HP ${fmt(m.stats.hp)}  DEF ${fmt(m.stats.def)}  EHP ${fmt(m.ehp)}  ${sets}  符文 ${m.runeIds.join(", ")}`;
+      const head = teams > 1 && i % size === 0 ? `\n[第 ${Math.floor(i / size) + 1} 隊]\n` : "";
+      return `${head}${monsterLabel(m.master)}  SPD ${m.stats.spd} (T${m.stats.tick})  HP ${fmt(m.stats.hp)}  DEF ${fmt(m.stats.def)}  EHP ${fmt(m.ehp)}  ${sets}  符文 ${m.runeIds.join(", ")}`;
     });
-    void navigator.clipboard?.writeText(lines.join("\n"));
-    notify("已複製整隊配裝清單");
+    void navigator.clipboard?.writeText(lines.join("\n").trim());
+    notify(teams > 1 ? `已複製 ${teams} 隊配裝清單` : "已複製整隊配裝清單");
   };
 
   if (!account) {
@@ -983,7 +1062,13 @@ export default function TeamOptimizerPage() {
   }
 
   const totalWeight = members.reduce((s, m) => s + Math.max(1, m.weight), 0);
-  const orderedFollow = [...followPlan].sort((a, b) => a.position - b.position);
+
+  /** 每一隊自己的速度順序（結果頁顯示用） */
+  const planSpeedOrders: TeamPlan["members"][] = activePlan
+    ? Array.from({ length: teams }, (_, t) =>
+        [...activePlan.members.slice(t * size, (t + 1) * size)].sort((a, b) => b.stats.spd - a.stats.spd),
+      )
+    : [];
 
   return (
     <>
@@ -993,7 +1078,7 @@ export default function TeamOptimizerPage() {
             <Zap size={15} className="gold" /> 一鍵配隊
           </div>
           <div className="card-sub">
-            先選 3～5 隻魔靈，再一次配好整隊符文；同一顆符文不會重複分配給兩隻魔靈。載入預設隊或切換隊型時，會依技能自動安排定位與出手順序。
+            每隊 3～5 隻、最多 3 隊（合計 15 隻），再一次配好所有隊伍的符文；同一顆符文不會重複分配給兩隻魔靈。RTA 用 1 隊 5 隻，混沌 PVE 可用 2～3 隊。
           </div>
         </div>
         <div className="row wrap" style={{ gap: 6 }}>
@@ -1014,11 +1099,19 @@ export default function TeamOptimizerPage() {
             <div className="tiny dim" style={{ marginTop: 3, maxWidth: 620 }}>{template.desc}</div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
+            <span className="tiny dim">隊伍數</span>
+            {([1, 2, 3] as TeamCount[]).map((n) => (
+              <button key={n} type="button" className={`chip ${teams === n ? "gold" : "muted"}`} style={{ cursor: "pointer" }} onClick={() => changeShape(n, size)}>
+                {n} 隊
+              </button>
+            ))}
+            <span className="tiny dim" style={{ marginLeft: 6 }}>每隊</span>
             {([3, 4, 5] as Size[]).map((n) => (
-              <button key={n} type="button" className={`chip ${size === n ? "gold" : "muted"}`} style={{ cursor: "pointer" }} onClick={() => changeSize(n)}>
+              <button key={n} type="button" className={`chip ${size === n ? "gold" : "muted"}`} style={{ cursor: "pointer" }} onClick={() => changeShape(teams, n)}>
                 {n} 隻
               </button>
             ))}
+            <span className="chip muted">共 {teams * size} 隻</span>
           </div>
         </div>
 
@@ -1029,22 +1122,6 @@ export default function TeamOptimizerPage() {
           <select className="select" style={{ width: 180 }} value={content} onChange={(e) => { setContent(e.target.value as DeckContext); setPlan(null); }}>
             {(["arena", "guild", "dungeon"] as DeckContext[]).map((c) => <option key={c} value={c}>{DECK_CONTEXT_LABEL[c]}</option>)}
           </select>
-          <label className="row" style={{ gap: 6 }}>
-            <span className="tiny dim">速度隊長技 %</span>
-            <input
-              className="input mono"
-              style={{ width: 84 }}
-              type="number"
-              min={0}
-              max={50}
-              value={leadPct}
-              onChange={(e) => {
-                setLeadPct(Math.max(0, Math.min(50, Number(e.target.value) || 0)));
-                setPlan(null);
-              }}
-              title="全隊速度隊長技加成，以每隻的基礎速度計算；0 = 沒有隊長技"
-            />
-          </label>
           <select className="select" style={{ width: 170 }} value={budgetKey} onChange={(e) => setBudgetKey(e.target.value as BudgetKey)}>
             {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => <option key={k} value={k}>預算：{BUDGETS[k].label}（{BUDGETS[k].hint}）</option>)}
           </select>
@@ -1052,25 +1129,58 @@ export default function TeamOptimizerPage() {
 
         <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
           <span className="tiny" style={{ color: "var(--gold, #f2c65c)" }}>
-            {leadPct > 0
-              ? `速度隊長技：每隻基礎速度 +${leadPct}%（可在成員卡片個別調整，留空 = 跟隨全隊）`
-              : "速度隊長技：0%（可在成員卡片輸入個別數值，例如只有部分屬性／內容吃得到）"}
+            速度隊長技 % 改成每隊各自設定（在下方每一隊的標題列），每隻也能在卡片上個別覆寫，留空 = 跟隨該隊。
           </span>
           {rta && <span className="tiny dim">RTA 模式：Tick 以 1.5% 計算，且不含一般建築</span>}
         </div>
       </div>
 
-      {/* 隊伍成員 */}
+      {/* 隊伍成員（依隊伍分組） */}
       <div className="team-member-grid">
         {members.map((m, i) => {
           const v = viewOf(m.unitId);
           const pinned = m.includeRunes.length > 0;
-          const laterCount = members.filter((x, j) => j !== i && x.order > m.order).length;
+          const teamIndex = Math.floor(i / size);
+          const isTeamStart = i === teamIndex * size;
+          const laterCount = members.filter((x, j) => j !== i && Math.floor(j / size) === teamIndex && x.order > m.order).length;
           const skills = skillData && v ? skillsForMonster(skillData, v.monster.id) : [];
           const effSkill = skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills);
           const appliedPreset = presets.find((p) => p.id === m.presetId);
           return (
-            <div key={i} className={`card card-pad team-member ${pinned ? "pinned" : ""}`}>
+            <Fragment key={i}>
+              {isTeamStart && (
+                <div className="team-group-head" style={{ gridColumn: "1 / -1" }}>
+                  <div className="row between wrap" style={{ gap: 8 }}>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span className="team-group-title">{teams > 1 ? `第 ${teamIndex + 1} 隊` : "隊伍設定"}</span>
+                      <span className="tiny dim">{size} 隻</span>
+                    </div>
+                    <div className="row wrap" style={{ gap: 8 }}>
+                      <label className="row" style={{ gap: 6 }}>
+                        <span className="tiny dim">速度隊長技 %</span>
+                        <input
+                          className="input mono"
+                          style={{ width: 72 }}
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={leadPcts[teamIndex] ?? 0}
+                          onChange={(e) => {
+                            const pct = Math.max(0, Math.min(50, Number(e.target.value) || 0));
+                            setLeadPcts((prev) => prev.map((p, k) => (k === teamIndex ? pct : p)));
+                            setPlan(null);
+                          }}
+                          title="這一隊的速度隊長技加成，以每隻的基礎速度計算；0 = 沒有隊長技"
+                        />
+                      </label>
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={() => void autoAssignTeam(teamIndex)} title="依魔靈技能重新安排這一隊的速隊長、提條與出手順序">
+                        <Users size={12} /> 依技能安排定位
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className={`card card-pad team-member ${pinned ? "pinned" : ""}`}>
               <div className="row between" style={{ gap: 8 }}>
                 <div className="row" style={{ gap: 8, minWidth: 0 }}>
                   <MonsterIcon id={v?.monster.id ?? 0} size={38} />
@@ -1094,11 +1204,11 @@ export default function TeamOptimizerPage() {
                     <span>
                       面板{" "}
                       <b className="gold">
-                        {v.base.spd + leadBonus(v.base.spd, leadPctOf(m)) + m.panelExtra}
+                        {v.base.spd + leadBonus(v.base.spd, leadPctOf(i)) + m.panelExtra}
                       </b>
-                      {leadPctOf(m) > 0 && (
+                      {leadPctOf(i) > 0 && (
                         <span className="dim">
-                          （{v.base.spd} + 隊長 {leadBonus(v.base.spd, leadPctOf(m))} + 額外{" "}
+                          （{v.base.spd} + 隊長 {leadBonus(v.base.spd, leadPctOf(i))} + 額外{" "}
                           {m.panelExtra}）
                         </span>
                       )}
@@ -1109,7 +1219,7 @@ export default function TeamOptimizerPage() {
                   )}
                   <span>T{v.stats.tick}</span>
                   <span>{v.runes.length}/6 符文</span>
-                  {leadPctOf(m) > 0 && <span className="chip gold">隊長 +{leadPctOf(m)}%</span>}
+                  {leadPctOf(i) > 0 && <span className="chip gold">隊長 +{leadPctOf(i)}%</span>}
                   {pinned && <span className="chip green"><Pin size={10} /> 已固定</span>}
                 </div>
               )}
@@ -1238,7 +1348,7 @@ export default function TeamOptimizerPage() {
                       onChange={(e) => updateMember(i, { panelExtra: Math.max(0, Number(e.target.value) || 0) })}
                       title={
                         v
-                          ? `基礎速度 ${v.base.spd} + 隊長技 ${leadBonus(v.base.spd, leadPctOf(m))} + 額外速度；例如要 391 就輸入 ${Math.max(0, 391 - v.base.spd - leadBonus(v.base.spd, leadPctOf(m)))}`
+                          ? `基礎速度 ${v.base.spd} + 隊長技 ${leadBonus(v.base.spd, leadPctOf(i))} + 額外速度；例如要 391 就輸入 ${Math.max(0, 391 - v.base.spd - leadBonus(v.base.spd, leadPctOf(i)))}`
                           : "輸入基礎速度與隊長技以外的額外速度"
                       }
                     />
@@ -1265,7 +1375,7 @@ export default function TeamOptimizerPage() {
                     min={0}
                     max={50}
                     value={m.leadPct ?? ""}
-                    placeholder={`全隊 ${leadPct}`}
+                    placeholder={`第 ${teamIndex + 1} 隊 ${leadPcts[teamIndex] ?? 0}`}
                     onChange={(e) =>
                       updateMember(i, {
                         leadPct:
@@ -1367,7 +1477,8 @@ export default function TeamOptimizerPage() {
                   </button>
                 </div>
               )}
-            </div>
+              </div>
+            </Fragment>
           );
         })}
       </div>
@@ -1393,7 +1504,7 @@ export default function TeamOptimizerPage() {
                 type="number"
                 min={0}
                 value={oppSpd || ""}
-                placeholder={autoOppSpd ? String(autoOppSpd) : "同起手"}
+                placeholder={followInfo[0]?.autoOpp ? String(followInfo[0].autoOpp) : "同起手"}
                 onChange={(e) => setOppSpd(Math.max(0, Number(e.target.value) || 0))}
                 title="0 / 留空 = 使用起手提條角的同速鏡像"
               />
@@ -1405,135 +1516,146 @@ export default function TeamOptimizerPage() {
           </div>
         </div>
 
-        {mirrorSteps.length > 0 && (
-          <div className="row wrap" style={{ gap: 6, marginTop: 10 }}>
-            <span className="tiny dim">鏡像預測：</span>
-            {mirrorSteps.map((s, i) => {
-              const v = viewOf(members[s.index]?.unitId ?? 0);
-              const name = v ? monsterLabel(v.monster.id) : `#${s.index + 1}`;
-              return (
-                <span
-                  key={`${s.tick}-${s.team}-${s.index}-${i}`}
-                  className={`chip ${s.team === "ally" ? "green" : "red"}`}
-                  title={`T${s.tick} 出手時攻擊條 ${s.ab}%`}
-                >
-                  T{s.tick} {s.team === "ally" ? "你" : "對手"} {name}
-                </span>
-              );
-            })}
-            {mirrorVerdict.status === "safe" && <span className="chip green">✓ 對手插不進來</span>}
-            {mirrorVerdict.status === "cut" &&
-              (mirrorVerdict.failing.length > 0 ? (
-                <span className="chip red">
-                  ✗{" "}
-                  {mirrorVerdict.failing
-                    .map((f) => {
-                      const v = viewOf(members[f.index]?.unitId ?? 0);
-                      return `${v ? monsterLabel(v.monster.id) : `#${f.index + 1}`}（T${f.targetTick}）`;
-                    })
-                    .join("、")}{" "}
-                  會被插隊
-                </span>
-              ) : (
-                <span className="chip red">✗ 對手會在 T{mirrorVerdict.firstOpp?.tick} 插隊</span>
-              ))}
-          </div>
-        )}
-
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(235px, 1fr))", gap: 8, marginTop: 10 }}>
-          {orderedFollow.map((r) => {
-            const v = viewOf(members[r.index]?.unitId ?? 0);
-            const isOpener = r.position === 0;
-            const hasTarget = r.targetTick != null;
-            const hasSpeed = r.panelSpd != null || r.currentSpd != null;
-            const statusClass = isOpener
-              ? "green"
-              : !hasTarget
-                ? "muted"
-                : r.met == null
-                  ? "muted"
-                  : r.met
-                    ? "green"
-                    : "red";
-            const statusText = isOpener
-              ? "起手"
-              : !hasTarget
-                ? "無接速下限"
-                : r.met == null
-                  ? "未設速度"
-                  : r.met
-                    ? "安全"
-                    : "會被插隊";
-            return (
-              <div key={r.index} className="team-result-member" style={{ padding: 9 }}>
-                <div className="row between" style={{ gap: 6 }}>
-                  <span className="chip gold">順序 {r.position + 1}</span>
-                  <span className={`chip ${statusClass}`}>{statusText}</span>
-                </div>
-                <div style={{ fontWeight: 700, fontSize: 12.5, marginTop: 6 }}>
-                  {v ? monsterLabel(v.monster.id) : "尚未選擇"}
-                </div>
-                <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 4 }}>
-                  <span>{isOpener ? `起手 T${r.effectiveTick ?? "—"}` : `對齊 T${r.targetTick}`}</span>
-                  {!isOpener && <span>提條 {r.boostPct}%</span>}
-                  {r.buffPct > 0 && <span className="gold">強化 +{Math.round(r.buffPct * 10) / 10}%</span>}
-                </div>
-
-                {isOpener ? (
-                  <div className="row between wrap" style={{ gap: 6, marginTop: 8 }}>
-                    <span className="tiny dim">沒有接速下限</span>
-                    <span className="chip muted">
-                      {r.panelSpd != null
-                        ? `面板 ${r.panelSpd}（${v ? v.base.spd : "—"}${r.leadFlat > 0 ? ` + ${r.leadFlat}` : ""} + 額外 ${Math.max(0, r.panelSpd - (v?.base.spd ?? 0) - r.leadFlat)}）→ T${r.panelTick ?? "—"}`
-                        : r.currentSpd != null
-                          ? `目前 ${r.currentSpd} → T${r.currentTick ?? "—"}`
-                          : "尚未設定速度"}
-                    </span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="row between wrap" style={{ gap: 6, marginTop: 7 }}>
-                      <span className="tiny dim">
-                        最低速度{" "}
-                        <b className={hasTarget ? "gold mono" : "muted mono"}>
-                          {hasTarget && Number.isFinite(r.minSpeed) ? r.minSpeed : "—"}
-                        </b>
-                        {hasTarget && v && Number.isFinite(r.minSpeed) && (
-                          <span className="dim mono">
-                            {" "}
-                            （{v.base.spd}
-                            {r.leadFlat > 0 ? ` + 隊長 ${r.leadFlat}` : ""} + 額外{" "}
-                            {Math.max(0, r.minSpeed - v.base.spd - r.leadFlat)}）
-                          </span>
-                        )}
-                      </span>
-                      <span className="tiny dim">
-                        對手攻擊條 <b className="mono">{r.opponentAb ? `${r.opponentAb.toFixed(1)}%` : "—"}</b>
-                      </span>
-                    </div>
-                    <div className="row between" style={{ gap: 6, marginTop: 6 }}>
-                      <span className="tiny dim">
-                        我方 T{r.targetTick}{" "}
-                        <b className={r.met ? "green mono" : hasSpeed ? "red mono" : "muted mono"}>
-                          {r.myAb != null ? `${r.myAb.toFixed(1)}%` : "—"}
-                        </b>
-                      </span>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-ghost"
-                        disabled={!hasTarget || !v || !Number.isFinite(r.minSpeed)}
-                        onClick={() => applyFollowFloor(r.index)}
-                        title="把面板速度設成不被鏡像對手插隊的最低值"
-                      >
-                        套用下限
-                      </button>
-                    </div>
-                  </>
-                )}
+        {followInfo.map((info, t) => (
+          <div key={t} className={teams > 1 ? "team-follow" : undefined}>
+            {teams > 1 && (
+              <div className="row between wrap" style={{ gap: 8, marginTop: 14, paddingTop: 10, borderTop: "1px dashed var(--line-soft)" }}>
+                <span className="team-group-title">第 {t + 1} 隊</span>
+                <span className="tiny dim">速度隊長技 {leadPcts[t] ?? 0}%</span>
               </div>
-            );
-          })}
-        </div>
+            )}
+
+            {info.steps.length > 0 && (
+              <div className="row wrap" style={{ gap: 6, marginTop: 10 }}>
+                <span className="tiny dim">鏡像預測：</span>
+                {info.steps.map((s, i) => {
+                  const v = viewOf(members[s.index]?.unitId ?? 0);
+                  const name = v ? monsterLabel(v.monster.id) : `#${s.index + 1}`;
+                  return (
+                    <span
+                      key={`${s.tick}-${s.team}-${s.index}-${i}`}
+                      className={`chip ${s.team === "ally" ? "green" : "red"}`}
+                      title={`T${s.tick} 出手時攻擊條 ${s.ab}%`}
+                    >
+                      T{s.tick} {s.team === "ally" ? "你" : "對手"} {name}
+                    </span>
+                  );
+                })}
+                {info.verdict === "safe" && <span className="chip green">✓ 對手插不進來</span>}
+                {info.verdict === "cut" &&
+                  (info.failing.length > 0 ? (
+                    <span className="chip red">
+                      ✗{" "}
+                      {info.failing
+                        .map((f) => {
+                          const v = viewOf(members[f.index]?.unitId ?? 0);
+                          return `${v ? monsterLabel(v.monster.id) : `#${f.index + 1}`}（T${f.targetTick}）`;
+                        })
+                        .join("、")}{" "}
+                      會被插隊
+                    </span>
+                  ) : (
+                    <span className="chip red">✗ 對手會在 T{info.firstOpp?.tick} 插隊</span>
+                  ))}
+              </div>
+            )}
+
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(235px, 1fr))", gap: 8, marginTop: 10 }}>
+              {info.ordered.map((r) => {
+                const v = viewOf(members[r.index]?.unitId ?? 0);
+                const isOpener = r.position === 0;
+                const hasTarget = r.targetTick != null;
+                const hasSpeed = r.panelSpd != null || r.currentSpd != null;
+                const statusClass = isOpener
+                  ? "green"
+                  : !hasTarget
+                    ? "muted"
+                    : r.met == null
+                      ? "muted"
+                      : r.met
+                        ? "green"
+                        : "red";
+                const statusText = isOpener
+                  ? "起手"
+                  : !hasTarget
+                    ? "無接速下限"
+                    : r.met == null
+                      ? "未設速度"
+                      : r.met
+                        ? "安全"
+                        : "會被插隊";
+                return (
+                  <div key={r.index} className="team-result-member" style={{ padding: 9 }}>
+                    <div className="row between" style={{ gap: 6 }}>
+                      <span className="chip gold">順序 {r.position + 1}</span>
+                      <span className={`chip ${statusClass}`}>{statusText}</span>
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 12.5, marginTop: 6 }}>
+                      {v ? monsterLabel(v.monster.id) : "尚未選擇"}
+                    </div>
+                    <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 4 }}>
+                      <span>{isOpener ? `起手 T${r.effectiveTick ?? "—"}` : `對齊 T${r.targetTick}`}</span>
+                      {!isOpener && <span>提條 {r.boostPct}%</span>}
+                      {r.buffPct > 0 && <span className="gold">強化 +{Math.round(r.buffPct * 10) / 10}%</span>}
+                    </div>
+
+                    {isOpener ? (
+                      <div className="row between wrap" style={{ gap: 6, marginTop: 8 }}>
+                        <span className="tiny dim">沒有接速下限</span>
+                        <span className="chip muted">
+                          {r.panelSpd != null
+                            ? `面板 ${r.panelSpd}（${v ? v.base.spd : "—"}${r.leadFlat > 0 ? ` + ${r.leadFlat}` : ""} + 額外 ${Math.max(0, r.panelSpd - (v?.base.spd ?? 0) - r.leadFlat)}）→ T${r.panelTick ?? "—"}`
+                            : r.currentSpd != null
+                              ? `目前 ${r.currentSpd} → T${r.currentTick ?? "—"}`
+                              : "尚未設定速度"}
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="row between wrap" style={{ gap: 6, marginTop: 7 }}>
+                          <span className="tiny dim">
+                            最低速度{" "}
+                            <b className={hasTarget ? "gold mono" : "muted mono"}>
+                              {hasTarget && Number.isFinite(r.minSpeed) ? r.minSpeed : "—"}
+                            </b>
+                            {hasTarget && v && Number.isFinite(r.minSpeed) && (
+                              <span className="dim mono">
+                                {" "}
+                                （{v.base.spd}
+                                {r.leadFlat > 0 ? ` + 隊長 ${r.leadFlat}` : ""} + 額外{" "}
+                                {Math.max(0, r.minSpeed - v.base.spd - r.leadFlat)}）
+                              </span>
+                            )}
+                          </span>
+                          <span className="tiny dim">
+                            對手攻擊條 <b className="mono">{r.opponentAb ? `${r.opponentAb.toFixed(1)}%` : "—"}</b>
+                          </span>
+                        </div>
+                        <div className="row between" style={{ gap: 6, marginTop: 6 }}>
+                          <span className="tiny dim">
+                            我方 T{r.targetTick}{" "}
+                            <b className={r.met ? "green mono" : hasSpeed ? "red mono" : "muted mono"}>
+                              {r.myAb != null ? `${r.myAb.toFixed(1)}%` : "—"}
+                            </b>
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            disabled={!hasTarget || !v || !Number.isFinite(r.minSpeed)}
+                            onClick={() => applyFollowFloor(r.index)}
+                            title="把面板速度設成不被鏡像對手插隊的最低值"
+                          >
+                            套用下限
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* 供給檢查 + 執行 */}
@@ -1564,7 +1686,7 @@ export default function TeamOptimizerPage() {
               </>
             ) : (
               <button type="button" className="btn btn-primary" onClick={run} disabled={members.some((m) => !m.unitId)}>
-                <Wand2 size={15} /> 一鍵配一隊
+                <Wand2 size={15} /> {teams > 1 ? `一鍵配 ${teams} 隊` : "一鍵配一隊"}
               </button>
             )}
           </div>
@@ -1635,25 +1757,39 @@ export default function TeamOptimizerPage() {
             </div>
           )}
 
-          <div className="deck-speedbar" style={{ marginTop: 10 }}>
-            <div className="row between" style={{ marginBottom: 6 }}>
-              <span className="tiny dim">速度順序</span>
-              <span className="tiny dim">Speed Tick</span>
-            </div>
-            <div className="row wrap" style={{ gap: 5 }}>
-              {planSpeedOrder.map((m, i) => (
-                <span key={m.unitId} className="chip muted" title={`SPD ${m.stats.spd} · Tick ${m.stats.tick}`}>
-                  <b className="gold">{i + 1}</b>
-                  <span style={{ margin: "0 4px" }}>{monsterLabel(m.master)}</span>
-                  <span className="mono">{m.stats.spd}</span>
-                  <span style={{ marginLeft: 4 }}>T{m.stats.tick}</span>
-                </span>
-              ))}
-            </div>
-          </div>
+          {Array.from({ length: teams }, (_, t) => {
+            const teamBuilds = activePlan.members.slice(t * size, (t + 1) * size);
+            return (
+              <div key={t}>
+                {teams > 1 && (
+                  <div className="row between wrap" style={{ gap: 8, marginTop: 16, paddingTop: 10, borderTop: "1px dashed var(--line-soft)" }}>
+                    <span className="team-group-title">第 {t + 1} 隊</span>
+                    <span className="tiny dim">
+                      平均效率{" "}
+                      {Math.round(teamBuilds.reduce((s, m) => s + m.eff, 0) / Math.max(1, teamBuilds.length))}%
+                    </span>
+                  </div>
+                )}
 
-          <div className="team-result-grid">
-            {activePlan.members.map((m) => {
+                <div className="deck-speedbar" style={{ marginTop: 10 }}>
+                  <div className="row between" style={{ marginBottom: 6 }}>
+                    <span className="tiny dim">速度順序</span>
+                    <span className="tiny dim">Speed Tick</span>
+                  </div>
+                  <div className="row wrap" style={{ gap: 5 }}>
+                    {(planSpeedOrders[t] ?? []).map((m, i) => (
+                      <span key={m.unitId} className="chip muted" title={`SPD ${m.stats.spd} · Tick ${m.stats.tick}`}>
+                        <b className="gold">{i + 1}</b>
+                        <span style={{ margin: "0 4px" }}>{monsterLabel(m.master)}</span>
+                        <span className="mono">{m.stats.spd}</span>
+                        <span style={{ marginLeft: 4 }}>T{m.stats.tick}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="team-result-grid">
+                  {teamBuilds.map((m) => {
               const runes = m.runeIds.map((id) => runeMap.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
               const v = viewOf(m.unitId);
               const artifacts = v?.artifacts ?? [];
@@ -1727,12 +1863,15 @@ export default function TeamOptimizerPage() {
                 </div>
               );
             })}
-          </div>
+                </div>
+              </div>
+            );
+          })}
 
           <div className="row wrap" style={{ gap: 6, marginTop: 12 }}>
-            <button type="button" className="btn btn-primary btn-sm" onClick={equipPlan}><Shirt size={13} /> 整隊上符</button>
-            <button type="button" className="btn btn-sm" onClick={lockPlan}><Lock size={13} /> 鎖定這隊符文</button>
-            <button type="button" className="btn btn-sm" onClick={savePlan}><Save size={13} /> 儲存到儲存庫</button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={equipPlan}><Shirt size={13} /> {teams > 1 ? "全部上符" : "整隊上符"}</button>
+            <button type="button" className="btn btn-sm" onClick={lockPlan}><Lock size={13} /> {teams > 1 ? "鎖定全部符文" : "鎖定這隊符文"}</button>
+            <button type="button" className="btn btn-sm" onClick={savePlan}><Save size={13} /> {teams > 1 ? `儲存 ${teams} 隊` : "儲存到儲存庫"}</button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={copyPlan}><Copy size={13} /> 複製清單</button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={run}><Gauge size={13} /> 重新計算</button>
           </div>

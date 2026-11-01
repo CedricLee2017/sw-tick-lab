@@ -124,7 +124,7 @@ interface Store {
   saveLoadout: (l: Omit<Loadout, "id" | "createdAt">) => void;
   removeLoadout: (id: string) => void;
   /** 儲存整隊預設隊到預設隊儲存庫 */
-  saveDeckFav: (d: Omit<DeckFav, "id" | "createdAt">) => void;
+  saveDeckFav: (d: Omit<DeckFav, "id" | "createdAt">, opts?: { silent?: boolean }) => void;
   removeDeckFav: (id: string) => void;
   /** 登入後把本機與雲端儲存庫合併（本機優先），必要時回寫雲端 */
   syncLibrary: () => Promise<void>;
@@ -378,7 +378,7 @@ export const useStore = create<Store>((setState, getState) => ({
     getState().notify("已儲存配裝");
   },
 
-  saveDeckFav: (d) => {
+  saveDeckFav: (d, opts) => {
     // 同類型、同序號且隊員完全相同視為同一組，直接覆蓋更新
     const signature = (x: { type: number; seq: number; units: { unitId: number }[] }) =>
       `${x.type}|${x.seq}|${x.units.map((u) => u.unitId).join(",")}`;
@@ -394,7 +394,7 @@ export const useStore = create<Store>((setState, getState) => ({
     setState({ deckFavs });
     void set(DECK_FAV_KEY, deckFavs);
     scheduleLibraryPush();
-    getState().notify(existing ? "已更新預設隊" : "已儲存預設隊");
+    if (!opts?.silent) getState().notify(existing ? "已更新預設隊" : "已儲存預設隊");
   },
 
   removeLoadout: (id) => {

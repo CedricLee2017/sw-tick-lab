@@ -941,6 +941,17 @@ p { margin: 0; }
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 10px;
 }
+.team-group-head {
+  grid-column: 1 / -1;
+  border-bottom: 1px dashed var(--line-soft);
+  padding: 2px 2px 6px;
+}
+.team-group-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  color: var(--gold);
+}
 .team-member { display: flex; flex-direction: column; gap: 8px; }
 .team-member.pinned {
   border-color: rgba(67, 217, 138, .38);
