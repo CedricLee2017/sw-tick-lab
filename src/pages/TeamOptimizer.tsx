@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Check, Copy, Gauge, Layers, Loader2, Lock, Pin, Save, Search,
-  Shirt, Users, Wand2, Zap,
+  Shirt, Trash2, Users, Wand2, Zap,
 } from "lucide-react";
 import { monsterLabel, useStore, type DeckFav } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
@@ -22,13 +22,14 @@ import {
   type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
 } from "../lib/teamOptimizer";
 import { TEAM_TEMPLATES, teamTemplateOf, templateMembers, type TeamMemberTemplate } from "../lib/teamTemplates";
+import { useRolePresets, type RolePreset } from "../lib/rolePresets";
 import type { FocusEntry } from "../lib/types";
 
 /** 每隻魔靈的搜尋目標 */
 type ObjectiveMode = "role" | "skill" | "spd" | "dps" | "tank" | "support" | "score";
 
 const OBJECTIVE_LABELS: Record<ObjectiveMode, string> = {
-  role: "依角色",
+  role: "依定位",
   skill: "技能傷害",
   spd: "速度",
   dps: "傷害期望",
@@ -73,6 +74,8 @@ function defaultAttackSkill(skills: Skill[]): Skill | undefined {
 interface MemberDraft {
   unitId: number;
   role: TeamRole;
+  /** 套用的自訂定位（預設定位）id；沒有套用時為 undefined */
+  presetId?: string;
   title: string;
   weight: number;
   /** 優先順序：1 = 最優先；0 = 不指定（依權重） */
@@ -262,6 +265,32 @@ export default function TeamOptimizerPage() {
   /** 鏡像對手（防守提條角）速度；0 = 自動使用起手速度 */
   const [oppSpd, setOppSpd] = useState(saved?.oppSpd ?? 0);
 
+  /** 玩家自訂的預設定位 */
+  const presets = useRolePresets((s) => s.presets);
+  const presetsReady = useRolePresets((s) => s.ready);
+  const hydratePresets = useRolePresets((s) => s.hydrate);
+  const saveRolePreset = useRolePresets((s) => s.save);
+  const removeRolePreset = useRolePresets((s) => s.remove);
+  const [presetModal, setPresetModal] = useState<{ index: number; name: string } | null>(null);
+
+  useEffect(() => {
+    void hydratePresets();
+  }, [hydratePresets]);
+
+  // 預設定位被刪除時，正在使用它的成員回到內建定位（要等讀取完成才判斷，避免誤清）
+  useEffect(() => {
+    if (!presetsReady) return;
+    const ids = new Set(presets.map((p) => p.id));
+    setMembers((prev) => {
+      if (!prev.some((m) => m.presetId && !ids.has(m.presetId))) return prev;
+      return prev.map((m) =>
+        m.presetId && !ids.has(m.presetId)
+          ? { ...m, presetId: undefined, title: TEAM_ROLE_LABELS[m.role] }
+          : m,
+      );
+    });
+  }, [presets, presetsReady]);
+
   const workerRef = useRef<Worker | null>(null);
   const runIdRef = useRef(0);
   /** 技能資料（判斷提條技能用）；載入後快取，之後切換隊型不必再等 */
@@ -355,6 +384,7 @@ export default function TeamOptimizerPage() {
       return {
         ...d,
         role: a.role,
+        presetId: undefined,
         title: setup.title,
         weight: setup.weight,
         set4: setup.set4,
@@ -400,7 +430,7 @@ export default function TeamOptimizerPage() {
       setMembers(auto.members);
       setLeadPct(auto.leadPct);
       notify(
-        `已依技能安排角色：${roleSummary(auto.members)}${auto.leadPct > 0 ? `（速度隊長技 +${auto.leadPct}%）` : ""}`,
+        `已依技能安排定位：${roleSummary(auto.members)}${auto.leadPct > 0 ? `（速度隊長技 +${auto.leadPct}%）` : ""}`,
       );
     } else {
       setMembers(drafts);
@@ -511,9 +541,67 @@ export default function TeamOptimizerPage() {
     );
   };
 
+  /** 手動改到定位相關的欄位時，視為偏離原本的預設定位 */
+  const PRESET_FIELDS: (keyof MemberDraft)[] = [
+    "role", "weight", "set4", "set2", "mains", "min", "tick", "focus", "objectiveMode", "speedMode",
+  ];
+
   const updateMember = (i: number, patch: Partial<MemberDraft>) => {
-    setMembers((prev) => prev.map((m, j) => (j === i ? { ...m, ...patch } : m)));
+    setMembers((prev) =>
+      prev.map((m, j) => {
+        if (j !== i) return m;
+        // 手動改到定位相關欄位時，視為偏離原本的預設定位，名稱回到內建定位
+        const drifted = !!m.presetId && !patch.presetId && PRESET_FIELDS.some((key) => key in patch);
+        return {
+          ...m,
+          ...patch,
+          ...(drifted ? { presetId: undefined, title: TEAM_ROLE_LABELS[m.role] } : {}),
+        };
+      }),
+    );
     setPlan(null);
+  };
+
+  /** 套用自訂定位：一次填入套裝、主屬性、下限、Tick、焦點與目標 */
+  const applyRolePreset = (i: number, preset: RolePreset) => {
+    updateMember(i, {
+      presetId: preset.id,
+      title: preset.name,
+      role: preset.role,
+      weight: preset.weight,
+      set4: preset.set4,
+      set2: preset.set2,
+      mains: { ...preset.mains },
+      min: { ...preset.min },
+      tick: preset.tick,
+      focus: preset.focus.map((f) => ({ ...f })),
+      objectiveMode: preset.objective,
+      speedMode: preset.speedMode,
+    });
+    notify(`已套用定位「${preset.name}」`);
+  };
+
+  /** 把目前這一隻的設定存成預設定位；同名會覆寫 */
+  const submitRolePreset = () => {
+    if (!presetModal) return;
+    const member = members[presetModal.index];
+    if (!member) return;
+    const saved = saveRolePreset(presetModal.name, {
+      role: member.role,
+      weight: member.weight,
+      set4: member.set4,
+      set2: member.set2,
+      mains: { ...member.mains },
+      min: { ...member.min },
+      tick: member.tick,
+      focus: member.focus.map((f) => ({ ...f })),
+      objective: member.objectiveMode,
+      speedMode: member.speedMode,
+    });
+    if (!saved) return notify("請先輸入定位名稱", "err");
+    updateMember(presetModal.index, { presetId: saved.id, title: saved.name });
+    setPresetModal(null);
+    notify(`已儲存定位「${saved.name}」，之後可從「定位」選單直接套用`);
   };
 
   /** 把這一隻提供的提條 % 與速度強化帶入後面出手的成員（來源自己不套用） */
@@ -544,7 +632,9 @@ export default function TeamOptimizerPage() {
         const min = { ...m.min };
         if (value > 0) min[key] = value;
         else delete min[key];
-        return { ...m, min };
+        return m.presetId
+          ? { ...m, min, presetId: undefined, title: TEAM_ROLE_LABELS[m.role] }
+          : { ...m, min };
       }),
     );
     setPlan(null);
@@ -903,7 +993,7 @@ export default function TeamOptimizerPage() {
             <Zap size={15} className="gold" /> 一鍵配隊
           </div>
           <div className="card-sub">
-            先選 3～5 隻魔靈，再一次配好整隊符文；同一顆符文不會重複分配給兩隻魔靈。載入預設隊或切換隊型時，會依技能自動安排角色與出手順序。
+            先選 3～5 隻魔靈，再一次配好整隊符文；同一顆符文不會重複分配給兩隻魔靈。載入預設隊或切換隊型時，會依技能自動安排定位與出手順序。
           </div>
         </div>
         <div className="row wrap" style={{ gap: 6 }}>
@@ -978,6 +1068,7 @@ export default function TeamOptimizerPage() {
           const laterCount = members.filter((x, j) => j !== i && x.order > m.order).length;
           const skills = skillData && v ? skillsForMonster(skillData, v.monster.id) : [];
           const effSkill = skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills);
+          const appliedPreset = presets.find((p) => p.id === m.presetId);
           return (
             <div key={i} className={`card card-pad team-member ${pinned ? "pinned" : ""}`}>
               <div className="row between" style={{ gap: 8 }}>
@@ -1025,10 +1116,45 @@ export default function TeamOptimizerPage() {
 
               <div className="team-fields">
                 <label>
-                  <span>角色</span>
-                  <select className="select" value={m.role} onChange={(e) => updateMember(i, { role: e.target.value as TeamRole, title: TEAM_ROLE_LABELS[e.target.value as TeamRole] })}>
-                    {(Object.keys(TEAM_ROLE_LABELS) as TeamRole[]).map((r) => <option key={r} value={r}>{TEAM_ROLE_LABELS[r]}</option>)}
+                  <span>定位</span>
+                  <select
+                    className="select"
+                    value={appliedPreset ? `preset:${appliedPreset.id}` : `role:${m.role}`}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value.startsWith("preset:")) {
+                        const preset = presets.find((p) => p.id === value.slice(7));
+                        if (preset) applyRolePreset(i, preset);
+                        return;
+                      }
+                      const role = value.slice(5) as TeamRole;
+                      updateMember(i, { role, presetId: undefined, title: TEAM_ROLE_LABELS[role] });
+                    }}
+                    title="內建定位之外，也可以把常用的套裝／主屬性存成「我的定位」"
+                  >
+                    <optgroup label="內建定位">
+                      {(Object.keys(TEAM_ROLE_LABELS) as TeamRole[]).map((r) => (
+                        <option key={r} value={`role:${r}`}>{TEAM_ROLE_LABELS[r]}</option>
+                      ))}
+                    </optgroup>
+                    {presets.length > 0 && (
+                      <optgroup label="我的定位">
+                        {presets.map((p) => <option key={p.id} value={`preset:${p.id}`}>{p.name}</option>)}
+                      </optgroup>
+                    )}
                   </select>
+                  <button
+                    type="button"
+                    className="preset-save"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setPresetModal({ index: i, name: appliedPreset?.name ?? "" });
+                    }}
+                    title="把這隻目前的套裝、主屬性、下限與 Tick 存成我的定位"
+                  >
+                    <Save size={11} /> 把目前設定存成定位
+                  </button>
                 </label>
                 <label>
                   <span>權重</span>
@@ -1614,6 +1740,103 @@ export default function TeamOptimizerPage() {
             上符只修改本工具的模擬資料，不會更動遊戲存檔；儲存後可在「儲存庫」或「Speed Tick → 從儲存庫載入」使用。
           </div>
         </div>
+      )}
+
+      {/* 儲存 / 管理自訂定位 */}
+      {presetModal && (
+        <Modal title="預設定位" onClose={() => setPresetModal(null)} width={460}>
+          <div className="st-modal-sec">
+            <div className="st-modal-label">把第 {presetModal.index + 1} 隻目前的設定存成定位</div>
+            <div className="tiny dim" style={{ marginTop: 3, lineHeight: 1.7 }}>
+              會儲存 4 件套、2 件套、2／4／6 號主屬性、下限、目標 Tick、速度條件、焦點與目標模式。
+              之後在「定位」選單選一次就會全部填入。定位只保存在這台裝置的瀏覽器。
+            </div>
+            <label className="row" style={{ gap: 8, marginTop: 10 }}>
+              <span className="tiny dim" style={{ flex: "0 0 auto" }}>名稱</span>
+              <input
+                className="input"
+                value={presetModal.name}
+                maxLength={20}
+                autoFocus
+                placeholder="例如：慢速打手"
+                onChange={(e) => setPresetModal({ ...presetModal, name: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitRolePreset();
+                  }
+                }}
+              />
+            </label>
+            <div className="row" style={{ gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPresetModal(null)}>取消</button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={!presetModal.name.trim()}
+                onClick={submitRolePreset}
+              >
+                <Save size={12} /> 儲存
+              </button>
+            </div>
+            {presetModal.name.trim() && presets.some((p) => p.name === presetModal.name.trim()) && (
+              <div className="tiny" style={{ marginTop: 6, color: "var(--gold)" }}>
+                已有同名定位，儲存會覆寫它目前的數值。
+              </div>
+            )}
+          </div>
+
+          <div className="st-modal-sec">
+            <div className="row between wrap" style={{ gap: 8 }}>
+              <div className="st-modal-label">我的定位</div>
+              <span className="chip gold">{presets.length} 組</span>
+            </div>
+            {presets.length === 0 ? (
+              <div className="tiny dim" style={{ marginTop: 6 }}>
+                還沒有自訂定位。調整好套裝與主屬性後，在上面輸入名稱就能存起來。
+              </div>
+            ) : (
+              <div className="col" style={{ gap: 6, marginTop: 8 }}>
+                {presets.map((p) => (
+                  <div key={p.id} className="row between wrap" style={{ gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 12.5 }}>{p.name}</div>
+                      <div className="tiny dim">
+                        {TEAM_ROLE_LABELS[p.role]}
+                        {p.set4 ? ` · ${SET_BY_ID[p.set4]?.name ?? `#${p.set4}`} ×4` : ""}
+                        {p.set2 ? ` + ${SET_BY_ID[p.set2]?.name ?? `#${p.set2}`} ×2` : ""}
+                        {p.tick > 0 ? ` · Tick ${p.tick}` : ""}
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 4 }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => {
+                          applyRolePreset(presetModal.index, p);
+                          setPresetModal(null);
+                        }}
+                      >
+                        套用
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost btn-icon"
+                        title="刪除這個定位"
+                        onClick={() => {
+                          removeRolePreset(p.id);
+                          notify(`已刪除定位「${p.name}」`);
+                        }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
 
       {/* 從預設隊儲存庫載入 */}

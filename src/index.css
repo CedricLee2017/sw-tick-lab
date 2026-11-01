@@ -954,6 +954,13 @@ p { margin: 0; }
 .team-fields .input,
 .team-fields .select { padding: 5px 8px; font-size: 12px; }
 .team-fields .select { padding-right: 24px; }
+.preset-save {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 0; border: 0; background: transparent;
+  color: var(--blue); font-size: 10.5px; font-weight: 600; line-height: 1.4;
+}
+.preset-save:hover { color: var(--gold); text-decoration: underline; }
 .team-advanced { margin-top: 2px; }
 .team-advanced > summary {
   cursor: pointer;
