@@ -1,0 +1,32 @@
+{
+  "name": "SW Tick Lab — 魔靈召喚符文與速度 Tick 實驗室",
+  "short_name": "SW Tick Lab",
+  "description": "上傳 SWEX / SWOP 存檔，分析魔靈與符文，並用 Speed Tick 為條件一鍵配符。",
+  "lang": "zh-Hant",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#070a12",
+  "theme_color": "#070a12",
+  "categories": ["games", "utilities", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

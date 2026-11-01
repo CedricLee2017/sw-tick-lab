@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "data": "node scripts/build-monsters.mjs",
+    "icons": "node scripts/make-icons.mjs",
     "skills": "node scripts/fetch-skills.mjs",
     "demo": "node scripts/build-demo.mjs",
     "set-password": "node scripts/set-password.mjs",

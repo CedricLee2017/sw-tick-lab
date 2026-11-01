@@ -13,6 +13,7 @@
   - 同時解析 **神器（Artifact）**：頂層 `artifacts` 與 `unit_list[].artifacts` 會以神器 ID 合併，已裝備神器以魔靈身上的 owner 為準。
   - 使用 sw-exporter 官方 stat / set ID（速度 = 8、暴走 = 13、意志 = 15…），並正確換算遠古符文（`class` / `rank` +10）。
   - 容忍多層包裝（`data` / `save` / `swop`）、以 id 為 key 的物件格式，以及字串形式的套裝 / 屬性名稱。
+- **安裝成 App（PWA）**：側邊欄與手機頂部都有「安裝成 App」按鈕。Chrome / Edge / Android 會叫用瀏覽器原生的安裝提示；iPhone / iPad 的 Safari 會顯示「分享 → 加入主畫面」圖解步驟。安裝後以獨立視窗開啟，Service Worker 會快取介面，短暫離線也能開啟（API 與存檔上傳仍需要網路）。
 - **帳號總覽**：魔靈數量、符文數量、Speed Tick 分布、一速排名、套裝統計。
 - **速度實驗室**：Tick ↔ 速度雙向換算、各 Tick 門檻表、建築與隊長技加成試算、隊伍出手順序模擬。
 - **RTA 世界競技場**：使用存檔的 `favorite_unit_list`（我的最愛）列出常用魔靈，依 RTA 獨立配裝的速度由高到低排序。
@@ -155,6 +156,7 @@ npm test           # Tick、配符、符文限制、技能傷害、神器、追�
 npm run data   # 由 SWARFARM API 重新產生 src/data/monsters.json
 npm run skills # 由 SWARFARM API 重新產生 public/data/skills.json（技能倍率）
 npm run demo   # 重新產生 public/demo-account.json 示範存檔
+npm run icons  # 重新產生 PWA 圖示（public/icons/*.png）
 ```
 
 ## 變更流程
@@ -253,7 +255,9 @@ src/
     teamTemplates.ts    3／4／5 人隊型預設與角色需求
     teamSpeed.ts        一鍵配隊的面板速度、提條、速度強化與接速計算
     accountStats.ts     帳號統計
+    pwa.ts              PWA 安裝提示、Service Worker 註冊
   components/ui.tsx     共用 UI（魔靈圖示、符文卡、神器卡、Tick 徽章、Modal）
+  components/InstallApp.tsx 「安裝成 App」按鈕與 iOS / Android 安裝說明
   components/MonsterPicker.tsx 共用的魔靈選擇器（搜尋、元素／胎生星級篩選）
                               預設排序：屬性 水火風光暗 → 原生星級高到低 → 已覺醒 → 名稱
                               所有會「選擇／新增魔靈」的頁面（Speed Tick、配符、速度實驗室、一鍵配隊、配神器、神器追傷）共用同一套卡片式選單
@@ -261,7 +265,11 @@ src/
   components/RuneRestrictions.tsx 排除 / 固定使用符文面板
   pages/                匯入、總覽、速度實驗室、Speed Tick、RTA、配符、一鍵配隊、配神器、神器追傷、配裝、預設隊、符文、神器、魔靈、設定
   store.ts              zustand + IndexedDB 本機儲存
-scripts/                資料產生與引擎測試
+scripts/                資料產生、PWA 圖示與引擎測試
+public/
+  manifest.webmanifest  PWA 名稱、圖示、獨立視窗設定
+  sw.js                 Service Worker（導覽 network-first、靜態資源 stale-while-revalidate）
+  icons/                192 / 512 / maskable / apple-touch 圖示
 ```
 
 前端：Vite + React + TypeScript + zustand，無後端。

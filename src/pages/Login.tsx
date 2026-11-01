@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Eye, EyeOff, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useAuth } from "../lib/auth";
+import { InstallAppButton } from "../components/InstallApp";
 
 type Mode = "login" | "register";
 
@@ -143,6 +144,9 @@ export default function LoginPage() {
         <h1>SW Tick Lab</h1>
         <div className="login-sub">魔靈召喚 · 符文配裝與 Speed Tick</div>
         <LoginForm />
+        <div style={{ width: "100%", marginTop: 4 }}>
+          <InstallAppButton />
+        </div>
       </div>
     </div>
   );

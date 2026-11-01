@@ -24,6 +24,7 @@ import RunesPage from "./pages/Runes";
 import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
+import { InstallAppButton } from "./components/InstallApp";
 
 type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "admin" | "settings";
 
@@ -189,6 +190,7 @@ export default function App() {
               <LogIn size={13} /> 使用 Google 登入
             </button>
           )}
+          <InstallAppButton />
           {account ? (
             <div className="card" style={{ padding: 11 }}>
               <div className="row" style={{ gap: 8 }}>
@@ -223,6 +225,7 @@ export default function App() {
             <div className="sub">{meta.sub}</div>
           </div>
           <div className="row" style={{ gap: 8 }}>
+            <InstallAppButton compact />
             {account && (
               <span className="chip green">
                 <ShieldCheck size={12} /> 已載入
