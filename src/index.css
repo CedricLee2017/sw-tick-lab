@@ -801,6 +801,33 @@ p { margin: 0; }
   display: flex; flex-direction: column; gap: 4px;
 }
 
+/* ── QR code（用手機／平板開啟） ─────────────────── */
+.qr-card { margin-top: 16px; }
+.qr-card-body {
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px 18px;
+}
+.qr-box {
+  background: #fff; border-radius: 10px; padding: 6px;
+  flex: 0 0 auto; line-height: 0;
+  box-shadow: 0 8px 22px -14px rgba(0, 0, 0, .85);
+}
+.qr-copy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.qr-url {
+  font-family: ui-monospace, "SFMono-Regular", monospace;
+  font-size: 11.5px; color: var(--text);
+  background: rgba(11, 17, 32, .7); border: 1px solid var(--line-soft);
+  border-radius: 7px; padding: 4px 8px;
+  max-width: min(360px, 100%);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  user-select: all;
+}
+.login-qr {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; margin-top: 14px; padding-top: 14px;
+  border-top: 1px dashed var(--line-soft); text-align: left;
+}
+
 /* ── misc ─────────────────────────────────────────── */
 .empty { padding: 50px 20px; text-align: center; color: var(--muted); }
 .empty svg { width: 40px; height: 40px; opacity: .35; margin-bottom: 10px; }
@@ -1027,6 +1054,8 @@ p { margin: 0; }
   .sidebar { display: none; }
   .content { padding: 16px 14px calc(90px + env(safe-area-inset-bottom)); }
   .topbar { padding: 12px 14px; padding-top: calc(12px + env(safe-area-inset-top)); }
+  /* 已經在手機上，不需要再掃 QR code */
+  .qr-card, .login-qr { display: none; }
   .install-compact { display: inline-flex; }
   .hero h2 { font-size: 26px; }
   .g2, .g3, .g4 { grid-template-columns: 1fr; }

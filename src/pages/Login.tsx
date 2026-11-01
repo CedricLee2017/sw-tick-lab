@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Eye, EyeOff, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { InstallAppButton } from "../components/InstallApp";
+import { SiteQr } from "../components/SiteQr";
 
 type Mode = "login" | "register";
 
@@ -146,6 +147,15 @@ export default function LoginPage() {
         <LoginForm />
         <div style={{ width: "100%", marginTop: 4 }}>
           <InstallAppButton />
+        </div>
+        <div className="login-qr">
+          <SiteQr size={92} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 12.5 }}>用手機或平板開啟</div>
+            <div className="tiny dim" style={{ marginTop: 2, lineHeight: 1.65 }}>
+              掃描 QR code 就能在另一台裝置開啟並登入，存檔與儲存庫會自動還原。
+            </div>
+          </div>
         </div>
       </div>
     </div>

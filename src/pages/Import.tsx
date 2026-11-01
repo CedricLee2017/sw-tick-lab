@@ -8,6 +8,7 @@ import { useAuth } from "../lib/auth";
 import { uploadSave } from "../lib/upload";
 import { formatCloudTime, listMyUploads, loadLatestSave, type CloudUpload } from "../lib/cloudSave";
 import { Modal, fmt } from "../components/ui";
+import { SiteQrCard } from "../components/SiteQr";
 import { buildingPct } from "../lib/stats";
 
 function fileSize(bytes: number): string {
@@ -206,6 +207,8 @@ export default function ImportPage() {
           </div>
         </div>
       </section>
+
+      <SiteQrCard />
 
       {uploadsEnabled && (
         <section className="card" style={{ marginTop: 16 }}>

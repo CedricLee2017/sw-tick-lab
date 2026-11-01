@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "sw-tick-lab",
   "private": true,
   "version": "1.0.0",
@@ -21,6 +21,7 @@
   "dependencies": {
     "idb-keyval": "6.3.0",
     "lucide-react": "1.61.0",
+    "qrcode.react": "4.2.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zustand": "5.0.16"

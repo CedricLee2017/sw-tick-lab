@@ -15,6 +15,7 @@
   - 容忍多層包裝（`data` / `save` / `swop`）、以 id 為 key 的物件格式，以及字串形式的套裝 / 屬性名稱。
 - **安裝成 App（PWA）**：側邊欄與手機頂部都有「安裝成 App」按鈕。Chrome / Edge / Android 會叫用瀏覽器原生的安裝提示；iPhone / iPad 的 Safari 會顯示「分享 → 加入主畫面」圖解步驟。安裝後以獨立視窗開啟，Service Worker 會快取介面，短暫離線也能開啟（API 與存檔上傳仍需要網路）。
 - **自動還原雲端存檔**：登入後如果本機沒有存檔，會自動載回上次上傳的 JSON（換手機、換電腦都一樣）；「匯入」頁的「雲端存檔」卡片也能手動重新載入。本機已有存檔時不自動覆蓋。
+- **首頁 QR code**：首頁（匯入頁）與登入頁都有「用手機或平板開啟」的 QR code，內容是目前網站的網址；手機或平板掃描就能直接開啟同一個網站，登入後會自動還原存檔與儲存庫。旁邊也能一鍵複製網址。QR code 在手機／平板尺寸會自動隱藏。
 - **帳號總覽**：魔靈數量、符文數量、Speed Tick 分布、一速排名、套裝統計。
 - **速度實驗室**：Tick ↔ 速度雙向換算、各 Tick 門檻表、建築與隊長技加成試算、隊伍出手順序模擬。
 - **RTA 世界競技場**：使用存檔的 `favorite_unit_list`（我的最愛）列出常用魔靈，依 RTA 獨立配裝的速度由高到低排序。
@@ -266,6 +267,7 @@ src/
     rolePresets.ts      一鍵配隊的自訂預設定位（IndexedDB）
   components/ui.tsx     共用 UI（魔靈圖示、符文卡、神器卡、Tick 徽章、Modal）
   components/InstallApp.tsx 「安裝成 App」按鈕與 iOS / Android 安裝說明
+  components/SiteQr.tsx  首頁「用手機或平板開啟」的 QR code（qrcode.react）與複製網址
   components/MonsterPicker.tsx 共用的魔靈選擇器（搜尋、元素／胎生星級篩選）
                               預設排序：屬性 水火風光暗 → 原生星級高到低 → 已覺醒 → 名稱
                               所有會「選擇／新增魔靈」的頁面（Speed Tick、配符、速度實驗室、一鍵配隊、配神器、神器追傷）共用同一套卡片式選單
