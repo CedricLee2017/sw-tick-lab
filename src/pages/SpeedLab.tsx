@@ -65,7 +65,7 @@ export default function SpeedPage() {
 
       {tab === "calc" && (
         <>
-          <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, .9fr)", gap: 16 }}>
+          <div className="grid split-2">
             <div className="card">
               <div className="card-head">
                 <div>
@@ -224,7 +224,7 @@ function OrderTab() {
   };
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 16 }}>
+    <div className="grid split-2">
       <div className="card">
         <div className="card-head">
           <div className="card-title">加入比較單位</div>

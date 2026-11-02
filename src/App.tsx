@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X,
 } from "lucide-react";
 import { ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
@@ -49,6 +49,12 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "settings", label: "設定", icon: <SettingsIcon size={17} />, title: "設定", sub: "建築、隊長技與進階選項" },
 ];
 
+/** 手機底部主選單：只放最常用的頁面，其餘收進「更多」面板。 */
+const MOBILE_PRIMARY: RouteKey[] = ["overview", "speedtick", "optimizer", "team-opt"];
+const MOBILE_SHORT_LABEL: Partial<Record<RouteKey, string>> = {
+  speedtick: "Speed Tick",
+};
+
 function currentRoute(): RouteKey {
   const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
   return (ROUTES.find((r) => r.key === h)?.key ?? "import") as RouteKey;
@@ -81,6 +87,8 @@ export default function App() {
   const { hydrate, ready, account, toasts, settings, importText, notify, syncLibrary } = useStore();
   const { ready: authReady, user, config, init: initAuth, signOut } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
+  /** 手機「更多」面板 */
+  const [moreOpen, setMoreOpen] = useState(false);
   /** 自動還原雲端存檔只嘗試一次，避免每次重新渲染都重打 API */
   const cloudTried = useRef(false);
 
@@ -139,6 +147,27 @@ export default function App() {
   useEffect(() => {
     setVisited((prev) => (prev.has(route) ? prev : new Set(prev).add(route)));
   }, [route]);
+
+  // 切換頁面時回到頂端，並關閉「更多」選單。
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    setMoreOpen(false);
+  }, [route]);
+
+  // 選單開啟時鎖住背景捲動，並支援 Esc 關閉。
+  useEffect(() => {
+    if (!moreOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
 
   useEffect(() => {
     if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "admin") {
@@ -280,13 +309,85 @@ export default function App() {
       </div>
 
       <nav className="mobile-nav">
-        {ROUTES.filter((r) => ["import", "overview", "speed", "speedtick", "rta", "optimizer", "team-opt", "artifact-opt", "artifact-ad", "builds", "decks", "summonlog", "runes", "artifacts", ...(user?.isAdmin ? ["admin"] : [])].includes(r.key)).map((r) => (
-          <button key={r.key} className={route === r.key ? "active" : ""} onClick={() => go(r.key)}>
-            {r.icon}
-            <span>{r.label}</span>
-          </button>
-        ))}
+        {MOBILE_PRIMARY.map((key) => {
+          const r = ROUTES.find((x) => x.key === key)!;
+          return (
+            <button key={r.key} className={route === r.key ? "active" : ""} onClick={() => go(r.key)}>
+              {r.icon}
+              <span>{MOBILE_SHORT_LABEL[r.key] ?? r.label}</span>
+            </button>
+          );
+        })}
+        <button
+          className={!MOBILE_PRIMARY.includes(route) ? "active" : ""}
+          onClick={() => setMoreOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+        >
+          <LayoutGrid size={17} />
+          <span>更多</span>
+        </button>
       </nav>
+
+      {moreOpen && (
+        <div className="sheet-back" onClick={() => setMoreOpen(false)}>
+          <div
+            className="sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label="所有功能"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sheet-grab" />
+            <div className="sheet-head">
+              <div>
+                <div className="sheet-title">所有功能</div>
+                <div className="tiny dim">選擇頁面，或管理帳號與安裝 App</div>
+              </div>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setMoreOpen(false)} aria-label="關閉">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="sheet-grid">
+              {ROUTES.filter((r) => r.key !== "admin" || user?.isAdmin).map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  className={`sheet-item ${route === r.key ? "active" : ""}`}
+                  onClick={() => {
+                    go(r.key);
+                    setMoreOpen(false);
+                  }}
+                >
+                  {r.icon}
+                  <span>{r.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="sheet-foot">
+              <InstallAppButton />
+              {user ? (
+                <button type="button" className="btn btn-ghost" onClick={() => void signOut()}>
+                  <LogOut size={14} /> 登出
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    setLoginOpen(true);
+                  }}
+                >
+                  <LogIn size={14} /> 登入
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="toast-wrap">
         {toasts.map((t) => (

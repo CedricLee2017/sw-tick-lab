@@ -197,7 +197,10 @@ export interface Stats {
   hp: number;
   atk: number;
   def: number;
+  /** 戰鬥有效速度：面板速度 + 速度圖騰 / 隊長技 / 速度強化 */
   spd: number;
+  /** 遊戲內魔靈面板速度：只有基礎 + 符文 + 套裝（不含建築 / 隊長 / Buff） */
+  panelSpd: number;
   cr: number;
   cd: number;
   res: number;

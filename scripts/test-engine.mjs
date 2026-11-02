@@ -174,6 +174,15 @@ check("statsForRunes 與 finalizeStats 結果一致（公會開關）", () => {
   assert.deepEqual(viaRunes, direct);
 });
 
+check("面板速度不含圖騰 / 隊長 / Buff，戰鬥速度才含", () => {
+  const base = { hp: 10000, atk: 1000, def: 1000, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
+  const bonus = defaultBonus({ towerSpd: 15, leadSpd: 28, buffSpd: 30 });
+  const s = finalizeStats(base, emptyAccum(), bonus, false, false);
+  assert.equal(s.panelSpd, 100);
+  assert.equal(s.spd, 100 + Math.ceil((100 * (15 + 28 + 30)) / 100));
+  assert.equal(s.tick, tickOf(s.spd));
+});
+
 /* ── 3. 示範帳號解析 ─────────────────────────── */
 console.log("\n[3] 示範帳號");
 const demoPath = path.join(ROOT, "public/demo-account.json");
@@ -495,7 +504,7 @@ check("允許破套：只強制主套 4 件", () => {
     assert.ok(b.stats.spd >= 286);
   }
 });
-check("3×2 件套（能量 + 刀刃 + 意志）", () => {
+check("3×2 件套（祝福 + 刀刃 + 意志）", () => {
   const tri = optimize({
     ...req,
     required: [{ set: 1, count: 2 }, { set: 4, count: 2 }, { set: 15, count: 2 }],
@@ -503,7 +512,7 @@ check("3×2 件套（能量 + 刀刃 + 意志）", () => {
   });
   assert.ok(tri.count > 0, "3×2 件套沒有任何結果");
   for (const b of buildsOf(tri, account.runes, false, 50)) {
-    assert.ok((b.sets[1] ?? 0) >= 2, "能量不足 2 件");
+    assert.ok((b.sets[1] ?? 0) >= 2, "祝福不足 2 件");
     assert.ok((b.sets[4] ?? 0) >= 2, "刀刃不足 2 件");
     assert.ok((b.sets[15] ?? 0) >= 2, "意志不足 2 件");
     assert.equal(Object.values(b.sets).reduce((s, c) => s + c, 0), 6);

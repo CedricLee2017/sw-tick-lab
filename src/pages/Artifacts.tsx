@@ -70,7 +70,7 @@ export default function ArtifactsPage() {
               共 {fmt(account.artifacts.length)} 件（已裝備 {fmt(equipped)}）
             </span>
           </div>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row filter-row" style={{ gap: 8 }}>
             <div style={{ position: "relative" }}>
               <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
               <input className="input" style={{ width: 210, paddingLeft: 28 }} placeholder="搜尋效果 / 類型 / 擁有者" value={q} onChange={(e) => setQ(e.target.value)} />

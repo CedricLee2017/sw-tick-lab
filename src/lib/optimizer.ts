@@ -183,6 +183,8 @@ export interface OptResult {
   runeTable: Float64Array;
   /** 每組面板數值（長度 count×8，順序同 STAT_KEYS） */
   statValues: Float32Array;
+  /** 這場計算的建築＋隊長＋強化所加的速度（面板速度 = spd - speedBonus） */
+  speedBonus: number;
   /** 每組 EHP（含一般召喚師技能，不含公會技能） */
   ehps: Float32Array;
   /** 每組 EHP（含一般 + 公會召喚師技能） */
@@ -240,6 +242,7 @@ const EMPTY_RESULT = (
   runeIdx: new Int32Array(0),
   runeTable: new Float64Array(0),
   statValues: new Float32Array(0),
+  speedBonus: 0,
   ehps: new Float32Array(0),
   ehpsGuild: new Float32Array(0),
   scores: new Float32Array(0),
@@ -268,6 +271,7 @@ export function statsAt(res: OptResult, i: number, rta = false, guildSkills = fa
     atk,
     def,
     spd,
+    panelSpd: Math.max(0, spd - res.speedBonus),
     cr: res.statValues[o + 4],
     cd: res.statValues[o + 5],
     res: res.statValues[o + 6],
@@ -431,6 +435,11 @@ export function optimize(req: OptRequest): OptResult {
   } = req;
 
   const INTANGIBLE_ID = 25;
+
+  /** 建築 / 隊長 / 強化實際加的速度（整場相同） */
+  const speedBonus = Math.ceil(
+    (base.spd * (bonus.towerSpd + bonus.leadSpd + bonus.buffSpd)) / 100,
+  );
 
   const focusList = normalizeFocus(focus);
   const focusWeight = new Map<StatKey, number>();
@@ -901,6 +910,7 @@ export function optimize(req: OptRequest): OptResult {
     runeIdx,
     runeTable: Float64Array.from(runeTable),
     statValues,
+    speedBonus,
     ehps,
     ehpsGuild,
     scores,
@@ -950,7 +960,7 @@ export function maxSpeedBound(req: {
   excludeRunes?: number[];
   includeRunes?: number[];
   lockedRunes?: number[];
-}): { speed: number; tick: number; perSlot: number[]; missingSlots: number[] } {
+}): { speed: number; panelSpeed: number; tick: number; perSlot: number[]; missingSlots: number[] } {
   const requiredSets = req.required.filter((r) => (req.relaxSub ? r.count >= 4 : r.count > 0));
   const requiredTotal = requiredSets.reduce((s, r) => s + r.count, 0);
   const strict = requiredSets.length > 0 && requiredTotal >= 6;
@@ -1050,8 +1060,15 @@ export function maxSpeedBound(req: {
   }
 
   const pct = req.bonus.towerSpd + req.bonus.leadSpd + req.bonus.buffSpd;
-  const speed = req.base.spd + Math.ceil((req.base.spd * pct) / 100) + flat + setSpd;
-  return { speed, tick: tickOf(speed, req.rta), perSlot, missingSlots };
+  const speedBonus = Math.ceil((req.base.spd * pct) / 100);
+  const speed = req.base.spd + speedBonus + flat + setSpd;
+  return {
+    speed,
+    panelSpeed: Math.max(0, speed - speedBonus),
+    tick: tickOf(speed, req.rta),
+    perSlot,
+    missingSlots,
+  };
 }
 
 export function tickTable(from = 1, to = 20, rta = false): { tick: number; speed: number }[] {

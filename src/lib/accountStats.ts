@@ -76,7 +76,7 @@ export function summarize(account: Account, bonus: BonusConfig, rta = false): Ac
     byEl,
     byNat,
     tickBuckets,
-    topSpeed: [...views].sort((a, b) => b.stats.spd - a.stats.spd).slice(0, 12),
+    topSpeed: [...views].sort((a, b) => (b.stats.panelSpd ?? b.stats.spd) - (a.stats.panelSpd ?? a.stats.spd)).slice(0, 12),
     sixStar: account.units.filter((u) => u.stars === 6).length,
     avgEff,
     sets,

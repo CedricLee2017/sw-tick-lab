@@ -132,7 +132,7 @@ for (let slot = 1; slot <= 6; slot++) {
 for (let u = 0; u < 18; u++) {
   const unit = units[u];
   for (let slot = 1; slot <= 6; slot++) {
-    // 每隻魔靈錯開取符文，讓身上的套裝有變化（3 迅速 + 2 暴走 + 1 能量之類）
+    // 每隻魔靈錯開取符文，讓身上的套裝有變化（3 迅速 + 2 暴走 + 1 祝福之類）
     const r = slotRunes[slot][(u + slot * 4) % slotRunes[slot].length];
     r.occupied_id = unit.unitId;
     r.locked = 1;

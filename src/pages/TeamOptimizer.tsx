@@ -1051,7 +1051,7 @@ export default function TeamOptimizerPage() {
     const lines = activePlan.members.map((m, i) => {
       const sets = setSummary(m.sets);
       const head = teams > 1 && i % size === 0 ? `\n[第 ${Math.floor(i / size) + 1} 隊]\n` : "";
-      return `${head}${monsterLabel(m.master)}  SPD ${m.stats.spd} (T${m.stats.tick})  HP ${fmt(m.stats.hp)}  DEF ${fmt(m.stats.def)}  EHP ${fmt(m.ehp)}  ${sets}  符文 ${m.runeIds.join(", ")}`;
+      return `${head}${monsterLabel(m.master)}  戰鬥 SPD ${m.stats.spd}（面板 ${m.stats.panelSpd ?? m.stats.spd}）(T${m.stats.tick})  HP ${fmt(m.stats.hp)}  DEF ${fmt(m.stats.def)}  EHP ${fmt(m.ehp)}  ${sets}  符文 ${m.runeIds.join(", ")}`;
     });
     void navigator.clipboard?.writeText(lines.join("\n").trim());
     notify(teams > 1 ? `已複製 ${teams} 隊配裝清單` : "已複製整隊配裝清單");
@@ -1115,7 +1115,7 @@ export default function TeamOptimizerPage() {
           </div>
         </div>
 
-        <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+        <div className="row wrap form-selects" style={{ gap: 8, marginTop: 10 }}>
           <select className="select" style={{ minWidth: 300 }} value={templateId} onChange={(e) => void applyTemplate(e.target.value)}>
             {TEAM_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
@@ -1198,7 +1198,7 @@ export default function TeamOptimizerPage() {
 
               {v && (
                 <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 6 }}>
-                  <span>目前 SPD <b className="gold">{v.stats.spd}</b></span>
+                  <span>目前 戰鬥 SPD <b className="gold">{v.stats.spd}</b>（面板 {v.stats.panelSpd ?? v.stats.spd}）</span>
                   <span>基礎 {v.base.spd}</span>
                   {m.speedMode !== "tick" && m.panelExtra > 0 && (
                     <span>
@@ -1778,7 +1778,7 @@ export default function TeamOptimizerPage() {
                   </div>
                   <div className="row wrap" style={{ gap: 5 }}>
                     {(planSpeedOrders[t] ?? []).map((m, i) => (
-                      <span key={m.unitId} className="chip muted" title={`SPD ${m.stats.spd} · Tick ${m.stats.tick}`}>
+                      <span key={m.unitId} className="chip muted" title={`戰鬥 SPD ${m.stats.spd} · 面板 ${m.stats.panelSpd ?? m.stats.spd} · Tick ${m.stats.tick}`}>
                         <b className="gold">{i + 1}</b>
                         <span style={{ margin: "0 4px" }}>{monsterLabel(m.master)}</span>
                         <span className="mono">{m.stats.spd}</span>
@@ -2040,7 +2040,7 @@ export default function TeamOptimizerPage() {
             key: String(v.unit.id),
             monster: v.monster,
             disabled: members.some((m, j) => j !== pickerIndex && m.unitId === v.unit.id),
-            meta: `${v._dup ? `#${v.unit.id} · ` : ""}${v.monster.nat}★ · ${v.runes.length}/6 符文 · SPD ${v.stats.spd} · T${v.stats.tick}`,
+            meta: `${v._dup ? `#${v.unit.id} · ` : ""}${v.monster.nat}★ · ${v.runes.length}/6 符文 · 戰鬥 SPD ${v.stats.spd}（面板 ${v.stats.panelSpd ?? v.stats.spd}）· T${v.stats.tick}`,
           }))}
           onPick={(e) => {
             const unitId = Number(e.key);

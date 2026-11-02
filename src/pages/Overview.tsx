@@ -40,7 +40,7 @@ export default function OverviewPage() {
         <Tile
           icon={<Gauge size={16} />}
           k="最快魔靈"
-          v={fastest ? `${fastest.stats.spd}` : "—"}
+          v={fastest ? `${fastest.stats.panelSpd ?? fastest.stats.spd}` : "—"}
           sub={fastest ? `${fastest.monster.name} · Tick ${fastest.stats.tick}` : ""}
         />
       </div>
@@ -167,7 +167,7 @@ export default function OverviewPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="num mono gold" style={{ fontWeight: 700 }}>{v.stats.spd}</td>
+                    <td className="num mono gold" style={{ fontWeight: 700 }} title="遊戲面板速度（不含建築 / 隊長 / 強化）">{v.stats.panelSpd ?? v.stats.spd}</td>
                     <td className="num"><TickBadge spd={v.stats.spd} rta={rta} /></td>
                     <td className="num mono">{fmt(v.stats.hp)}</td>
                     <td className="num mono dim">{v.runes.length}/6</td>

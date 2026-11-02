@@ -52,7 +52,7 @@ export function ElementTag({ el }: { el: number }) {
 export function TickBadge({ spd, rta = false }: { spd: number; rta?: boolean }) {
   const info = tickInfo(spd, rta);
   return (
-    <span className="tick-badge" title={`${spd} 速度 → Tick ${info.tick}`}>
+    <span className="tick-badge" title={`戰鬥 ${spd} 速度 → Tick ${info.tick}`}>
       T{Number.isFinite(info.tick) ? info.tick : "—"}
     </span>
   );
@@ -63,7 +63,7 @@ export function StatGrid({ stats, compact = false }: { stats: Stats; compact?: b
     ["HP", fmt(stats.hp)],
     ["攻", fmt(stats.atk)],
     ["防", fmt(stats.def)],
-    ["速", fmt(stats.spd)],
+    ["速", fmt(stats.panelSpd ?? stats.spd)],
     ["暴", `${stats.cr}%`],
     ["暴傷", `${stats.cd}%`],
     ["命", `${stats.acc}%`],
@@ -102,7 +102,7 @@ export function StatRows({
     { label: "體力", base: base?.hp, value: stats.hp },
     { label: "攻擊力", base: base?.atk, value: stats.atk },
     { label: "防禦力", base: base?.def, value: stats.def },
-    { label: "攻擊速度", base: base?.spd, value: stats.spd },
+    { label: "攻擊速度", base: base?.spd, value: stats.panelSpd ?? stats.spd },
     { label: "暴擊率", value: stats.cr, percent: true },
     { label: "暴擊傷害", value: stats.cd, percent: true },
     { label: "效果抵抗", value: stats.res, percent: true },

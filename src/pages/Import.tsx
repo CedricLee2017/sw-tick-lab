@@ -323,7 +323,7 @@ export default function ImportPage() {
                 <a className="btn" href="#/optimizer"><Wand2 size={15} /> 開始配符</a>
                 <a className="btn btn-ghost" href="#/monsters"><BookOpen size={15} /> 查看魔靈</a>
                 <span className="dim tiny" style={{ marginLeft: "auto" }}>
-                  {fastest ? `目前最快：${fastest.monster.name} ${fastest.stats.spd} 速（Tick ${fastest.stats.tick}）` : "尚無配符資料"}
+                  {fastest ? `目前最快：${fastest.monster.name} ${fastest.stats.panelSpd ?? fastest.stats.spd} 面板速（Tick ${fastest.stats.tick}）` : "尚無配符資料"}
                 </span>
               </div>
             </div>

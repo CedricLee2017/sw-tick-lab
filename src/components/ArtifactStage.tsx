@@ -258,13 +258,14 @@ export function ArtifactStage({
                     <span>HP <b className="mono" style={{ color: "var(--text)" }}>{fmt(p.stats.hp)}</b></span>
                     <span>ATK <b className="mono" style={{ color: "var(--text)" }}>{fmt(p.stats.atk)}</b></span>
                     <span>DEF <b className="mono" style={{ color: "var(--text)" }}>{fmt(p.stats.def)}</b></span>
-                    <span>SPD <b className="mono" style={{ color: "var(--text)" }}>{p.stats.spd}</b></span>
+                    <span>SPD <b className="mono" style={{ color: "var(--text)" }} title="遊戲面板速度（不含建築 / 隊長 / 強化）">{p.stats.panelSpd ?? p.stats.spd}</b></span>
                     <span>EHP <b className="mono" style={{ color: "var(--text)" }}>{fmt(p.stats.ehp)}</b></span>
                     <span className="dim">裝備符文：{p.build.runes.filter(Boolean).length}/6</span>
                   </div>
 
                   {open && (
                     <div style={{ marginTop: 10 }}>
+                      <div className="table-scroll">
                       <table className="table">
                         <thead>
                           <tr>
@@ -281,6 +282,7 @@ export function ArtifactStage({
                           </tr>
                         </tbody>
                       </table>
+                      </div>
                       <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
                         <button className="btn btn-sm" onClick={() => setOpenRunes(runesOpen ? -1 : i)}>
                           {runesOpen ? "收起符文" : "查看這組符文"}

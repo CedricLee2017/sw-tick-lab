@@ -153,7 +153,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, .85fr)", gap: 16, marginTop: 16 }}>
+      <div className="grid settings-grid">
         <div className="card">
           <div className="card-head">
             <div>
@@ -166,9 +166,10 @@ export default function SettingsPage() {
             </div>
           </div>
           <div className="card-pad">
-            <table className="table">
+            <div className="table-scroll">
+            <table className="table settings-table">
               <thead>
-                <tr><th>建築</th><th className="num">存檔等級</th><th className="num">效果</th><th style={{ width: 130 }}>套用等級</th></tr>
+                <tr><th>建築</th><th className="num">存檔等級</th><th className="num">效果</th><th style={{ width: 150 }}>套用等級</th></tr>
               </thead>
               <tbody>
                 {BUILDING_FIELDS.map(({ id, field }) => {
@@ -213,6 +214,7 @@ export default function SettingsPage() {
                 </tr>
               </tbody>
             </table>
+            </div>
 
             <div className="divider" style={{ margin: "14px 0" }} />
             <div className="tiny dim" style={{ marginBottom: 8 }}>

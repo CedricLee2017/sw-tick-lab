@@ -139,7 +139,7 @@ export function addArtifactToAccum(a: StatAccum, artifact: Artifact) {
   else if (meta.key === "def") a.flatDef += artifact.main.v;
 }
 
-/** 套裝加成（能量 15% HP 等） */
+/** 套裝加成（祝福 15% HP 等） */
 export function applySetBonuses(a: StatAccum, base: BaseStats) {
   for (const [idStr, count] of Object.entries(a.sets)) {
     const def = SET_BY_ID[Number(idStr)];
@@ -221,8 +221,10 @@ export function speedForTick(tick: number, rta = false): number {
  * `withSkills = true` ＝實戰數值：再加上一般召喚師技能、競技場圖騰、屬性塔，
  * 以及（`useGuild` 開啟時）公會技能。傷害與 EHP 一律用這個版本。
  *
- * 速度是例外：速度圖騰 / 隊長技 / 速度 Buff 是 Tick 的計算基礎，
- * 兩種版本都會計入，否則 Tick 會全部失準。
+ * 速度分成兩種：
+ *  - `panelSpd`：遊戲內魔靈面板速度，只有基礎 + 符文 + 套裝。
+ *  - `spd`：戰鬥有效速度，再加競技場速度圖騰、隊長技與速度 Buff；Tick 用這個。
+ * 其餘數值（HP / ATK / DEF / CD）的 `withSkills` 語意不變。
  */
 export function finalizeStats(
   base: BaseStats,
@@ -244,14 +246,15 @@ export function finalizeStats(
   const hp = base.hp + Math.ceil((base.hp * pctHp) / 100) + a.flatHp;
   const atk = base.atk + Math.ceil((base.atk * pctAtk) / 100) + a.flatAtk;
   const def = base.def + Math.ceil((base.def * pctDef) / 100) + a.flatDef;
-  const spd = base.spd + Math.ceil((base.spd * pctSpd) / 100) + a.spdSet + a.flatSpd;
+  const panelSpd = base.spd + a.spdSet + a.flatSpd;
+  const spd = panelSpd + Math.ceil((base.spd * pctSpd) / 100);
   const cr = Math.min(100, base.cr + a.flatCr);
   const cd = base.cd + a.flatCd + (withSkills ? (bonus.towerCd ?? 0) + (guild ? bonus.guildCd : 0) : 0);
   const res = Math.min(100, base.res + a.flatRes);
   const acc = Math.min(100, base.acc + a.flatAcc);
   const ehp = Math.floor((hp * (1140 + 3.5 * def)) / 1000);
 
-  return { hp, atk, def, spd, cr, cd, res, acc, ehp, tick: tickOf(spd, rta) };
+  return { hp, atk, def, spd, panelSpd, cr, cd, res, acc, ehp, tick: tickOf(spd, rta) };
 }
 
 export function statsForRunes(

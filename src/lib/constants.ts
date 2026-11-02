@@ -52,7 +52,7 @@ export interface RuneSetDef {
  * 注意：9 與 12 不是有效套裝；暴走 = 13、意志 = 15（舊版常數曾经整體偏移）。
  */
 export const RUNE_SETS: RuneSetDef[] = [
-  { id: 1, name: "能量", en: "Energy", pieces: 2, stat: "hp", value: 15 },
+  { id: 1, name: "祝福", en: "Energy", pieces: 2, stat: "hp", value: 15 },
   { id: 2, name: "守護", en: "Guard", pieces: 2, stat: "def", value: 15 },
   { id: 3, name: "迅速", en: "Swift", pieces: 4, stat: "spd", value: 25 },
   { id: 4, name: "刀刃", en: "Blade", pieces: 2, stat: "cr", value: 12 },
@@ -63,10 +63,10 @@ export const RUNE_SETS: RuneSetDef[] = [
   { id: 10, name: "絕望", en: "Despair", pieces: 4, note: "技能攻擊 25% 機率暈眩" },
   { id: 11, name: "吸血", en: "Vampire", pieces: 4, note: "造成傷害 35% 轉為回復" },
   { id: 13, name: "暴走", en: "Violent", pieces: 4, note: "每回合 22% 機率追加回合" },
-  { id: 14, name: "反擊", en: "Nemesis", pieces: 2, note: "被攻擊時依傷害提升攻速條" },
+  { id: 14, name: "應報", en: "Nemesis", pieces: 2, note: "被攻擊時依傷害提升攻速條" },
   { id: 15, name: "意志", en: "Will", pieces: 2, note: "開場免疫負面效果 1 回合" },
   { id: 16, name: "保護", en: "Shield", pieces: 2, note: "開場獲得 15% 體力護盾" },
-  { id: 17, name: "復仇", en: "Revenge", pieces: 2, note: "15% 機率反擊" },
+  { id: 17, name: "反擊", en: "Revenge", pieces: 2, note: "15% 機率反擊" },
   { id: 18, name: "破壞", en: "Destroy", pieces: 2, note: "攻擊時破壞敵方體力上限" },
   { id: 19, name: "鬥志", en: "Fight", pieces: 2, stat: "atk", value: 8 },
   { id: 20, name: "決心", en: "Determination", pieces: 2, stat: "def", value: 8 },

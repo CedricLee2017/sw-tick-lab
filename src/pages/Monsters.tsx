@@ -28,7 +28,7 @@ export default function MonstersPage() {
     if (el) arr = arr.filter((v) => v.monster.el === el);
     if (onlyBuilt) arr = arr.filter((v) => v.runes.length > 0);
     arr = [...arr].sort((a, b) => {
-      if (sort === "spd" || sort === "tick") return b.stats.spd - a.stats.spd;
+      if (sort === "spd" || sort === "tick") return (b.stats.panelSpd ?? b.stats.spd) - (a.stats.panelSpd ?? a.stats.spd);
       if (sort === "hp") return b.stats.hp - a.stats.hp;
       return a.monster.name.localeCompare(b.monster.name);
     });
@@ -42,7 +42,7 @@ export default function MonstersPage() {
   return (
     <>
       <div className="row between wrap" style={{ gap: 10, marginBottom: 14 }}>
-        <div className="row" style={{ gap: 8 }}>
+        <div className="row filter-row" style={{ gap: 8 }}>
           <div style={{ position: "relative" }}>
             <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
             <input className="input" style={{ width: 200, paddingLeft: 28 }} placeholder="搜尋魔靈…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -80,7 +80,7 @@ export default function MonstersPage() {
               <TickBadge spd={v.stats.spd} rta={rta} />
             </div>
             <div className="row between" style={{ marginTop: 9 }}>
-              <span className="mono gold" style={{ fontWeight: 800, fontSize: 15 }}>{v.stats.spd}</span>
+              <span className="mono gold" style={{ fontWeight: 800, fontSize: 15 }} title="遊戲面板速度（不含建築 / 隊長 / 強化）">{v.stats.panelSpd ?? v.stats.spd}</span>
               <span className="tiny dim">HP {fmt(v.stats.hp)}</span>
               <span className="tiny dim">{v.runes.length}/6</span>
             </div>

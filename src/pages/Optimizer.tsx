@@ -138,7 +138,7 @@ const QUICK_PRESETS: QuickPreset[] = [
   {
     id: "ehp-max",
     name: "EHP最大化",
-    desc: "能量 ×3 · 體力% / 防禦% / 體力% · 焦點 體力 / 防禦 各 10 分 · EHP 排序",
+    desc: "祝福 ×3 · 體力% / 防禦% / 體力% · 焦點 體力 / 防禦 各 10 分 · EHP 排序",
     groups: [{ set: 1, pieces: 2 }, { set: 1, pieces: 2 }, { set: 1, pieces: 2 }],
     mains: { 2: 2, 4: 6, 6: 2 },
     limits: {},
@@ -393,7 +393,14 @@ export default function OptimizerPage() {
   }, [boxMonster, anyMonster]);
 
   const tickNeed = useMemo(() => speedNeededForTick(tick, base.spd, bonus, rta), [tick, base.spd, bonus, rta]);
-  const targetSpeed = mode === "tick" ? tickNeed.target : speedTarget;
+  /** 建築 + 隊長 + 強化實際加的速度 */
+  const speedBonus = useMemo(
+    () => Math.ceil((base.spd * (bonus.towerSpd + bonus.leadSpd + bonus.buffSpd)) / 100),
+    [base.spd, bonus.towerSpd, bonus.leadSpd, bonus.buffSpd],
+  );
+  /** 最低面板速度模式：輸入的是面板速度，optimizer 內部用戰鬥速度比較 */
+  const targetSpeed =
+    mode === "tick" ? tickNeed.target : speedTarget > 0 ? speedTarget + speedBonus : 0;
 
   const required = useMemo(
     () => setGroups.filter((g) => g.set > 0).map((g) => ({ set: g.set, count: g.pieces })),
@@ -472,9 +479,12 @@ export default function OptimizerPage() {
     }
     const canRelax = hasFour && hasTwo && !relax;
     const maxSpeed = Math.max(bound.speed, canRelax && relaxBound ? relaxBound.speed : 0);
+    const maxPanel = Math.max(bound.panelSpeed, canRelax && relaxBound ? relaxBound.panelSpeed : 0);
     if (!opts.auto && targetSpeed > 0 && maxSpeed < targetSpeed) {
       return notify(
-        `目前符文即使全選最高速也只有約 ${maxSpeed} 速（Tick ${tickOf(maxSpeed, rta)}），無法達到 ${targetSpeed} 速。請降低 Tick、放寬套裝或主屬性。`,
+        mode === "tick"
+          ? `目前符文即使全選最高速也只有約 ${maxSpeed} 戰鬥速（面板 ${maxPanel}・Tick ${tickOf(maxSpeed, rta)}），無法達到 ${targetSpeed} 戰鬥速。請降低 Tick、放寬套裝或主屬性。`
+          : `目前符文即使全選最高速也只有約 ${maxPanel} 面板速（戰鬥 ${maxSpeed}），無法達到 ${speedTarget} 面板速。請放寬套裝、主屬性或其他下限。`,
         "err",
       );
     }
@@ -799,7 +809,7 @@ export default function OptimizerPage() {
                   <span>基礎速度 {base.spd}</span>
                   <span>·</span>
                   <span>體力 {fmt(base.hp)}</span>
-                  {currentStats && <><span>·</span><span className="green">目前 {currentStats.spd} 速 T{currentStats.tick}</span></>}
+                  {currentStats && <><span>·</span><span className="green">目前 {currentStats.panelSpd} 面板速（戰鬥 {currentStats.spd}・T{currentStats.tick}）</span></>}
                 </div>
               )}
             </div>
@@ -907,20 +917,24 @@ export default function OptimizerPage() {
                   ))}
                 </div>
                 <div className="card" style={{ padding: 10, background: "rgba(242,198,92,.05)", borderColor: "rgba(242,198,92,.22)" }}>
-                  <div className="kv"><span className="k">目標總速度</span><span className="v mono gold">{tickNeed.target}</span></div>
-                  <div className="kv"><span className="k">建築+隊長+強化</span><span className="v mono">+{Math.ceil((base.spd * (bonus.towerSpd + bonus.leadSpd + bonus.buffSpd)) / 100)}</span></div>
+                  <div className="kv"><span className="k">目標戰鬥速度</span><span className="v mono gold">{tickNeed.target}</span></div>
+                  <div className="kv"><span className="k">建築+隊長+強化</span><span className="v mono">+{speedBonus}</span></div>
                   <div className="kv"><span className="k">符文至少需要</span><span className="v mono gold">{tickNeed.runeSpeed} 速</span></div>
                   <div className="kv">
-                    <span className="k">目前符文上限</span>
+                    <span className="k">目前戰鬥速度上限</span>
                     <span className={`v mono ${bound.speed < tickNeed.target ? "red" : "green"}`}>
                       {bound.speed} 速 · T{bound.tick}
                     </span>
+                  </div>
+                  <div className="kv">
+                    <span className="k">目前面板速度上限</span>
+                    <span className="v mono">{bound.panelSpeed} 速</span>
                   </div>
                 </div>
                 {bound.speed < tickNeed.target && (
                   <div className="alert warn" style={{ padding: "8px 10px", fontSize: 11.5 }}>
                     <div>
-                      以目前符文與套裝，最高約 {bound.speed} 速，無法達到 Tick {tick}（{tickNeed.target} 速）。
+                      以目前符文與套裝，最高約 {bound.speed} 戰鬥速（面板 {bound.panelSpeed}），無法達到 Tick {tick}（{tickNeed.target} 戰鬥速）。
                       {relaxBound && relaxBound.speed >= tickNeed.target && " 但開啟破套後可達標。"}
                       {bound.missingSlots.length > 0 && ` 位置 ${bound.missingSlots.join("、")} 沒有可用符文。`}
                     </div>
@@ -930,7 +944,7 @@ export default function OptimizerPage() {
                       </button>
                       {relaxBound && relaxBound.speed >= tickNeed.target && (
                         <button className="btn btn-sm btn-primary" onClick={() => setRelaxSub(true)}>
-                          開啟破套（可達 {relaxBound.speed} 速）
+                          開啟破套（可達 {mode === "tick" ? `${relaxBound.speed} 戰鬥速` : `${relaxBound.panelSpeed} 面板速`}）
                         </button>
                       )}
                       {required.length > 0 && (
@@ -949,7 +963,7 @@ export default function OptimizerPage() {
                 min={0}
                 max={500}
                 onChange={setSpeedTarget}
-                hint={`目前符文上限 ${bound.speed} 速（Tick ${bound.tick}）`}
+                hint={`目前符文上限 ${bound.panelSpeed} 面板速（戰鬥 ${bound.speed}・Tick ${bound.tick}）`}
               />
             )}
 
@@ -1034,7 +1048,7 @@ export default function OptimizerPage() {
               </div>
               <div className="row wrap" style={{ gap: 5, marginTop: 7 }}>
                 {loadouts.slice(0, 12).map((l) => (
-                  <button key={l.id} type="button" className="build-fav-chip" onClick={() => applyLoadout(l)} title={`${l.name} · ${l.stats.spd} 速`}>
+                  <button key={l.id} type="button" className="build-fav-chip" onClick={() => applyLoadout(l)} title={`${l.name} · 面板 ${l.stats.panelSpd ?? l.stats.spd} 速（戰鬥 ${l.stats.spd}）`}>
                     {monsterLabel(l.monsterId)} <span className="dim">T{l.stats.tick}</span>
                   </button>
                 ))}
@@ -1088,7 +1102,13 @@ export default function OptimizerPage() {
                     </span>
                   ))}
                   <span className={`chip ${targetSpeed > 0 ? "gold" : "muted"}`}>
-                    {targetSpeed > 0 ? `≥ ${targetSpeed} 速` : "速度不限"}
+                    {mode === "tick"
+                      ? targetSpeed > 0
+                        ? `≥ ${targetSpeed} 戰鬥速`
+                        : "速度不限"
+                      : speedTarget > 0
+                        ? `≥ ${speedTarget} 面板速`
+                        : "速度不限"}
                   </span>
                 </div>
               </div>
@@ -1124,7 +1144,7 @@ export default function OptimizerPage() {
                 <div className="alert warn" style={{ marginTop: 10 }}>
                   <div>找不到符合條件的配裝。</div>
                   <div className="tiny" style={{ marginTop: 4 }}>
-                    目前符文上限約 {bound.speed} 速（Tick {bound.tick}）；候選 {fmt(result.candidates)} 顆。
+                    目前面板上限約 {bound.panelSpeed} 速（戰鬥 {bound.speed}・Tick {bound.tick}）；候選 {fmt(result.candidates)} 顆。
                     可嘗試：降低 Tick、把套裝改成「不限」、放寬主屬性/其他下限，或把候選符文數調高。
                   </div>
                 </div>
@@ -1292,7 +1312,8 @@ function BuildCard({
           <div style={{ minWidth: 0 }}>
             <div className="row wrap" style={{ gap: 6, marginBottom: 5 }}>
               <TickBadge spd={s.spd} rta={rta} />
-              <span className="mono gold" style={{ fontWeight: 800 }}>{s.spd} 速</span>
+              <span className="mono gold" style={{ fontWeight: 800 }}>{s.panelSpd} 面板速</span>
+              <span className="tiny dim" title="含建築 / 隊長技 / 速度強化">戰鬥 {s.spd}</span>
               {mainSets.map(([id, c]) => (
                 <span key={id} className="chip" style={{ padding: "1px 7px", fontSize: 10.5, borderColor: setColor(Number(id)) + "55", color: setColor(Number(id)) }}>
                   {SET_BY_ID[Number(id)]?.name}×{c}
@@ -1426,7 +1447,7 @@ function PlanModal({
   const notify = useStore((s) => s.notify);
   const text = [
     `【${monsterName}】配符清單`,
-    `速度 ${build.stats.spd}（Tick ${build.stats.tick}）｜HP ${fmt(build.stats.hp)}｜DEF ${fmt(build.stats.def)}｜ATK ${fmt(build.stats.atk)}｜ACC ${build.stats.acc}%｜CR ${build.stats.cr}%｜CD ${build.stats.cd}%｜EHP ${fmt(build.stats.ehp)}`,
+    `面板速度 ${build.stats.panelSpd ?? build.stats.spd}（戰鬥 ${build.stats.spd}・Tick ${build.stats.tick}）｜HP ${fmt(build.stats.hp)}｜DEF ${fmt(build.stats.def)}｜ATK ${fmt(build.stats.atk)}｜ACC ${build.stats.acc}%｜CR ${build.stats.cr}%｜CD ${build.stats.cd}%｜EHP ${fmt(build.stats.ehp)}`,
     `套裝：${Object.entries(build.sets).map(([id, c]) => `${SET_BY_ID[Number(id)]?.name}×${c}`).join(" ")}｜平均效率 ${build.eff.toFixed(1)}%`,
     ...build.runes.filter(Boolean).map((r) => {
       const rn = r!;

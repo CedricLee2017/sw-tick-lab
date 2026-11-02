@@ -67,7 +67,7 @@ export default function RunesPage() {
       <div className="card">
         <div className="card-head">
           <div className="card-title">符文倉庫 <span className="dim tiny" style={{ fontWeight: 400 }}>共 {fmt(runes.length)} 顆</span></div>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row filter-row" style={{ gap: 8 }}>
             <div style={{ position: "relative" }}>
               <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
               <input className="input" style={{ width: 190, paddingLeft: 28 }} placeholder="搜尋套裝 / 屬性 / 擁有者" value={q} onChange={(e) => setQ(e.target.value)} />

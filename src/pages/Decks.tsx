@@ -204,7 +204,7 @@ export default function DecksPage() {
             ；已命名類型顯示名稱，尚未命名的類型以「類型 N」列出。
           </div>
         </div>
-        <div className="row" style={{ gap: 8 }}>
+        <div className="row filter-row" style={{ gap: 8 }}>
           <div style={{ position: "relative" }}>
             <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
             <input className="input" style={{ width: 210, paddingLeft: 28 }} placeholder="搜尋魔靈 / 類型 / 序號" value={q} onChange={(e) => setQ(e.target.value)} />

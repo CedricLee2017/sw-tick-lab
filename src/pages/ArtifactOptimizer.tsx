@@ -217,7 +217,7 @@ export default function ArtifactOptimizerPage() {
 
       <div className="card card-pad" style={{ marginBottom: 14 }}>
         <div className="row between wrap" style={{ gap: 8 }}>
-          <div className="row" style={{ gap: 7 }}>
+          <div className="row note-title" style={{ gap: 7 }}>
             <span className="focus-title">已儲存的魔靈符文組合</span>
             <span className="tiny dim">點一下即可選擇該魔靈與符文，並立即計算神器</span>
           </div>
@@ -235,12 +235,12 @@ export default function ArtifactOptimizerPage() {
                 type="button"
                 className={`saved-build-card ${saved?.id === l.id ? "on" : ""}`}
                 onClick={() => applySaved(l)}
-                title={`${l.name} · ${l.stats.spd} 速`}
+                title={`${l.name} · 面板 ${l.stats.panelSpd ?? l.stats.spd} 速（戰鬥 ${l.stats.spd}）`}
               >
                 <MonsterIcon id={l.monsterId} size={30} />
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: "block", fontSize: 11.5, fontWeight: 700 }}>{monsterLabel(l.monsterId)}</span>
-                  <span className="tiny dim">T{l.stats.tick} · {l.stats.spd} 速 · {l.runeIds.length}/6</span>
+                  <span className="tiny dim">T{l.stats.tick} · {l.stats.panelSpd ?? l.stats.spd} 面板速 · {l.runeIds.length}/6</span>
                 </span>
               </button>
             ))}

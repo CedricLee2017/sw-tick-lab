@@ -164,7 +164,7 @@ export default function AdCalculatorPage() {
 
       <div className="card card-pad" style={{ marginBottom: 14 }}>
         <div className="row between wrap" style={{ gap: 8 }}>
-          <div className="row" style={{ gap: 7 }}>
+          <div className="row note-title" style={{ gap: 7 }}>
             <span className="focus-title">已儲存的魔靈符文組合</span>
             <span className="tiny dim">點一下即可用該組符文的面板數值計算追傷</span>
           </div>

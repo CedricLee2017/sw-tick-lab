@@ -184,7 +184,8 @@ export default function BuildsPage() {
                   <TickBadge spd={l.stats.spd} />
                 </div>
                 <div className="row wrap tiny" style={{ gap: 8, marginTop: 8, color: "var(--muted)" }}>
-                  <span className="mono gold" style={{ fontSize: 16, fontWeight: 800 }}>{l.stats.spd}</span>
+                  <span className="mono gold" style={{ fontSize: 16, fontWeight: 800 }} title="遊戲面板速度（不含建築 / 隊長 / 強化）">{l.stats.panelSpd ?? l.stats.spd}</span>
+                  <span className="tiny dim">面板速</span>
                   <span>HP {fmt(l.stats.hp)}</span>
                   <span>DEF {fmt(l.stats.def)}</span>
                   <span>EHP {fmt(l.stats.ehp)}</span>
