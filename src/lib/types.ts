@@ -93,6 +93,8 @@ export interface Unit {
   runes: number[];
   artifacts: number[];
   locked: boolean;
+  /** 使用者自行新增的魔靈（本機虛擬資料，重新匯入存檔時會保留但清空配裝） */
+  custom?: boolean;
 }
 
 /**

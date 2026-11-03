@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Search, Users, Wand2 } from "lucide-react";
-import { useStore } from "../store";
+import { Plus, Search, Trash2, Users, Wand2 } from "lucide-react";
+import { MONSTER_MAP, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
 import { Modal, MonsterIcon, MonsterPanel, RuneBoard, RuneCard, ArtifactCard, TickBadge, fmt, setColor } from "../components/ui";
+import { MonsterPickerModal, toMonsterEntries } from "../components/MonsterPicker";
 import { setSummary } from "../lib/stats";
 import { sendOptimizerDraft } from "../lib/draft";
 
@@ -20,6 +21,11 @@ export default function MonstersPage() {
   const [onlyBuilt, setOnlyBuilt] = useState(false);
   const [sort, setSort] = useState<"spd" | "hp" | "name" | "tick">("spd");
   const [open, setOpen] = useState<number | null>(null);
+  const addCustomUnit = useStore((s) => s.addCustomUnit);
+  const removeCustomUnit = useStore((s) => s.removeCustomUnit);
+  /** 新增自訂魔靈：先選魔靈，再設定星級 / 等級 */
+  const [addOpen, setAddOpen] = useState(false);
+  const [draft, setDraft] = useState<{ id: number; stars: number; level: number } | null>(null);
 
   const views = useMemo(() => {
     if (!summary) return [];
@@ -35,9 +41,29 @@ export default function MonstersPage() {
     return arr;
   }, [summary, q, el, onlyBuilt, sort]);
 
+  /** 新增魔靈清單：標示目前帳號已擁有幾隻，方便避開重複 */
+  const addEntries = useMemo(() => {
+    const owned = new Map<number, number>();
+    for (const v of summary?.views ?? []) owned.set(v.monster.id, (owned.get(v.monster.id) ?? 0) + 1);
+    return toMonsterEntries().map((e) => {
+      const n = owned.get(e.monster.id) ?? 0;
+      return { ...e, meta: n > 0 ? `已擁有 ${n} 隻` : "尚未擁有" };
+    });
+  }, [summary]);
+
   if (!summary) return <div className="empty"><Users size={40} /><div>尚未匯入存檔</div></div>;
 
   const current = open !== null ? views.find((v) => v.unit.id === open) : undefined;
+  const customCount = summary.views.filter((v) => v.unit.custom).length;
+
+  const confirmAdd = () => {
+    if (!draft) return;
+    const id = addCustomUnit(draft.id, draft.stars, draft.level);
+    if (id !== null) {
+      setDraft(null);
+      setOpen(id);
+    }
+  };
 
   return (
     <>
@@ -60,7 +86,14 @@ export default function MonstersPage() {
             <input type="checkbox" checked={onlyBuilt} onChange={(e) => setOnlyBuilt(e.target.checked)} /> 只看有配符
           </label>
         </div>
-        <span className="dim tiny">共 {views.length} 隻</span>
+        <div className="row wrap" style={{ gap: 8, alignItems: "center" }}>
+          <span className="dim tiny">
+            共 {views.length} 隻{customCount > 0 ? ` · 自訂 ${customCount}` : ""}
+          </span>
+          <button type="button" className="btn btn-sm btn-primary" onClick={() => setAddOpen(true)}>
+            <Plus size={14} /> 新增魔靈
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(212px, 1fr))", gap: 10 }}>
@@ -75,7 +108,10 @@ export default function MonstersPage() {
               <MonsterIcon id={v.monster.id} size={46} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.monster.name}</div>
-                <div className="tiny dim">{ELEMENTS[v.monster.el as 1].name} · {v.monster.nat}★ · {v.unit.stars}★{v.unit.level}</div>
+                <div className="tiny dim">
+                  {v.unit.custom && <span className="chip gold" style={{ padding: "0 5px", fontSize: 9, marginRight: 4 }}>自訂</span>}
+                  {ELEMENTS[v.monster.el as 1].name} · {v.monster.nat}★ · {v.unit.stars}★{v.unit.level}
+                </div>
               </div>
               <TickBadge spd={v.stats.spd} rta={rta} />
             </div>
@@ -160,8 +196,92 @@ export default function MonstersPage() {
             </button>
             <span className="tiny dim">套裝加成：{Object.entries(current.runes.reduce((acc, r) => ({ ...acc, [r.set]: (acc[r.set] ?? 0) + 1 }), {} as Record<number, number>)).map(([id, c]) => `${SET_BY_ID[Number(id)]?.name}×${c}`).join(" · ") || "—"}</span>
           </div>
+
+          {current.unit.custom && (
+            <div className="row between wrap" style={{ marginTop: 16, paddingTop: 12, gap: 8, borderTop: "1px dashed var(--line-soft)" }}>
+              <span className="tiny dim" style={{ flex: 1, minWidth: 180, lineHeight: 1.6 }}>
+                這是自訂魔靈，只存在這台裝置。重新匯入存檔時會保留，但配裝會被清空。
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                style={{ color: "var(--red, #ff7b7b)" }}
+                onClick={() => {
+                  if (window.confirm(`確定要移除自訂魔靈「${current.monster.name}」嗎？已裝備的符文會回到未裝備狀態。`)) {
+                    removeCustomUnit(current.unit.id);
+                    setOpen(null);
+                  }
+                }}
+              >
+                <Trash2 size={13} /> 移除自訂魔靈
+              </button>
+            </div>
+          )}
         </Modal>
       )}
+
+      {addOpen && (
+        <MonsterPickerModal
+          title="新增魔靈（自訂）"
+          entries={addEntries}
+          onPick={(e) => {
+            setAddOpen(false);
+            setDraft({ id: e.monster.id, stars: 6, level: 40 });
+          }}
+          onClose={() => setAddOpen(false)}
+          footerLeft="先選一隻魔靈，再設定星級與等級"
+          emptyText="找不到符合條件的魔靈"
+        />
+      )}
+
+      {draft && (() => {
+        const m = MONSTER_MAP.get(draft.id);
+        if (!m) return null;
+        return (
+          <Modal title="新增自訂魔靈" onClose={() => setDraft(null)} width={460}>
+            <div className="row" style={{ gap: 12 }}>
+              <MonsterIcon id={m.id} size={64} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>{m.name}</div>
+                <div className="tiny dim" style={{ marginTop: 3 }}>
+                  {ELEMENTS[m.el as 1]?.name} · {m.nat}★ 原生 · 基礎速度 {m.spd}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid split-2" style={{ gap: 10, marginTop: 16 }}>
+              <div className="field">
+                <label>星級</label>
+                <select className="select" value={draft.stars} onChange={(e) => setDraft({ ...draft, stars: Number(e.target.value) })}>
+                  {[6, 5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n}★</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>等級</label>
+                <input
+                  className="input mono"
+                  type="number"
+                  min={1}
+                  max={40}
+                  value={draft.level}
+                  onChange={(e) => setDraft({ ...draft, level: Math.max(1, Math.min(40, Number(e.target.value) || 1)) })}
+                />
+              </div>
+            </div>
+
+            <div className="tiny dim" style={{ marginTop: 12, lineHeight: 1.7 }}>
+              新增後會出現在魔靈圖鑑，可以當成配符、一鍵配隊的目標。這是本機虛擬資料，不會影響原始存檔。
+            </div>
+
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn" onClick={() => setDraft(null)}>取消</button>
+              <button type="button" className="btn btn-primary" onClick={confirmAdd}>
+                <Plus size={14} /> 新增
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
     </>
   );
 }

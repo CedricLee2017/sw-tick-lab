@@ -5,7 +5,7 @@ import { PARSE_VERSION, parseAccountJSON } from "./lib/parse";
 import { defaultBonus } from "./lib/stats";
 import { useAuth } from "./lib/auth";
 import { mergeLibrary, pullLibrary, pushLibrary } from "./lib/librarySync";
-import type { Account, BonusConfig, FocusEntry, Monster, Rune, Stats } from "./lib/types";
+import type { Account, BonusConfig, FocusEntry, Monster, Rune, Stats, Unit } from "./lib/types";
 
 export const MONSTERS = monstersJson as unknown as Monster[];
 export const MONSTER_MAP = new Map<number, Monster>(MONSTERS.map((m) => [m.id, m]));
@@ -121,6 +121,10 @@ interface Store {
   equipRunes: (unitId: number, runeIds: number[]) => number;
   /** 一次將整隊符文上符；同一顆符文只會分配給一隻魔靈 */
   equipTeam: (assignments: { unitId: number; runeIds: number[] }[]) => number;
+  /** 新增自訂魔靈（沒有實際擁有，用來試配符／配隊）；回傳新 unit id，失敗回傳 null */
+  addCustomUnit: (master: number, stars: number, level: number) => number | null;
+  /** 移除自訂魔靈，並釋放它身上的符文 */
+  removeCustomUnit: (unitId: number) => boolean;
   saveLoadout: (l: Omit<Loadout, "id" | "createdAt">) => void;
   removeLoadout: (id: string) => void;
   /** 儲存整隊預設隊到預設隊儲存庫 */
@@ -194,8 +198,24 @@ export const useStore = create<Store>((setState, getState) => ({
   },
 
   importText: (text, fileName) => {
-    const { account, error, warnings } = parseAccountJSON(text, fileName);
-    if (!account) return { ok: false, error, warnings };
+    const parsed = parseAccountJSON(text, fileName);
+    const { error, warnings } = parsed;
+    if (!parsed.account) return { ok: false, error, warnings };
+    let account = parsed.account;
+    // 重新匯入存檔時保留先前新增的自訂魔靈（清空配裝，避免參照到舊存檔的符文）
+    const keptCustom = (getState().account?.units ?? []).filter((u) => u.custom);
+    if (keptCustom.length) {
+      const used = new Set(account.units.map((u) => u.id));
+      let nextId = -1;
+      const carried = keptCustom.map((u) => {
+        while (used.has(nextId)) nextId--;
+        const id = nextId;
+        used.add(id);
+        nextId--;
+        return { ...u, id, runes: [], artifacts: [] };
+      });
+      account = { ...account, units: [...account.units, ...carried] };
+    }
     // 建築一律以全滿等計算（速度圖騰 15%、競技場 20%、屬性塔 21%、公會 20/25%）。
     // 若存檔有建築等級，可在「設定」頁按「套用存檔建築等級」覆寫。
     const prev = getState().settings;
@@ -216,7 +236,8 @@ export const useStore = create<Store>((setState, getState) => ({
     const detectedSpeed = account.buildings.find((b) => b.id === 7);
     getState().notify(
       `已載入 ${account.units.length} 隻魔靈 / ${account.runes.length} 顆符文 / ${account.artifacts.length} 件神器 · 建築以全滿等計算` +
-        (detectedSpeed ? `（存檔速度圖騰 Lv.${detectedSpeed.level}，可於設定頁套用）` : ""),
+        (detectedSpeed ? `（存檔速度圖騰 Lv.${detectedSpeed.level}，可於設定頁套用）` : "") +
+        (keptCustom.length ? `；已保留 ${keptCustom.length} 隻自訂魔靈（配裝清空）` : ""),
     );
     return { ok: true, warnings };
   },
@@ -367,6 +388,53 @@ export const useStore = create<Store>((setState, getState) => ({
     setState({ account: next, runeMap: new Map(next.runes.map((r) => [r.id, r])) });
     void set(ACCOUNT_KEY, next);
     return chosen.size;
+  },
+
+  addCustomUnit: (master, stars, level) => {
+    const account = getState().account;
+    if (!account) return null;
+    const monster = MONSTER_MAP.get(master);
+    if (!monster) return null;
+    // 自訂魔靈使用負數 id，避免和存檔內的 unit id 衝突
+    const used = new Set(account.units.map((u) => u.id));
+    let id = -1;
+    while (used.has(id)) id--;
+    const unit: Unit = {
+      id,
+      master,
+      stars: Math.min(6, Math.max(1, Math.round(stars || 6))),
+      level: Math.min(40, Math.max(1, Math.round(level || 40))),
+      runes: [],
+      artifacts: [],
+      locked: false,
+      custom: true,
+    };
+    const next: Account = { ...account, units: [...account.units, unit] };
+    setState({ account: next });
+    void set(ACCOUNT_KEY, next);
+    getState().notify(`已新增 ${monster.name}（自訂魔靈）`);
+    return id;
+  },
+
+  removeCustomUnit: (unitId) => {
+    const account = getState().account;
+    if (!account) return false;
+    const unit = account.units.find((u) => u.id === unitId);
+    if (!unit?.custom) return false;
+    const runeById = new Map(account.runes.map((r) => [r.id, { ...r }]));
+    for (const id of unit.runes) {
+      const r = runeById.get(id);
+      if (r && r.occupied === unitId) r.occupied = 0;
+    }
+    const next: Account = {
+      ...account,
+      units: account.units.filter((u) => u.id !== unitId),
+      runes: [...runeById.values()],
+    };
+    setState({ account: next, runeMap: new Map(next.runes.map((r) => [r.id, r])) });
+    void set(ACCOUNT_KEY, next);
+    getState().notify(`已移除自訂魔靈 ${monsterLabel(unit.master)}`);
+    return true;
   },
 
   saveLoadout: (l) => {

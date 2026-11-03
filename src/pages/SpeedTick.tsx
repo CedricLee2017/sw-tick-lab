@@ -155,6 +155,8 @@ export default function SpeedTickPage() {
   const [rangeModal, setRangeModal] = useState<{
     kind: "mod" | "add";
     unitId: string;
+    /** 指定整隊時忽略 unitId */
+    team: "blue" | "red" | null;
     from: number;
     to: number;
     value: number;
@@ -529,12 +531,13 @@ export default function SpeedTickPage() {
     return `將對${label}在 Tick ${lo} - ${hi} ${boostModal.mode === "increase" ? "增加" : "減少"} ${Math.abs(boostModal.amount)}% 攻擊條`;
   };
 
-  const openRangeModal = (kind: "mod" | "add") =>
+  const openRangeModal = (kind: "mod" | "add", opts?: { team?: "blue" | "red"; tick?: number }) =>
     setRangeModal({
       kind,
       unitId: units[0]?.id ?? "",
-      from: 0,
-      to: TICKS[TICKS.length - 1],
+      team: opts?.team ?? null,
+      from: opts?.tick ?? 0,
+      to: opts?.tick ?? TICKS[TICKS.length - 1],
       value: kind === "mod" ? 30 : 20,
       mode: "flat",
     });
@@ -544,7 +547,9 @@ export default function SpeedTickPage() {
     if (!rangeModal) return;
     const lo = Math.min(rangeModal.from, rangeModal.to);
     const hi = Math.max(rangeModal.from, rangeModal.to);
-    const targets = units.filter((u) => (rangeModal.unitId ? u.id === rangeModal.unitId : true));
+    const targets = units.filter((u) =>
+      rangeModal.team ? u.team === rangeModal.team : rangeModal.unitId ? u.id === rangeModal.unitId : true,
+    );
     const ids = new Set(targets.map((u) => u.id));
     const ticks = TICKS.filter((t) => t >= lo && t <= hi);
 
@@ -574,9 +579,11 @@ export default function SpeedTickPage() {
     if (!rangeModal) return "";
     const lo = Math.min(rangeModal.from, rangeModal.to);
     const hi = Math.max(rangeModal.from, rangeModal.to);
-    const who = rangeModal.unitId
-      ? units.find((u) => u.id === rangeModal.unitId)?.name ?? "魔靈"
-      : "全部魔靈";
+    const who = rangeModal.team
+      ? `${rangeModal.team === "blue" ? "藍隊" : "紅隊"}全部`
+      : rangeModal.unitId
+        ? units.find((u) => u.id === rangeModal.unitId)?.name ?? "魔靈"
+        : "全部魔靈";
     if (rangeModal.kind === "mod") {
       return `將把 ${who} 在 Tick ${lo} - ${hi} 的速度增減設為 ${rangeModal.value}%`;
     }
@@ -1047,10 +1054,35 @@ export default function SpeedTickPage() {
                 <button className="btn btn-sm" onClick={() => setMods([])}>Clear</button>
               </div>
             </div>
-            <div className="tiny dim" style={{ marginBottom: 6 }}>每格只在該 Tick 生效（例如 30 或 -30）；正向增減會被神器「速度增加效果」放大</div>
+            <div className="tiny dim" style={{ marginBottom: 6 }}>每格只在該 Tick 生效（例如 30 或 -30）；正向增減會被神器「速度增加效果」放大。Team 列可一次調整整隊</div>
             <div style={{ overflowX: "auto" }}>
               <table className="table st-matrix" style={{ minWidth: 120 + TICKS.length * 74 }}>
                 <thead>
+                  <tr>
+                    <th style={{ fontSize: 10 }}>Team</th>
+                    {TICKS.map((t) => (
+                      <th key={t} style={{ padding: "2px 3px" }}>
+                        <div className="row" style={{ gap: 2, justifyContent: "center" }}>
+                          <button
+                            type="button"
+                            className="st-team-btn blue"
+                            title={`藍隊速度增減工具（Tick ${t}）`}
+                            onClick={() => openRangeModal("mod", { team: "blue", tick: t })}
+                          >
+                            藍
+                          </button>
+                          <button
+                            type="button"
+                            className="st-team-btn red"
+                            title={`紅隊速度增減工具（Tick ${t}）`}
+                            onClick={() => openRangeModal("mod", { team: "red", tick: t })}
+                          >
+                            紅
+                          </button>
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
                   <tr>
                     <th>Monster</th>
                     {TICKS.map((t) => <th key={t} className="num">{t}</th>)}
@@ -1436,14 +1468,27 @@ export default function SpeedTickPage() {
         >
           <div className="st-modal-sec">
             <div className="st-modal-label">TARGET</div>
-            <div className="tiny dim">選擇要套用的魔靈（或全部）</div>
+            <div className="tiny dim">選擇要套用的魔靈、整隊或全部</div>
             <select
               className="select"
               style={{ marginTop: 8, width: "100%" }}
-              value={rangeModal.unitId}
-              onChange={(e) => setRangeModal({ ...rangeModal, unitId: e.target.value })}
+              value={rangeModal.team ? `team:${rangeModal.team}` : rangeModal.unitId}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v.startsWith("team:")) {
+                  setRangeModal({ ...rangeModal, unitId: "", team: v.slice(5) as "blue" | "red" });
+                } else {
+                  setRangeModal({ ...rangeModal, team: null, unitId: v });
+                }
+              }}
             >
               <option value="">全部魔靈（{units.length} 隻）</option>
+              {rangeModal.kind === "mod" && (
+                <>
+                  <option value="team:blue">藍隊全部（{teamCount("blue")} 隻）</option>
+                  <option value="team:red">紅隊全部（{teamCount("red")} 隻）</option>
+                </>
+              )}
               {units.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name || "魔靈"}（{u.team === "blue" ? "藍 攻" : "紅 守"}）

@@ -834,7 +834,7 @@ p { margin: 0; }
 
 .modal-back {
   position: fixed; inset: 0; background: rgba(3, 6, 12, .78); backdrop-filter: blur(6px);
-  display: grid; place-items: center; z-index: 100; padding: 20px;
+  display: grid; place-items: center; z-index: 210; padding: 20px;
 }
 .modal {
   width: min(760px, 100%); max-height: 86vh; overflow: auto;
@@ -1169,6 +1169,9 @@ p { margin: 0; }
   .settings-table th, .settings-table td { padding: 8px 6px; }
   .table { font-size: 12px; }
   .table th, .table td { padding: 8px 9px; }
+
+  /* Speed Tick 表格的隊伍按鈕：手機放大一點，方便點擊 */
+  .st-team-btn { min-width: 26px; min-height: 26px; font-size: 11px; padding: 2px 5px; border-radius: 6px; }
 
   /* 彈出視窗：手機改用底部面板 */
   .modal-back { padding: 0; display: flex; align-items: flex-end; }
