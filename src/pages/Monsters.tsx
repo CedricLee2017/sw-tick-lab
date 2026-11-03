@@ -1,21 +1,16 @@
 import { useMemo, useState } from "react";
-import { Plus, Search, Trash2, Users, Wand2 } from "lucide-react";
+import { Plus, Search, Users } from "lucide-react";
 import { MONSTER_MAP, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
-import { ELEMENTS, SET_BY_ID } from "../lib/constants";
-import { Modal, MonsterIcon, MonsterPanel, RuneBoard, RuneCard, ArtifactCard, TickBadge, fmt, setColor } from "../components/ui";
+import { ELEMENTS } from "../lib/constants";
+import { Modal, MonsterIcon, TickBadge, fmt, setColor } from "../components/ui";
 import { MonsterPickerModal, toMonsterEntries } from "../components/MonsterPicker";
-import { setSummary } from "../lib/stats";
+import { MonsterDetailModal } from "../components/MonsterDetail";
 import { sendOptimizerDraft } from "../lib/draft";
 
 export default function MonstersPage() {
   const summary = useSummary();
   const rta = useStore((s) => s.settings.rta);
-  const lockedRunes = useStore((s) => s.settings.lockedRunes);
-  const excludedRunes = useStore((s) => s.settings.excludedRunes);
-  const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
-  const lockedSet = useMemo(() => new Set(lockedRunes), [lockedRunes]);
-  const excludedSet = useMemo(() => new Set(excludedRunes), [excludedRunes]);
   const [q, setQ] = useState("");
   const [el, setEl] = useState(0);
   const [onlyBuilt, setOnlyBuilt] = useState(false);
@@ -131,93 +126,29 @@ export default function MonstersPage() {
       </div>
 
       {current && (
-        <Modal title={current.monster.name} onClose={() => setOpen(null)} width={820}>
-          <MonsterPanel
-            monster={current.monster}
-            base={current.base}
-            stats={current.stats}
-            stars={current.unit.stars}
-            level={current.unit.level}
-            artifacts={current.artifacts}
-            badge={<TickBadge spd={current.stats.spd} rta={rta} />}
-          />
-
-          <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
-            <span className="chip gold">{current.monster.nat}★ 原生</span>
-            <span className="chip muted">符文 {current.runes.length}/6</span>
-            <span className="chip muted">神器 {current.artifacts.length}/2</span>
-          </div>
-
-          <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>
-            <div className="card-title">目前配裝</div>
-            <span className="tiny dim">{current.runes.length > 0 ? setSummary(Object.fromEntries(current.runes.reduce((m, r) => m.set(r.set, (m.get(r.set) ?? 0) + 1), new Map<number, number>()))) : "未裝備"}</span>
-          </div>
-
-          {current.runes.length === 0 ? (
-            <div className="empty tiny">這隻魔靈目前沒有裝備符文</div>
-          ) : (
-            <RuneBoard
-              runes={current.runes}
-              renderRune={(r) => (
-                <RuneCard
-                  rune={r}
-                  owner={current.monster.name}
-                  locked={lockedSet.has(r.id)}
-                  excluded={excludedSet.has(r.id)}
-                  onToggleLock={() => toggleRuneFlag("locked", r.id)}
-                  onToggleExclude={() => toggleRuneFlag("excluded", r.id)}
-                />
-              )}
-            />
-          )}
-
-          <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>
-            <div className="card-title">神器</div>
-            <span className="tiny dim">裝備 {current.artifacts.length} / 2</span>
-          </div>
-          {current.artifacts.length === 0 ? (
-            <div className="empty tiny">這隻魔靈目前沒有裝備神器</div>
-          ) : (
-            <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8 }}>
-              {current.artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} owner={current.monster.name} />)}
-            </div>
-          )}
-
-          <div className="row" style={{ marginTop: 14, gap: 8 }}>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => {
-                sendOptimizerDraft({ monsterId: current.monster.id });
-                window.location.hash = "#/optimizer";
-                setOpen(null);
-              }}
-            >
-              <Wand2 size={13} /> 幫這隻配符
-            </button>
-            <span className="tiny dim">套裝加成：{Object.entries(current.runes.reduce((acc, r) => ({ ...acc, [r.set]: (acc[r.set] ?? 0) + 1 }), {} as Record<number, number>)).map(([id, c]) => `${SET_BY_ID[Number(id)]?.name}×${c}`).join(" · ") || "—"}</span>
-          </div>
-
-          {current.unit.custom && (
-            <div className="row between wrap" style={{ marginTop: 16, paddingTop: 12, gap: 8, borderTop: "1px dashed var(--line-soft)" }}>
-              <span className="tiny dim" style={{ flex: 1, minWidth: 180, lineHeight: 1.6 }}>
-                這是自訂魔靈，只存在這台裝置。重新匯入存檔時會保留，但配裝會被清空。
-              </span>
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost"
-                style={{ color: "var(--red, #ff7b7b)" }}
-                onClick={() => {
-                  if (window.confirm(`確定要移除自訂魔靈「${current.monster.name}」嗎？已裝備的符文會回到未裝備狀態。`)) {
-                    removeCustomUnit(current.unit.id);
-                    setOpen(null);
-                  }
-                }}
-              >
-                <Trash2 size={13} /> 移除自訂魔靈
-              </button>
-            </div>
-          )}
-        </Modal>
+        <MonsterDetailModal
+          monster={current.monster}
+          base={current.base}
+          stats={current.stats}
+          stars={current.unit.stars}
+          level={current.unit.level}
+          runes={current.runes}
+          artifacts={current.artifacts}
+          badge={<TickBadge spd={current.stats.spd} rta={rta} />}
+          custom={current.unit.custom}
+          onRemoveCustom={() => {
+            if (window.confirm(`確定要移除自訂魔靈「${current.monster.name}」嗎？已裝備的符文會回到未裝備狀態。`)) {
+              removeCustomUnit(current.unit.id);
+              setOpen(null);
+            }
+          }}
+          onOptimize={() => {
+            sendOptimizerDraft({ monsterId: current.monster.id });
+            window.location.hash = "#/optimizer";
+            setOpen(null);
+          }}
+          onClose={() => setOpen(null)}
+        />
       )}
 
       {addOpen && (

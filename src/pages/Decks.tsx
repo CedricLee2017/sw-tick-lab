@@ -6,6 +6,7 @@ import { baseStats, statsForRunes } from "../lib/stats";
 import { DECK_TYPE_NUMBERS, deckTypeLabel } from "../lib/deckTypes";
 import { deckContext, spdLeaderApplies, spdLeaderSkill, SPD_AREA_LABEL } from "../lib/deckSpeed";
 import { ArtifactCard, Modal, MonsterIcon, RuneCard, TickBadge, fmt } from "../components/ui";
+import { MonsterDetailModal } from "../components/MonsterDetail";
 import type { Artifact, Deck, DeckEquip, Rune } from "../lib/types";
 
 type DeckWithEquip = Deck;
@@ -22,6 +23,8 @@ export default function DecksPage() {
   const [q, setQ] = useState("");
   const [type, setType] = useState(0);
   const [open, setOpen] = useState<DeckWithEquip | null>(null);
+  /** 從預設隊點開的魔靈完整面板（依該隊快照計算） */
+  const [unitOpen, setUnitOpen] = useState<{ deck: DeckWithEquip; uid: number } | null>(null);
 
   const decks = account?.decks ?? [];
   const defenseDecks = account?.defenseDecks ?? [];
@@ -187,6 +190,43 @@ export default function DecksPage() {
     ? speedByDeck.get(`${open.type}-${open.seq}`)
     : undefined;
 
+  /**
+   * 依指定預設隊的符文 / 神器快照，組出單隻魔靈的完整面板資料。
+   * 速度會套用該隊的隊長技，與速度順序顯示一致。
+   */
+  const deckUnitDetail = (deck: DeckWithEquip, uid: number) => {
+    if (!account) return null;
+    const u = account.units.find((x) => x.id === uid);
+    const monster = u ? MONSTER_MAP.get(u.master) : undefined;
+    if (!u || !monster) return null;
+    const eq = deck.equip.find((e) => e.unit === uid);
+    const runes = (eq?.runes ?? []).map((id) => runeMap.get(id)).filter((r): r is Rune => !!r);
+    const artMap = new Map(account.artifacts.map((a) => [a.id, a]));
+    const artifacts = (eq?.artifacts ?? []).map((id) => artMap.get(id)).filter((a): a is Artifact => !!a);
+
+    const leaderUid = deck.leader || deck.units[0] || 0;
+    const leaderUnit = account.units.find((x) => x.id === leaderUid);
+    const skill = leaderUnit ? spdLeaderSkill(leaderUnit.master) : null;
+    const leadPct = !leaderUnit
+      ? bonus.leadSpd
+      : skill && spdLeaderApplies(skill, monster.el, deckContext(deck.type))
+        ? skill.p
+        : 0;
+    const deckBonus = leadPct === bonus.leadSpd ? bonus : { ...bonus, leadSpd: leadPct };
+
+    const base = baseStats(monster, u.stars, u.level);
+    const stats = statsForRunes(base, runes, deckBonus, rta, false, artifacts);
+    return {
+      unit: u,
+      monster,
+      runes,
+      artifacts,
+      base,
+      stats,
+      info: speedByDeck.get(`${deck.type}-${deck.seq}`)?.units.get(uid),
+    };
+  };
+
   if (!account) return <div className="empty"><Layers size={40} /><div>尚未匯入存檔</div></div>;
 
   const openEquip = open ? new Map<number, DeckEquip>(open.equip.map((e) => [e.unit, e])) : new Map<number, DeckEquip>();
@@ -288,13 +328,22 @@ export default function DecksPage() {
                           const m = unitMaster(uid);
                           const info = deckSpeed?.units.get(uid);
                           return (
-                            <span key={uid} className={`deck-unit ${uid === leaderUid ? "leader" : ""}`} title={`${unitName(uid)}${info ? ` · SPD ${info.spd} · Tick ${info.tick}（第 ${info.rank} 速）` : ""}`}>
+                            <button
+                              type="button"
+                              key={uid}
+                              className={`deck-unit deck-unit-btn ${uid === leaderUid ? "leader" : ""}`}
+                              title={`${unitName(uid)}${info ? ` · SPD ${info.spd} · Tick ${info.tick}（第 ${info.rank} 速）` : ""} · 點擊查看完整面板`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setUnitOpen({ deck: d, uid });
+                              }}
+                            >
                               <span className="deck-unit-icon">
                                 <MonsterIcon id={m} size={34} />
                                 {info && info.spd > 0 && <span className="deck-tick">T{info.tick}</span>}
                               </span>
                               <span className="tiny">{unitName(uid)}</span>
-                            </span>
+                            </button>
                           );
                         })}
                       </div>
@@ -329,7 +378,7 @@ export default function DecksPage() {
       {open && (
         <Modal title={`${deckTypeLabel(open.type)} · 第 ${open.seq} 隊`} onClose={() => setOpen(null)} width={940}>
           <div className="row between wrap" style={{ gap: 8, marginBottom: 12 }}>
-            <span className="tiny dim">共 {open.units.length} 隻{open.leader ? ` · 隊長 ${unitName(open.leader)}` : openSpeed?.leaderUid ? ` · 隊長 ${unitName(openSpeed.leaderUid)}（第 1 位）` : ""}{open.battlePower ? ` · 戰力 ${fmt(open.battlePower)}` : ""}</span>
+            <span className="tiny dim">共 {open.units.length} 隻{open.leader ? ` · 隊長 ${unitName(open.leader)}` : openSpeed?.leaderUid ? ` · 隊長 ${unitName(openSpeed.leaderUid)}（第 1 位）` : ""}{open.battlePower ? ` · 戰力 ${fmt(open.battlePower)}` : ""} · 點擊魔靈看完整面板</span>
             <div className="row" style={{ gap: 6 }}>
               <span className="tiny dim">預設隊快照（符文 / 神器配置）</span>
               <button type="button" className="btn btn-sm btn-primary" onClick={() => saveWholeDeck(open)}>
@@ -374,9 +423,15 @@ export default function DecksPage() {
               return (
                 <div key={uid} className="deck-detail">
                   <div className="row between" style={{ gap: 10 }}>
-                    <div className="row" style={{ gap: 10, minWidth: 0 }}>
+                    <button
+                      type="button"
+                      className="row deck-detail-open"
+                      style={{ gap: 10, minWidth: 0, flex: 1 }}
+                      onClick={() => setUnitOpen({ deck: open, uid })}
+                      title="查看完整面板（三圍、符文、神器）"
+                    >
                       <MonsterIcon id={master} size={46} />
-                      <div style={{ flex: 1 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="row wrap" style={{ gap: 6 }}>
                           <b>{unitName(uid)}</b>
                           {monster && <span className={`el-${monster.el}`} style={{ fontSize: 11 }}>{ELEMENTS[monster.el as 1]?.name}</span>}
@@ -391,7 +446,7 @@ export default function DecksPage() {
                           <span className="tiny dim">{runes.length}/6 符文 · {artifacts.length}/2 神器</span>
                         </div>
                       </div>
-                    </div>
+                    </button>
                     <button
                       type="button"
                       className="btn btn-sm btn-ghost"
@@ -423,6 +478,27 @@ export default function DecksPage() {
           </div>
         </Modal>
       )}
+
+      {unitOpen && (() => {
+        const detail = deckUnitDetail(unitOpen.deck, unitOpen.uid);
+        if (!detail) return null;
+        return (
+          <MonsterDetailModal
+            title={`${detail.monster.name} · 預設隊面板`}
+            monster={detail.monster}
+            base={detail.base}
+            stats={detail.stats}
+            stars={detail.unit.stars}
+            level={detail.unit.level}
+            runes={detail.runes}
+            artifacts={detail.artifacts}
+            badge={<TickBadge spd={detail.info?.spd ?? detail.stats.spd} rta={rta} />}
+            ownerName={unitName(unitOpen.uid)}
+            note={`數值依「${deckTypeLabel(unitOpen.deck.type)} · 第 ${unitOpen.deck.seq} 隊」的符文／神器快照計算，可能與目前裝備不同。`}
+            onClose={() => setUnitOpen(null)}
+          />
+        );
+      })()}
     </>
   );
 }
