@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer,
 } from "lucide-react";
 import { ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
@@ -21,13 +21,14 @@ import OptimizerPage from "./pages/Optimizer";
 import TeamOptimizerPage from "./pages/TeamOptimizer";
 import AdminPage from "./pages/Admin";
 import RunesPage from "./pages/Runes";
+import GrindPage from "./pages/Grind";
 import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "artifacts" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -44,6 +45,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "monsters", label: "魔靈", icon: <Users size={17} />, title: "魔靈圖鑑", sub: "你的魔靈盒與目前配裝" },
   { key: "summonlog", label: "魔靈召喚記錄", icon: <ScrollText size={17} />, title: "魔靈召喚記錄", sub: "原4 / 原5 魔靈的取得時間軸" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
+  { key: "grind", label: "精煉建議", icon: <Hammer size={17} />, title: "精煉建議", sub: "依符文素質、套裝與裝備對象排出精煉順序" },
   { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },
   { key: "admin", label: "後台", icon: <ShieldCheck size={17} />, title: "管理後台", sub: "會員、上傳紀錄與容量" },
   { key: "settings", label: "設定", icon: <SettingsIcon size={17} />, title: "設定", sub: "建築、隊長技與進階選項" },
@@ -75,6 +77,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   monsters: MonstersPage,
   summonlog: SummonLogPage,
   runes: RunesPage,
+  grind: GrindPage,
   artifacts: ArtifactsPage,
   admin: AdminPage,
   settings: SettingsPage,

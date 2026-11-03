@@ -66,7 +66,12 @@ export default function RunesPage() {
     <>
       <div className="card">
         <div className="card-head">
-          <div className="card-title">符文倉庫 <span className="dim tiny" style={{ fontWeight: 400 }}>共 {fmt(runes.length)} 顆</span></div>
+          <div className="card-title">
+            符文倉庫 <span className="dim tiny" style={{ fontWeight: 400 }}>共 {fmt(runes.length)} 顆</span>
+            <a className="chip gold" href="#/grind" style={{ marginLeft: 8, textDecoration: "none" }} title="依符文素質與裝備對象列出精煉順序">
+              精煉建議 →
+            </a>
+          </div>
           <div className="row filter-row" style={{ gap: 8 }}>
             <div style={{ position: "relative" }}>
               <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
