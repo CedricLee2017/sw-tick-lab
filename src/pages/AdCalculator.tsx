@@ -69,8 +69,9 @@ export default function AdCalculatorPage() {
     const artifactMap = new Map(account.artifacts.map((a) => [a.id, a]));
     const arts = u.artifacts.map((aid) => artifactMap.get(aid)).filter((a): a is Artifact => !!a);
     const runes = runeIds.map((rid) => runeMap.get(rid)).filter((r): r is NonNullable<typeof r> => !!r);
-    const s = statsForRunes(baseStats(m!, u.stars, u.level), runes, settings.bonus, settings.rta, true, arts);
-    setStats({ hp: s.hp, atk: s.atk, def: s.def, spd: s.spd });
+    const s = statsForRunes(baseStats(m!, u.stars, u.level), runes, settings.bonus, settings.rta, false, arts);
+    // 與魔靈頁 / 預設隊的「面板數值」一致：不含建築、圖騰、隊長技與速度 Buff。
+    setStats({ hp: s.hp, atk: s.atk, def: s.def, spd: s.panelSpd });
   };
 
   const pickUnit = (id: number) => {
@@ -216,6 +217,7 @@ export default function AdCalculatorPage() {
       <div className="grid g2" style={{ gap: 14, alignItems: "start" }}>
         <div className="card card-pad">
           <div className="card-title">面板數值</div>
+          <div className="tiny dim" style={{ marginTop: 3 }}>不含建築、圖騰、隊長技與速度 Buff（與魔靈頁的面板一致，可手動修改）</div>
           <div className="grid g2" style={{ marginTop: 10 }}>
             <NumberField label="體力 HP" value={stats.hp} min={0} step={1000} onChange={(v) => setStats((s) => ({ ...s, hp: v }))} />
             <NumberField label="攻擊 ATK" value={stats.atk} min={0} step={100} onChange={(v) => setStats((s) => ({ ...s, atk: v }))} />
