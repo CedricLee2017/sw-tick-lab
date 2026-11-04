@@ -11,7 +11,13 @@ import {
   type AdStats,
 } from "../lib/adCalculator";
 import { baseStats, statsForRunes } from "../lib/stats";
-import { artifactKindText, artifactMainText, artifactSubText } from "../lib/artifacts";
+import {
+  artifactAutoLabels,
+  artifactEligible,
+  artifactKindText,
+  artifactMainText,
+  artifactSubText,
+} from "../lib/artifacts";
 import { MonsterIcon, NumberField, fmt } from "../components/ui";
 import { MonsterPickerField } from "../components/MonsterPicker";
 import type { Artifact } from "../lib/types";
@@ -89,12 +95,20 @@ export default function AdCalculatorPage() {
 
   const result = useMemo(() => calculateAd(stats, effects, hits), [stats, effects, hits]);
 
+  /** 選了魔靈後，只保留該魔靈可裝備的神器（屬性 / 類型 / 無形） */
+  const selectedMonster = useMemo(
+    () => units.find((x) => x.u.id === unitId)?.m ?? null,
+    [units, unitId],
+  );
+  const filterLabels = selectedMonster ? artifactAutoLabels(selectedMonster) : null;
+
   const adArtifacts = useMemo(() => {
     if (!account) return [];
     const term = q.trim().toLowerCase();
     return account.artifacts
       .filter((a) => hasAdEffect(a))
       .filter((a) => !type || a.type === type)
+      .filter((a) => !selectedMonster || artifactEligible(a, selectedMonster))
       .filter((a) => {
         if (!term) return true;
         return `${artifactKindText(a)} ${artifactMainText(a)} ${a.subs.map(artifactSubText).join(" ")} ${owner.get(a.id) ?? ""}`.toLowerCase().includes(term);
@@ -102,7 +116,7 @@ export default function AdCalculatorPage() {
       .map((a) => ({ art: a, result: artifactAdResult(a, stats, hits), effects: artifactAdEffects(a) }))
       .sort((a, b) => b.result.perHit - a.result.perHit || b.art.rank - a.art.rank)
       .slice(0, 120);
-  }, [account, q, type, stats, hits, owner]);
+  }, [account, q, type, stats, hits, owner, selectedMonster]);
 
   const addArtifact = (a: Artifact) => {
     setEffects((e) => normEffects(addAdEffects(e, artifactAdEffects(a))));
@@ -149,6 +163,11 @@ export default function AdCalculatorPage() {
               label={(e) => (e ? <>{e.monster.name} · {e.meta}</> : "選擇魔靈…")}
               onChange={(key) => pickUnit(key)}
             />
+            {filterLabels && (
+              <div className="tiny dim" style={{ marginTop: 5 }}>
+                神器篩選：{filterLabels.attribute}／{filterLabels.archetype}（含無形）
+              </div>
+            )}
           </div>
         </div>
         {saved && (
