@@ -3,7 +3,7 @@ import { Plus, Search, Users } from "lucide-react";
 import { MONSTER_MAP, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { ELEMENTS } from "../lib/constants";
-import { Modal, MonsterIcon, TickBadge, fmt, setColor } from "../components/ui";
+import { Modal, MonsterIcon, NumberInput, TickBadge, fmt, setColor } from "../components/ui";
 import { MonsterPickerModal, toMonsterEntries } from "../components/MonsterPicker";
 import { MonsterDetailModal } from "../components/MonsterDetail";
 import { sendOptimizerDraft } from "../lib/draft";
@@ -189,13 +189,12 @@ export default function MonstersPage() {
               </div>
               <div className="field">
                 <label>等級</label>
-                <input
+                <NumberInput
                   className="input mono"
-                  type="number"
                   min={1}
                   max={40}
                   value={draft.level}
-                  onChange={(e) => setDraft({ ...draft, level: Math.max(1, Math.min(40, Number(e.target.value) || 1)) })}
+                  onChange={(v) => setDraft({ ...draft, level: Math.max(1, Math.min(40, v)) })}
                 />
               </div>
             </div>

@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, Check, Copy, Gauge, Layers, Loader2, Lock, Pin, Save, Search,
+  AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Gauge, Layers, Loader2, Lock, Pin, Save, Search,
   Shirt, Trash2, Users, Wand2, Zap,
 } from "lucide-react";
 import { monsterLabel, useStore, type DeckFav } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
-import { MonsterIcon, Modal, RuneCard, RuneBoard, StatRows, TickBadge, fmt, ArtifactCard } from "../components/ui";
+import { MonsterIcon, Modal, NumberInput, RuneCard, RuneBoard, StatRows, TickBadge, fmt, ArtifactCard } from "../components/ui";
 import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPicker";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import { setSummary, speedForTick } from "../lib/stats";
@@ -1158,16 +1158,15 @@ export default function TeamOptimizerPage() {
                     <div className="row wrap" style={{ gap: 8 }}>
                       <label className="row" style={{ gap: 6 }}>
                         <span className="tiny dim">速度隊長技 %</span>
-                        <input
+                        <NumberInput
                           className="input mono"
                           style={{ width: 72 }}
-                          type="number"
                           min={0}
                           max={50}
                           value={leadPcts[teamIndex] ?? 0}
-                          onChange={(e) => {
-                            const pct = Math.max(0, Math.min(50, Number(e.target.value) || 0));
-                            setLeadPcts((prev) => prev.map((p, k) => (k === teamIndex ? pct : p)));
+                          onChange={(pct) => {
+                            const next = Math.max(0, Math.min(50, pct));
+                            setLeadPcts((prev) => prev.map((p, k) => (k === teamIndex ? next : p)));
                             setPlan(null);
                           }}
                           title="這一隊的速度隊長技加成，以每隻的基礎速度計算；0 = 沒有隊長技"
@@ -1268,7 +1267,7 @@ export default function TeamOptimizerPage() {
                 </label>
                 <label>
                   <span>權重</span>
-                  <input className="input mono" type="number" min={1} max={10} value={m.weight} onChange={(e) => updateMember(i, { weight: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
+                  <NumberInput className="input mono" min={1} max={10} value={m.weight} onChange={(v) => updateMember(i, { weight: Math.max(1, Math.min(10, v)) })} />
                 </label>
                 <label>
                   <span>優先順序</span>
@@ -1356,16 +1355,45 @@ export default function TeamOptimizerPage() {
                 ) : (
                   <label>
                     <span>目標 Tick</span>
-                    <input className="input mono" type="number" min={0} max={20} value={m.tick} onChange={(e) => updateMember(i, { tick: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })} title="0 = 不限；此模式不採用面板速度" />
+                    <NumberInput className="input mono" min={0} max={20} value={m.tick} onChange={(v) => updateMember(i, { tick: Math.max(0, Math.min(20, v)) })} title="0 = 不限；此模式不採用面板速度" />
                   </label>
                 )}
                 <label>
                   <span>攻擊順序</span>
-                  <input className="input mono" type="number" min={1} max={10} value={m.order} onChange={(e) => updateMember(i, { order: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} title="1 = 最先出手；接速以鏡像對手的攻擊條為門檻" />
+                  <div className="order-stepper">
+                    <NumberInput
+                      className="input mono"
+                      min={1}
+                      max={10}
+                      value={m.order}
+                      onChange={(v) => updateMember(i, { order: Math.max(1, Math.min(10, v)) })}
+                      title="1 = 最先出手；接速以鏡像對手的攻擊條為門檻"
+                    />
+                    <span className="order-stepper-btns">
+                      <button
+                        type="button"
+                        className="order-step"
+                        aria-label="攻擊順序往前"
+                        title="往前一位"
+                        onClick={() => updateMember(i, { order: Math.max(1, m.order - 1) })}
+                      >
+                        <ChevronUp size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="order-step"
+                        aria-label="攻擊順序往後"
+                        title="往後一位"
+                        onClick={() => updateMember(i, { order: Math.min(10, m.order + 1) })}
+                      >
+                        <ChevronDown size={13} />
+                      </button>
+                    </span>
+                  </div>
                 </label>
                 <label>
                   <span>提條 %</span>
-                  <input className="input mono" type="number" min={0} max={100} value={m.boostPct} onChange={(e) => updateMember(i, { boostPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} title="這隻魔靈會收到的攻擊條 %（例如 風格 S3 全隊 +30）" />
+                  <NumberInput className="input mono" min={0} max={100} value={m.boostPct} onChange={(v) => updateMember(i, { boostPct: Math.max(0, Math.min(100, v)) })} title="這隻魔靈會收到的攻擊條 %（例如 風格 S3 全隊 +30）" />
                 </label>
                 <label>
                   <span>隊長技 %</span>
@@ -1396,23 +1424,22 @@ export default function TeamOptimizerPage() {
                 </label>
                 <label>
                   <span>神器速度 +%</span>
-                  <input
+                  <NumberInput
                     className="input mono"
-                    type="number"
                     min={0}
                     max={100}
                     value={m.artifactPct}
-                    onChange={(e) => updateMember(i, { artifactPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                    onChange={(v) => updateMember(i, { artifactPct: Math.max(0, Math.min(100, v)) })}
                     title="神器「速度增加效果 +%」（效果 206）；只有啟用速度強化時才會放大 Buff"
                   />
                 </label>
                 <label>
                   <span>抵抗下限</span>
-                  <input className="input mono" type="number" min={0} max={100} value={m.min.res ?? 0} onChange={(e) => patchMin(i, "res", Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
+                  <NumberInput className="input mono" min={0} max={100} value={m.min.res ?? 0} onChange={(v) => patchMin(i, "res", Math.max(0, Math.min(100, v)))} />
                 </label>
                 <label>
                   <span>暴率下限</span>
-                  <input className="input mono" type="number" min={0} max={100} value={m.min.cr ?? 0} onChange={(e) => patchMin(i, "cr", Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
+                  <NumberInput className="input mono" min={0} max={100} value={m.min.cr ?? 0} onChange={(v) => patchMin(i, "cr", Math.max(0, Math.min(100, v)))} />
                 </label>
               </div>
 

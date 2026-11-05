@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { X, Lock, Unlock, Ban, Droplet, Flame, Wind, Sun, Moon } from "lucide-react";
 import { ELEMENTS, SET_BY_ID, STAT_TYPES, type StatKey } from "../lib/constants";
 import { monsterOf } from "../store";
@@ -468,6 +468,74 @@ export function setColor(id: number): string {
   return c[id] ?? "#8b9cc0";
 }
 
+/**
+ * 數字輸入框：允許先清空再輸入（不會立刻被 0 蓋回去）。
+ * 編輯中保留使用者輸入的字串；失焦時才把空白 / 無效值還原成 fallback（預設 min 或 0）並套用上下限。
+ */
+export function NumberInput({
+  value,
+  onChange,
+  fallback,
+  min,
+  max,
+  step,
+  className = "input mono",
+  onFocus,
+  onBlur,
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "min" | "max"> & {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+  /** 清空後失焦時要帶入的值（預設 min ?? 0） */
+  fallback?: number;
+}) {
+  const [text, setText] = useState(() => (Number.isFinite(value) ? String(value) : ""));
+  const focused = useRef(false);
+
+  useEffect(() => {
+    if (!focused.current) setText(Number.isFinite(value) ? String(value) : "");
+  }, [value]);
+
+  const commit = (raw: string) => {
+    let n = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(n)) n = fallback ?? min ?? 0;
+    if (min != null) n = Math.max(min, n);
+    if (max != null) n = Math.min(max, n);
+    setText(String(n));
+    if (n !== value) onChange(n);
+  };
+
+  return (
+    <input
+      {...rest}
+      type="number"
+      className={className}
+      value={text}
+      min={min}
+      max={max}
+      step={step}
+      onFocus={(e) => {
+        focused.current = true;
+        onFocus?.(e);
+      }}
+      onBlur={(e) => {
+        focused.current = false;
+        commit(text);
+        onBlur?.(e);
+      }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setText(raw);
+        if (raw.trim() === "") return;
+        const n = Number(raw);
+        if (Number.isFinite(n)) onChange(n);
+      }}
+    />
+  );
+}
+
 export function NumberField({
   label,
   value,
@@ -477,6 +545,7 @@ export function NumberField({
   step,
   suffix,
   hint,
+  fallback,
 }: {
   label: string;
   value: number;
@@ -486,19 +555,20 @@ export function NumberField({
   step?: number;
   suffix?: string;
   hint?: string;
+  fallback?: number;
 }) {
   return (
     <div className="field">
       <label>{label}</label>
       <div style={{ position: "relative" }}>
-        <input
+        <NumberInput
           className="input mono"
-          type="number"
-          value={Number.isFinite(value) ? value : ""}
+          value={value}
+          onChange={onChange}
           min={min}
           max={max}
           step={step ?? 1}
-          onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
+          fallback={fallback}
         />
         {suffix && (
           <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "var(--muted-2)" }}>{suffix}</span>

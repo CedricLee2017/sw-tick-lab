@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { ArrowRight, Gauge, ListOrdered, Plus, Trash2, Wand2, Users, Info } from "lucide-react";
 import { useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
-import { MonsterIcon, NumberField, TickBadge, fmt } from "../components/ui";
+import { MonsterIcon, NumberField, NumberInput, TickBadge, fmt } from "../components/ui";
 import { MonsterPickerField } from "../components/MonsterPicker";
 import { speedForTick, tickOf } from "../lib/stats";
 import { simulateOrder } from "../lib/optimizer";
@@ -235,12 +235,11 @@ function OrderTab() {
             <div className="row" key={u.id} style={{ gap: 8 }}>
               <span className="mono" style={{ width: 18, color: "var(--muted-2)" }}>{i + 1}</span>
               <input className="input" value={u.name} onChange={(e) => setUnits((arr) => arr.map((x) => (x.id === u.id ? { ...x, name: e.target.value } : x)))} />
-              <input
+              <NumberInput
                 className="input mono"
-                type="number"
                 style={{ width: 86 }}
                 value={u.spd}
-                onChange={(e) => setUnits((arr) => arr.map((x) => (x.id === u.id ? { ...x, spd: Number(e.target.value) } : x)))}
+                onChange={(v) => setUnits((arr) => arr.map((x) => (x.id === u.id ? { ...x, spd: v } : x)))}
               />
               <TickBadge spd={u.spd} rta={rta} />
               <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setUnits((arr) => arr.filter((x) => x.id !== u.id))}><Trash2 size={13} /></button>

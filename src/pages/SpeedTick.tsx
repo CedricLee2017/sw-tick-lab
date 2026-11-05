@@ -3,7 +3,7 @@ import { RotateCcw, Save as SaveIcon, Timer, Trash2, Upload, X, Copy, ArrowRight
 import { ELEMENTS } from "../lib/constants";
 import { deckTypeLabel } from "../lib/deckTypes";
 import { MONSTERS, MONSTER_MAP, useStore } from "../store";
-import { MonsterIcon, Modal } from "../components/ui";
+import { MonsterIcon, Modal, NumberInput } from "../components/ui";
 import { MonsterPickerModal, sortMonsterEntries, toMonsterEntries } from "../components/MonsterPicker";
 import type { DeckFav, Loadout } from "../store";
 import {
@@ -115,7 +115,6 @@ function loadSaves(): SavedCalc[] {
   }
 }
 
-const numOr0 = (v: string) => Number(v) || 0;
 const clampTick = (v: number) => Math.max(0, Math.min(TICKS[TICKS.length - 1], Math.round(v)));
 
 export default function SpeedTickPage() {
@@ -791,11 +790,10 @@ export default function SpeedTickPage() {
                     </div>
                     <div className="field">
                       <label>Base Speed</label>
-                      <input
+                      <NumberInput
                         className="input mono"
-                        type="number"
                         value={u.baseSpd}
-                        onChange={(e) => update(u.id, { baseSpd: numOr0(e.target.value) })}
+                        onChange={(v) => update(u.id, { baseSpd: v })}
                       />
                     </div>
                   </div>
@@ -816,17 +814,16 @@ export default function SpeedTickPage() {
                     <span title="符文 + 套裝的總和（= 遊戲內 Total Speed − 基礎速度）；開迅速時要含 25% 的加成">
                       Spd from Runes (+)
                     </span>
-                    <input
+                    <NumberInput
                       className="input mono"
-                      type="number"
                       title="符文 + 套裝的總和（含迅速加成）"
                       value={u.runeSpd}
-                      onChange={(e) => update(u.id, { runeSpd: numOr0(e.target.value) })}
+                      onChange={(v) => update(u.id, { runeSpd: v })}
                     />
                   </div>
                   <div className="st-line">
                     <span>Artifact Spd Buff + %</span>
-                    <input className="input mono" type="number" value={u.artifactPct} onChange={(e) => update(u.id, { artifactPct: numOr0(e.target.value) })} />
+                    <NumberInput className="input mono" value={u.artifactPct} onChange={(v) => update(u.id, { artifactPct: v })} />
                   </div>
                   <div className="st-line">
                     <span>Total Speed:</span>
@@ -916,7 +913,7 @@ export default function SpeedTickPage() {
                           </span>
                         </td>
                         <td className="num">
-                          <input className="input mono st-cell" type="number" value={u.baseSpd} onChange={(e) => update(u.id, { baseSpd: numOr0(e.target.value) })} />
+                          <NumberInput className="input mono st-cell" value={u.baseSpd} onChange={(v) => update(u.id, { baseSpd: v })} />
                         </td>
                         <td>
                           <select
@@ -932,12 +929,12 @@ export default function SpeedTickPage() {
                         <td className="num">
                           <span className="row" style={{ gap: 3, justifyContent: "flex-end" }}>
                             <button className="btn btn-sm btn-ghost btn-icon" onClick={() => update(u.id, { runeSpd: Math.max(0, u.runeSpd - 1) })}>−</button>
-                            <input className="input mono st-cell" type="number" value={u.runeSpd} onChange={(e) => update(u.id, { runeSpd: numOr0(e.target.value) })} />
+                            <NumberInput className="input mono st-cell" value={u.runeSpd} onChange={(v) => update(u.id, { runeSpd: v })} />
                             <button className="btn btn-sm btn-ghost btn-icon" onClick={() => update(u.id, { runeSpd: u.runeSpd + 1 })}>+</button>
                           </span>
                         </td>
                         <td className="num">
-                          <input className="input mono st-cell" type="number" value={u.artifactPct} onChange={(e) => update(u.id, { artifactPct: numOr0(e.target.value) })} />
+                          <NumberInput className="input mono st-cell" value={u.artifactPct} onChange={(v) => update(u.id, { artifactPct: v })} />
                         </td>
                         <td className="num mono">{b.total}</td>
                         <td className="num mono" style={{ fontWeight: 700 }}>{b.normal}</td>
@@ -1370,23 +1367,21 @@ export default function SpeedTickPage() {
             <div className="tiny dim">選擇這個調整要套用的 Tick 範圍</div>
             <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
               <span className="tiny dim">From:</span>
-              <input
+              <NumberInput
                 className="input mono"
-                type="number"
                 min={0}
                 max={TICKS[TICKS.length - 1]}
                 value={boostModal.from}
-                onChange={(e) => setBoostModal({ ...boostModal, from: clampTick(Number(e.target.value)) })}
+                onChange={(v) => setBoostModal({ ...boostModal, from: clampTick(v) })}
                 style={{ width: 80 }}
               />
               <span className="tiny dim">To:</span>
-              <input
+              <NumberInput
                 className="input mono"
-                type="number"
                 min={0}
                 max={TICKS[TICKS.length - 1]}
                 value={boostModal.to}
-                onChange={(e) => setBoostModal({ ...boostModal, to: clampTick(Number(e.target.value)) })}
+                onChange={(v) => setBoostModal({ ...boostModal, to: clampTick(v) })}
                 style={{ width: 80 }}
               />
               <button className="btn btn-sm" onClick={() => setBoostModal({ ...boostModal, to: TICKS[TICKS.length - 1] })}>Max</button>
@@ -1433,13 +1428,12 @@ export default function SpeedTickPage() {
                 ))}
                 <span className="row" style={{ gap: 4 }}>
                   <span className="tiny dim">Custom:</span>
-                  <input
+                  <NumberInput
                     className="input mono"
-                    type="number"
                     min={1}
                     max={200}
                     value={boostModal.amount}
-                    onChange={(e) => setBoostModal({ ...boostModal, amount: Math.max(1, Math.min(200, Number(e.target.value) || 1)) })}
+                    onChange={(v) => setBoostModal({ ...boostModal, amount: Math.max(1, Math.min(200, v)) })}
                     style={{ width: 72 }}
                   />
                   <span className="tiny dim">%</span>
@@ -1502,23 +1496,21 @@ export default function SpeedTickPage() {
             <div className="tiny dim">每個 Tick 會各自存一筆，只影響那一格（與 SWGT 相同）</div>
             <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
               <span className="tiny dim">From:</span>
-              <input
+              <NumberInput
                 className="input mono"
-                type="number"
                 min={0}
                 max={TICKS[TICKS.length - 1]}
                 value={rangeModal.from}
-                onChange={(e) => setRangeModal({ ...rangeModal, from: clampTick(Number(e.target.value)) })}
+                onChange={(v) => setRangeModal({ ...rangeModal, from: clampTick(v) })}
                 style={{ width: 80 }}
               />
               <span className="tiny dim">To:</span>
-              <input
+              <NumberInput
                 className="input mono"
-                type="number"
                 min={0}
                 max={TICKS[TICKS.length - 1]}
                 value={rangeModal.to}
-                onChange={(e) => setRangeModal({ ...rangeModal, to: clampTick(Number(e.target.value)) })}
+                onChange={(v) => setRangeModal({ ...rangeModal, to: clampTick(v) })}
                 style={{ width: 80 }}
               />
               <button className="btn btn-sm" onClick={() => setRangeModal({ ...rangeModal, to: TICKS[TICKS.length - 1] })}>Max</button>
@@ -1562,11 +1554,10 @@ export default function SpeedTickPage() {
               ))}
               <span className="row" style={{ gap: 4 }}>
                 <span className="tiny dim">Custom:</span>
-                <input
+                <NumberInput
                   className="input mono"
-                  type="number"
                   value={rangeModal.value}
-                  onChange={(e) => setRangeModal({ ...rangeModal, value: Number(e.target.value) || 0 })}
+                  onChange={(v) => setRangeModal({ ...rangeModal, value: v })}
                   style={{ width: 80 }}
                 />
                 <span className="tiny dim">{rangeModal.kind === "mod" || rangeModal.mode === "pct" ? "%" : "速"}</span>

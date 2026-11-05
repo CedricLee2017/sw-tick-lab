@@ -5,7 +5,7 @@ import { ELEMENTS } from "../lib/constants";
 import { rtaView, type RtaView } from "../lib/rta";
 import { setSummary } from "../lib/stats";
 import type { Monster } from "../lib/types";
-import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, RuneBoard, RuneCard, TickBadge, fmt } from "../components/ui";
+import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, NumberInput, RuneBoard, RuneCard, TickBadge, fmt } from "../components/ui";
 
 type RtaRow = RtaView & { monster: Monster };
 
@@ -110,14 +110,13 @@ export default function RtaPage() {
             </div>
             {leaderOn && (
               <div style={{ position: "relative" }}>
-                <input
+                <NumberInput
                   className="input mono"
-                  type="number"
                   min={0}
                   max={50}
                   step={1}
                   value={leaderPct}
-                  onChange={(e) => setLeaderPct(Number(e.target.value) || 0)}
+                  onChange={setLeaderPct}
                   style={{ width: 96, paddingRight: 22 }}
                   title="速度隊長技 %"
                 />

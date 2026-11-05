@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { useStore, monsterLabel, type Loadout, type RuneFlag } from "../store";
 import { useSummary } from "../lib/accountStats";
-import { MonsterIcon, NumberField, RuneBoard, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
+import { MonsterIcon, NumberField, NumberInput, RuneBoard, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
 import { MonsterPickerField } from "../components/MonsterPicker";
 import { DamagePanel } from "../components/DamagePanel";
 import {
@@ -1201,15 +1201,14 @@ export default function OptimizerPage() {
                 第 {page * PAGE_SIZE + 1}–{Math.min(total, (page + 1) * PAGE_SIZE)} 組 / 共 {fmt(total)} 組
               </span>
               <div className="row" style={{ gap: 4, alignItems: "center" }}>
-                <input
+                <NumberInput
                   className="input mono"
-                  type="number"
                   min={1}
                   max={pageCount}
                   value={page + 1}
-                  onChange={(e) => {
-                    const v = Math.max(1, Math.min(pageCount, Math.round(Number(e.target.value) || 1)));
-                    setPage(v - 1);
+                  onChange={(v) => {
+                    const next = Math.max(1, Math.min(pageCount, Math.round(v)));
+                    setPage(next - 1);
                   }}
                   style={{ width: 72, padding: "4px 6px", textAlign: "center" }}
                   title="跳到指定頁"
@@ -1538,15 +1537,14 @@ function FocusEditor({
               <option key={o.key} value={o.key} disabled={o.key !== f.key && used.has(o.key)}>{o.label}</option>
             ))}
           </select>
-          <input
+          <NumberInput
             className="input mono"
-            type="number"
             min={1}
             max={10}
             value={f.weight}
             title="比重 1~10"
-            onChange={(e) => {
-              const w = Math.max(1, Math.min(10, Math.round(Number(e.target.value) || 1)));
+            onChange={(v) => {
+              const w = Math.max(1, Math.min(10, Math.round(v)));
               onChange(value.map((x, j) => (j === i ? { ...x, weight: w } : x)));
             }}
           />

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
-import { ArtifactCard, RuneCard, TickBadge, fmt, setColor } from "./ui";
+import { ArtifactCard, NumberInput, RuneCard, TickBadge, fmt, setColor } from "./ui";
 import { ELEMENTS } from "../lib/constants";
 import { ARTIFACT_EFFECT_MAX, artifactAutoLabels, artifactEffectLabel } from "../lib/artifacts";
 import type { DamageOptions, Skill } from "../lib/damage";
@@ -360,9 +360,9 @@ function FocusEditor({
                 </select>
                 <div className="artifact-focus-range">
                   <span className="tiny dim">最小</span>
-                  <input className="input mono" type="number" min={0} max={max} step={step} value={f.min} onChange={(e) => update(i, { min: Number(e.target.value) || 0 })} />
+                  <NumberInput className="input mono" min={0} max={max} step={step} value={f.min} onChange={(v) => update(i, { min: v })} />
                   <span className="tiny dim">最大</span>
-                  <input className="input mono" type="number" min={0} max={max} step={step} value={f.max} onChange={(e) => update(i, { max: Number(e.target.value) || 0 })} />
+                  <NumberInput className="input mono" min={0} max={max} step={step} value={f.max} onChange={(v) => update(i, { max: v })} />
                 </div>
                 <select className="select" style={{ width: 78 }} value={f.weight} onChange={(e) => update(i, { weight: Number(e.target.value) })}>
                   {Array.from({ length: 10 }, (_, n) => n + 1).map((n) => <option key={n} value={n}>權重 {n}</option>)}

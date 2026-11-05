@@ -995,6 +995,18 @@ p { margin: 0; }
 .team-fields .input,
 .team-fields .select { padding: 5px 8px; font-size: 12px; }
 .team-fields .select { padding-right: 24px; }
+.order-stepper { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
+.order-stepper > .input { flex: 1; min-width: 0; }
+.order-stepper > .input::-webkit-outer-spin-button,
+.order-stepper > .input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.order-stepper > .input { -moz-appearance: textfield; appearance: textfield; }
+.order-stepper-btns { display: flex; flex-direction: column; gap: 2px; }
+.order-step {
+  width: 26px; height: 17px; padding: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 17, 32, .9); border: 1px solid var(--line); border-radius: 5px;
+  color: var(--muted); cursor: pointer;
+}
+.order-step:hover { color: var(--gold); border-color: rgba(242, 198, 92, .45); }
 .preset-save {
   align-self: flex-start;
   display: inline-flex; align-items: center; gap: 4px;
@@ -1200,6 +1212,10 @@ p { margin: 0; }
 
   /* Speed Tick 表格的隊伍按鈕：手機放大一點，方便點擊 */
   .st-team-btn { min-width: 26px; min-height: 26px; font-size: 11px; padding: 2px 5px; border-radius: 6px; }
+
+  /* 攻擊順序的上下箭頭：手機加大，取代不會顯示的原生數字微調鈕 */
+  .order-step { width: 40px; height: 21px; }
+  .order-step svg { width: 15px; height: 15px; }
 
   /* 彈出視窗：手機改用底部面板 */
   .modal-back { padding: 0; display: flex; align-items: flex-end; }
