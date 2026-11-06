@@ -20,6 +20,15 @@ export const GRIND_PROFILES: { key: GrindProfile; label: string; desc: string }[
   { key: "support", label: "輔助", desc: "速度、體力%、防禦% 與效果命中" },
 ];
 
+/** 精煉接受程度：10 = 傳說精滿，9 / 8 各降一分 */
+export type GrindAccept = 8 | 9 | 10;
+
+export const GRIND_ACCEPT_LEVELS: { value: GrindAccept; label: string; hint: string }[] = [
+  { value: 10, label: "10 分", hint: "體攻防% 13+10、速度 10+5、爆率/爆傷 13" },
+  { value: 9, label: "9 分", hint: "體攻防% 12+9、速度 9+4、爆率/爆傷 12" },
+  { value: 8, label: "8 分", hint: "體攻防% 11+8、速度 8+3、爆率/爆傷 11" },
+];
+
 /** 可精煉副屬性的權重（type id → 0~100） */
 const WEIGHTS: Record<GrindProfile, Record<number, number>> = {
   speed: { 8: 100, 2: 44, 6: 38, 4: 28, 1: 4, 3: 3, 5: 3 },
@@ -81,6 +90,59 @@ export function grindStatSuffix(t: number): string {
   return PCT_TYPES.has(t) ? "%" : "";
 }
 
+/**
+ * 接受程度評分：每一條重要副屬性以「寶石 + 精煉」的完美總值為 10 分，
+ * 每降一分 = 寶石 -1、精煉 -1（總值 -2）。
+ *
+ *   體力% / 攻擊力% / 防禦力%：10 分 = 13 + 10 = 23
+ *   速度：10 分 = 10 + 5 = 15
+ *   暴擊率 / 暴擊傷害：10 分 = 13（磨石不可用，只算寶石）
+ */
+const PERFECT_GEM: Record<number, number> = { 2: 13, 4: 13, 6: 13, 8: 10, 9: 13, 10: 13 };
+const PERFECT_GRIND: Record<number, number> = { 2: 10, 4: 10, 6: 10, 8: 5, 9: 0, 10: 0 };
+const PERFECT_TOTAL: Record<number, number> = { 2: 23, 4: 23, 6: 23, 8: 15, 9: 13, 10: 13 };
+
+/** 這條副屬性的接受目標（寶石 + 精煉）；不列入評分的屬性回傳 null */
+export function acceptTarget(t: number, accept: GrindAccept): { gem: number; grind: number; total: number } | null {
+  const perfect = PERFECT_TOTAL[t];
+  if (perfect == null) return null;
+  const drop = 10 - accept;
+  const gem = Math.max(0, (PERFECT_GEM[t] ?? 0) - drop);
+  const grind = Math.max(0, (PERFECT_GRIND[t] ?? 0) - drop);
+  return { gem, grind, total: perfect - 2 * drop };
+}
+
+/** 副屬性分數：10 / 9 / 8；低於 8 分回傳 7。不列入評分回傳 null */
+export function subScore(t: number, current: number): number | null {
+  const perfect = PERFECT_TOTAL[t];
+  if (perfect == null) return null;
+  let score = 10;
+  while (score > 8 && current < perfect - 2 * (10 - score)) score -= 1;
+  return current >= perfect - 2 * (10 - 8) ? score : 7;
+}
+
+/** 符文速度：速度副屬性（含精煉）＋ 速度 prefix */
+export function runeSpeed(rune: Rune): number {
+  let spd = 0;
+  for (const s of rune.subs) if (s.t === 8) spd += s.v + (s.g ?? 0);
+  if (rune.prefix?.t === 8) spd += rune.prefix.v;
+  return spd;
+}
+
+export interface SubScoreInfo {
+  t: number;
+  label: string;
+  suffix: string;
+  /** 目前總值（數值 + 精煉） */
+  current: number;
+  score: number;
+  /** 接受程度對應的寶石 / 精煉目標 */
+  gem: number;
+  grind: number;
+  target: number;
+  grindable: boolean;
+}
+
 export interface GrindOwner {
   name: string;
   unitId: number;
@@ -120,6 +182,12 @@ export interface GrindTarget {
   effAfter: number;
   setMatch: boolean;
   reasons: string[];
+  /** 符文速度（速度副屬性含精煉 + 速度 prefix） */
+  speed: number;
+  /** 每條重要副屬性的接受程度分數 */
+  subScores: SubScoreInfo[];
+  /** 可精煉副屬性中最低的分數（沒有可評分項目時為 null） */
+  acceptScore: number | null;
 }
 
 export interface GrindFilter {
@@ -127,6 +195,8 @@ export interface GrindFilter {
   owners?: Map<number, GrindOwner>;
   /** 只考慮這些屬性；null / 空 = 全部 */
   stat?: number | number[] | null;
+  /** 速度優先模式：只留下未達此接受程度的符文 */
+  accept?: GrindAccept;
 }
 
 const GRADE_FACTOR = [0, 0.35, 0.5, 0.68, 0.82, 0.92, 1];
@@ -144,6 +214,7 @@ export function analyzeRune(
   profile: GrindProfile,
   owner?: GrindOwner,
   onlyStat?: Set<number> | null,
+  accept: GrindAccept = 10,
 ): GrindTarget | null {
   const weights = WEIGHTS[profile];
   const options: GrindOption[] = [];
@@ -170,6 +241,28 @@ export function analyzeRune(
   if (!options.length) return null;
   options.sort((a, b) => b.value - a.value);
   const best = options[0];
+
+  const subScores: SubScoreInfo[] = [];
+  for (const s of rune.subs) {
+    const target = acceptTarget(s.t, accept);
+    const sc = subScore(s.t, s.v + (s.g ?? 0));
+    if (!target || sc == null) continue;
+    subScores.push({
+      t: s.t,
+      label: grindStatLabel(s.t),
+      suffix: grindStatSuffix(s.t),
+      current: s.v + (s.g ?? 0),
+      score: sc,
+      gem: target.gem,
+      grind: target.grind,
+      target: target.total,
+      grindable: GRIND_MAX[s.t] != null && GRIND_MAX[s.t] > 0,
+    });
+  }
+  // 未達標只看可用磨石精煉的屬性（速度、體 / 攻 / 防%）
+  const scoredGrindable = subScores.filter((s) => s.grindable);
+  const acceptScore = scoredGrindable.length ? Math.min(...scoredGrindable.map((s) => s.score)) : null;
+  const speed = runeSpeed(rune);
 
   const effNow = rune.eff;
   const effAfter = runeEfficiency(
@@ -212,16 +305,32 @@ export function analyzeRune(
     effAfter,
     setMatch,
     reasons,
+    speed,
+    subScores,
+    acceptScore,
   };
 }
 
-/** 分析全部符文，依推薦分排序 */
+/** 分析全部符文；速度優先模式依「未達接受程度 → 符文速度」排序 */
 export function analyzeGrind(runes: Rune[], filter: GrindFilter): GrindTarget[] {
   const onlyStat = statSet(filter.stat);
+  const accept = filter.accept ?? 10;
   const out: GrindTarget[] = [];
   for (const rune of runes) {
-    const t = analyzeRune(rune, filter.profile, filter.owners?.get(rune.id), onlyStat);
+    const t = analyzeRune(rune, filter.profile, filter.owners?.get(rune.id), onlyStat, accept);
     if (t) out.push(t);
+  }
+  // 速度優先：只留下還有可精煉屬性、而且未達接受程度的符文，依速度由高到低
+  if (filter.profile === "speed") {
+    return out
+      .filter((t) => t.acceptScore != null && t.acceptScore < accept)
+      .sort(
+        (a, b) =>
+          b.speed - a.speed ||
+          (b.acceptScore ?? 0) - (a.acceptScore ?? 0) ||
+          b.rune.grade - a.rune.grade ||
+          b.effNow - a.effNow,
+      );
   }
   out.sort((a, b) => b.rawScore - a.rawScore || b.rune.grade - a.rune.grade || b.effNow - a.effNow);
   return out;

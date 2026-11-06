@@ -4,11 +4,13 @@ import { MONSTER_MAP, useStore } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { EmptyState, setColor } from "../components/ui";
 import {
+  GRIND_ACCEPT_LEVELS,
   GRIND_PROFILES,
   analyzeGrind,
   grindStatLabel,
   grindStatSuffix,
   stoneGain,
+  type GrindAccept,
   type GrindOwner,
   type GrindProfile,
   type GrindTarget,
@@ -33,7 +35,7 @@ function Tile({ k, v, sub }: { k: string; v: string; sub?: string }) {
   );
 }
 
-function TargetCard({ t }: { t: GrindTarget }) {
+function TargetCard({ t, accept, showAccept }: { t: GrindTarget; accept: GrindAccept; showAccept: boolean }) {
   const set = SET_BY_ID[t.rune.set];
   const gain = t.effAfter - t.effNow;
   const extra = t.reasons.filter(
@@ -62,6 +64,28 @@ function TargetCard({ t }: { t: GrindTarget }) {
           {t.tier === "high" ? "優先" : t.tier === "mid" ? "可考慮" : "暫緩"} {t.score}
         </span>
       </div>
+
+      {showAccept && (
+        <div className="row wrap" style={{ gap: 6, marginTop: 9 }}>
+          <span className="chip gold" title="速度副屬性（含精煉）＋ 速度 prefix">
+            速度 {t.speed}
+          </span>
+          <span className="chip gold" title={`接受程度 ${accept} 分；低於 ${accept} 分表示還未達標`}>
+            精煉分 {t.acceptScore != null && t.acceptScore >= 8 ? t.acceptScore : "<8"} / {accept}
+          </span>
+          {t.subScores.map((s) => (
+            <span
+              key={s.t}
+              className={`chip ${s.score >= accept ? "muted" : "gold"}`}
+              title={`目標 ${s.gem}+${s.grind} = ${s.target}${s.grindable ? "" : "（只能用寶石，不能用磨石）"}`}
+            >
+              {s.label} {s.current} / {s.target}
+              {s.suffix}
+              <span className="dim"> · {s.score >= 8 ? s.score : "<8"}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="grind-opts">
         {t.options.slice(0, 4).map((o) => (
@@ -98,6 +122,7 @@ function TargetCard({ t }: { t: GrindTarget }) {
 export default function GrindPage() {
   const account = useStore((s) => s.account);
   const [profile, setProfile] = useState<GrindProfile>("speed");
+  const [accept, setAccept] = useState<GrindAccept>(10);
   const [onlyEquipped, setOnlyEquipped] = useState(false);
   const [onlySix, setOnlySix] = useState(false);
   const [onlyHigh, setOnlyHigh] = useState(false);
@@ -108,7 +133,7 @@ export default function GrindPage() {
 
   useEffect(() => {
     setTake(40);
-  }, [profile, onlyEquipped, onlySix, onlyHigh, setId, stat, q]);
+  }, [profile, accept, onlyEquipped, onlySix, onlyHigh, setId, stat, q]);
 
   const owners = useMemo(() => {
     const map = new Map<number, GrindOwner>();
@@ -123,8 +148,8 @@ export default function GrindPage() {
   const all = useMemo(() => {
     if (!account) return [];
     const onlyStat = stat === 0 ? null : stat === -1 ? [1, 3, 5] : stat;
-    return analyzeGrind(account.runes, { profile, owners, stat: onlyStat });
-  }, [account, profile, owners, stat]);
+    return analyzeGrind(account.runes, { profile, owners, stat: onlyStat, accept });
+  }, [account, profile, owners, stat, accept]);
 
   const sets = useMemo(() => {
     const ids = new Set(account?.runes.map((r) => r.set) ?? []);
@@ -185,11 +210,17 @@ export default function GrindPage() {
             依符文素質、套裝、裝備對象與目前精煉值排序；只考慮可用磨石精煉的屬性（速度、體力／攻擊／防禦與固定值）。
           </div>
         </div>
-        <span className="chip gold">可精煉 {all.length} 顆</span>
+        <span className="chip gold">
+          {profile === "speed" ? `未達 ${accept} 分 ${all.length} 顆` : `可精煉 ${all.length} 顆`}
+        </span>
       </div>
 
       <div className="grid g4" style={{ marginBottom: 14 }}>
-        <Tile k="可精煉符文" v={String(all.length)} sub="還有提升空間" />
+        <Tile
+          k={profile === "speed" ? `未達 ${accept} 分` : "可精煉符文"}
+          v={String(all.length)}
+          sub={profile === "speed" ? "依速度由高到低" : "還有提升空間"}
+        />
         <Tile k="高優先" v={String(summary.high)} sub="建議先處理" />
         <Tile k="速度候選" v={String(summary.speed)} sub={`其中 6★ ${summary.speed6} 顆`} />
         <Tile k="平均效率提升" v={`+${summary.avgGain.toFixed(1)}%`} sub="全部都精煉到上限" />
@@ -210,8 +241,29 @@ export default function GrindPage() {
           ))}
         </div>
         <div className="tiny dim" style={{ marginTop: 7 }}>
-          {GRIND_PROFILES.find((p) => p.key === profile)?.desc}
+          {profile === "speed"
+            ? `速度優先：只列出未達接受程度（${accept} 分）的符文，依符文速度（速度副屬性＋精煉）由高到低排序。`
+            : GRIND_PROFILES.find((p) => p.key === profile)?.desc}
         </div>
+
+        {profile === "speed" && (
+          <div className="row wrap" style={{ gap: 6, marginTop: 10, alignItems: "center" }}>
+            <span className="tiny dim">接受程度</span>
+            {GRIND_ACCEPT_LEVELS.map((a) => (
+              <button
+                key={a.value}
+                type="button"
+                className={`chip ${accept === a.value ? "gold" : "muted"}`}
+                style={{ cursor: "pointer" }}
+                onClick={() => setAccept(a.value)}
+                title={a.hint}
+              >
+                {a.label}
+              </button>
+            ))}
+            <span className="tiny dim">{GRIND_ACCEPT_LEVELS.find((a) => a.value === accept)?.hint}</span>
+          </div>
+        )}
 
         <div className="row filter-row" style={{ gap: 8, marginTop: 12 }}>
           <div style={{ position: "relative" }}>
@@ -304,6 +356,7 @@ export default function GrindPage() {
           <li><b>可以重複嘗試。</b>同一條副屬性再精煉會覆蓋上一次的加成，不會疊加；接近上限時再用高一級的石頭追求滿值，已經用高階石精煉過的就不要再用低階石覆蓋。</li>
           <li>暴擊率、暴擊傷害、效果命中、效果抵抗<b>不能用磨石</b>，需要用寶石轉換，這個頁面不會把它們列入精煉候選。</li>
           <li><b>分數怎麼看：</b>推薦分 = 屬性權重 × 可提升幅度，再依符文星級、效率、是否已裝備與套裝契合度調整。分數高不代表一定要精煉，還是要看該顆符文是不是你長期會用的。</li>
+          <li><b>速度優先的接受程度：</b>體攻防% 以「寶石 13 + 精煉 10」為 10 分，速度以「寶石 10 + 精煉 5」為 10 分，爆率／爆傷以寶石 13 為 10 分；每降一分，寶石與精煉各減 1。選 9 分（體攻防% 12+9、速度 9+4）就只會列出未達該分數的符文，並依符文速度由高到低排序。</li>
           <li><b>這頁不會讀取磨石庫存。</b>建議先看「依套裝分配」整理手上同套裝的石頭，再從清單最上面開始處理；沒有對應套裝的石頭就先跳過，不要為了一顆符文浪費其他套裝的資源。</li>
         </ol>
       </details>
@@ -312,12 +365,18 @@ export default function GrindPage() {
         <div className="empty card" style={{ padding: "40px 16px" }}>
           <Hammer size={34} style={{ opacity: .3, marginBottom: 8 }} />
           <div style={{ fontWeight: 600, color: "var(--text)" }}>沒有符合條件的精煉候選</div>
-          <div className="tiny dim" style={{ marginTop: 4 }}>試著放寬套裝 / 屬性篩選，或取消「只看已裝備 / 只看 6★ / 只看高優先」。</div>
+          <div className="tiny dim" style={{ marginTop: 4 }}>
+            {profile === "speed"
+              ? `目前沒有未達 ${accept} 分的符文，或篩選條件太窄。可調低接受程度或放寬篩選。`
+              : "試著放寬套裝 / 屬性篩選，或取消「只看已裝備 / 只看 6★ / 只看高優先」。"}
+          </div>
         </div>
       ) : (
         <>
           <div className="grind-list">
-            {shown.map((t) => <TargetCard key={t.rune.id} t={t} />)}
+            {shown.map((t) => (
+              <TargetCard key={t.rune.id} t={t} accept={accept} showAccept={profile === "speed"} />
+            ))}
           </div>
           {filtered.length > shown.length && (
             <div className="row" style={{ justifyContent: "center", marginTop: 14 }}>
