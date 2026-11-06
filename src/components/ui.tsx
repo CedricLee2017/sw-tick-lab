@@ -246,6 +246,7 @@ export function RuneCard({
   excluded = false,
   onToggleLock,
   onToggleExclude,
+  children,
 }: {
   rune: Rune;
   owner?: string;
@@ -260,6 +261,8 @@ export function RuneCard({
   excluded?: boolean;
   onToggleLock?: () => void;
   onToggleExclude?: () => void;
+  /** 卡片底部的附加內容（例如精煉建議） */
+  children?: ReactNode;
 }) {
   const set = SET_BY_ID[rune.set];
   const gradeClass = rune.grade >= 5 ? "legendary" : rune.grade === 4 ? "hero" : rune.grade === 3 ? "rare" : "";
@@ -354,6 +357,7 @@ export function RuneCard({
           <div className="bar" style={{ height: 4 }}><i style={{ width: `${Math.min(100, Math.max(0, eff))}%` }} /></div>
         </div>
       )}
+      {children && <div className="rune-extra">{children}</div>}
     </div>
   );
 }

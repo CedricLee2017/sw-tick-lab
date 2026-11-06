@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Hammer, Search } from "lucide-react";
 import { MONSTER_MAP, useStore } from "../store";
 import { SET_BY_ID } from "../lib/constants";
-import { EmptyState, NumberInput, setColor } from "../components/ui";
+import { EmptyState, NumberInput, RuneCard } from "../components/ui";
 import {
   GRIND_ACCEPT_LEVELS,
   GRIND_PROFILES,
@@ -42,14 +42,21 @@ function TargetCard({
   showAccept,
   showScore,
   targetScore,
+  locked,
+  excluded,
+  onToggleLock,
+  onToggleExclude,
 }: {
   t: GrindTarget;
   accept: GrindAccept;
   showAccept: boolean;
   showScore: boolean;
   targetScore: number;
+  locked: boolean;
+  excluded: boolean;
+  onToggleLock: () => void;
+  onToggleExclude: () => void;
 }) {
-  const set = SET_BY_ID[t.rune.set];
   const gain = t.effAfter - t.effNow;
   const plan = showScore ? planScore(t, targetScore) : [];
   const planGain = plan.reduce((s, x) => s + x.gain, 0);
@@ -57,42 +64,29 @@ function TargetCard({
     (r) => !r.startsWith("裝備於") && r !== "未裝備" && !r.endsWith("符文") && !r.startsWith("效率"),
   );
   return (
-    <div className="card card-pad grind-card">
-      <div className="row between wrap" style={{ gap: 8 }}>
-        <div className="row" style={{ gap: 10, minWidth: 0 }}>
-          <div className="grind-badge" style={{ borderColor: setColor(t.rune.set) }}>
-            <b className="mono">{t.rune.slot}</b>
-            <span>+{t.rune.level}</span>
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: 13.5 }}>
-              {set?.name ?? "?"} · {t.rune.slot} 號{" "}
-              <span className="tiny dim">{"★".repeat(Math.max(1, t.rune.grade))} +{t.rune.level}</span>
-            </div>
-            <div className="tiny dim" style={{ marginTop: 2 }}>
-              主屬 {grindStatLabel(t.rune.main.t)} +{t.rune.main.v}
-              {grindStatSuffix(t.rune.main.t)} · 效率 {Math.round(t.effNow)}% · {t.owner ?? "未裝備"}
-            </div>
-          </div>
-        </div>
-        <div className="row wrap" style={{ gap: 6 }}>
-          <span className="chip muted" title="遊戲內符文分數（副屬性＋固有屬性，含精煉）">
-            ◆ {t.gameScore}
+    <RuneCard
+      rune={t.rune}
+      owner={t.owner ?? undefined}
+      locked={locked}
+      excluded={excluded}
+      onToggleLock={onToggleLock}
+      onToggleExclude={onToggleExclude}
+    >
+      <div className="row wrap" style={{ gap: 6 }}>
+        {showScore ? (
+          <span className="chip gold" title="全部可精煉屬性精煉到上限後的分數">
+            可達 {t.maxGameScore}
           </span>
-          {showScore ? (
-            <span className="chip gold" title={`全部可精煉屬性精煉到上限後的分數`}>
-              可達 {t.maxGameScore}
-            </span>
-          ) : (
-            <span className={`chip ${t.tier === "high" ? "gold" : "muted"}`}>
-              {t.tier === "high" ? "優先" : t.tier === "mid" ? "可考慮" : "暫緩"} {t.score}
-            </span>
-          )}
-        </div>
+        ) : (
+          <span className={`chip ${t.tier === "high" ? "gold" : "muted"}`}>
+            {t.tier === "high" ? "優先" : t.tier === "mid" ? "可考慮" : "暫緩"} {t.score}
+          </span>
+        )}
+        <span className="chip muted" title="目前符文效率">效率 {Math.round(t.effNow)}%</span>
       </div>
 
       {showAccept && (
-        <div className="row wrap" style={{ gap: 6, marginTop: 9 }}>
+        <div className="row wrap" style={{ gap: 6 }}>
           <span className="chip gold" title="速度副屬性（含精煉）＋ 速度 prefix">
             速度 {t.speed}
           </span>
@@ -115,7 +109,7 @@ function TargetCard({
 
       {showScore && (
         <>
-          <div className="tiny" style={{ lineHeight: 1.7, marginTop: 8 }}>
+          <div className="tiny" style={{ lineHeight: 1.7 }}>
             <span className="gold">遊戲分數 {t.gameScore}</span>
             <span className="dim"> · 精煉後最高 {t.maxGameScore} 分</span>
             {t.gameScore >= targetScore ? (
@@ -174,12 +168,17 @@ function TargetCard({
         </>
       )}
       {extra.length > 0 && <div className="tiny dim">{extra.join(" · ")}</div>}
-    </div>
+    </RuneCard>
   );
 }
 
 export default function GrindPage() {
   const account = useStore((s) => s.account);
+  const lockedRunes = useStore((s) => s.settings.lockedRunes);
+  const excludedRunes = useStore((s) => s.settings.excludedRunes);
+  const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
+  const lockedSet = useMemo(() => new Set(lockedRunes), [lockedRunes]);
+  const excludedSet = useMemo(() => new Set(excludedRunes), [excludedRunes]);
   const [profile, setProfile] = useState<GrindProfile>("speed");
   const [accept, setAccept] = useState<GrindAccept>(10);
   const [targetScore, setTargetScore] = useState(250);
@@ -483,6 +482,10 @@ export default function GrindPage() {
                 showAccept={profile === "speed"}
                 showScore={profile === "score"}
                 targetScore={targetScore}
+                locked={lockedSet.has(t.rune.id)}
+                excluded={excludedSet.has(t.rune.id)}
+                onToggleLock={() => toggleRuneFlag("locked", t.rune.id)}
+                onToggleExclude={() => toggleRuneFlag("excluded", t.rune.id)}
               />
             ))}
           </div>

@@ -426,6 +426,7 @@ p { margin: 0; }
 .rune-slot { font-size: 10.5px; color: var(--muted-2); font-weight: 700; letter-spacing: .06em; }
 .rune-main { font-size: 13px; font-weight: 800; color: var(--gold); }
 .rune-sub { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; font-size: 11.5px; color: var(--muted); }
+.rune-extra { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 8px; }
 .rune-sub b { color: #cfdcf7; font-weight: 600; }
 .rune-sub .g { color: var(--green); font-size: 10.5px; }
 .rune.legendary { border-color: rgba(255, 200, 90, .28); }
@@ -1101,14 +1102,6 @@ p { margin: 0; }
 
 /* ── 精煉建議 ─────────────────────────────────────── */
 .grind-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
-.grind-card { display: flex; flex-direction: column; gap: 9px; }
-.grind-badge {
-  width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line);
-  background: rgba(11, 17, 32, .7); display: flex; flex-direction: column;
-  align-items: center; justify-content: center; line-height: 1.15; flex: 0 0 auto;
-}
-.grind-badge b { font-size: 15px; }
-.grind-badge span { font-size: 9px; color: var(--muted); }
 .grind-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
 .grind-opt {
   border: 1px solid var(--line-soft); border-radius: 8px; padding: 7px 9px;
