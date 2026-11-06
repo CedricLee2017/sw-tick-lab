@@ -3,7 +3,7 @@ import { X, Lock, Unlock, Ban, Droplet, Flame, Wind, Sun, Moon } from "lucide-re
 import { ELEMENTS, SET_BY_ID, STAT_TYPES, type StatKey } from "../lib/constants";
 import { monsterOf } from "../store";
 import type { Artifact, Monster, Rune, Stats } from "../lib/types";
-import type { BaseStats } from "../lib/stats";
+import { runeScore, type BaseStats } from "../lib/stats";
 import { artifactKindText, artifactMainText, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
 import { tickInfo } from "../lib/optimizer";
 
@@ -266,6 +266,7 @@ export function RuneCard({
   const stars = ["", "★", "★★", "★★★", "★★★★", "★★★★★", "★★★★★★"][rune.grade] ?? "";
   const showSubs = !compact || detail;
   const eff = Math.round(rune.eff);
+  const score = runeScore(rune);
   return (
     <div
       className={`rune ${gradeClass} ${detail ? "detail" : ""} ${excluded ? "excluded" : ""} ${locked ? "locked" : ""}`}
@@ -307,6 +308,9 @@ export function RuneCard({
               <Ban size={11} />
             </button>
           )}
+          <span className="rune-slot" title="遊戲內符文分數（副屬性＋固有屬性，含精煉）">
+            ◆ {score}
+          </span>
           <span className="rune-slot">+{rune.level}</span>
         </div>
       </div>
@@ -345,6 +349,7 @@ export function RuneCard({
         <div className="rune-meta">
           <div className="rune-meta-row"><span>符文 ID</span><b className="mono">{rune.id}</b></div>
           <div className="rune-meta-row"><span>原裝備</span><b title={owner || "未裝備"}>{owner || "未裝備"}</b></div>
+          <div className="rune-meta-row"><span>遊戲分數</span><b className="gold">◆ {score}</b></div>
           <div className="rune-meta-row"><span>效率</span><b className="gold">{eff}%</b></div>
           <div className="bar" style={{ height: 4 }}><i style={{ width: `${Math.min(100, Math.max(0, eff))}%` }} /></div>
         </div>

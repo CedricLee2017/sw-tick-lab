@@ -7,14 +7,14 @@
  * 暴擊率、暴擊傷害、效果命中、效果抵抗不能用磨石（要用寶石）。
  */
 import { SET_BY_ID, STAT_TYPES } from "./constants";
-import { runeEfficiency } from "./stats";
+import { runeEfficiency, runeScoreRaw, scoreOfStat } from "./stats";
 import type { Rune } from "./types";
 
-export type GrindProfile = "speed" | "balanced" | "damage" | "tank" | "support";
+export type GrindProfile = "speed" | "score" | "damage" | "tank" | "support";
 
 export const GRIND_PROFILES: { key: GrindProfile; label: string; desc: string }[] = [
   { key: "speed", label: "速度優先", desc: "PVP 搶一速：速度最優先，其次體力% / 防禦%" },
-  { key: "balanced", label: "均衡", desc: "速度、生存與輸出平均發展" },
+  { key: "score", label: "分數", desc: "輸入目標分數，列出精煉後能達標的符文與精煉方式" },
   { key: "damage", label: "輸出", desc: "攻擊% / 暴擊 / 暴傷為主，速度次之" },
   { key: "tank", label: "坦度", desc: "體力% / 防禦% 為主，適合坦隊與據點戰" },
   { key: "support", label: "輔助", desc: "速度、體力%、防禦% 與效果命中" },
@@ -32,7 +32,7 @@ export const GRIND_ACCEPT_LEVELS: { value: GrindAccept; label: string; hint: str
 /** 可精煉副屬性的權重（type id → 0~100） */
 const WEIGHTS: Record<GrindProfile, Record<number, number>> = {
   speed: { 8: 100, 2: 44, 6: 38, 4: 28, 1: 4, 3: 3, 5: 3 },
-  balanced: { 8: 70, 2: 55, 6: 50, 4: 45, 1: 6, 3: 5, 5: 5 },
+  score: { 8: 100, 2: 75, 6: 75, 4: 75, 1: 1, 3: 10, 5: 10 },
   damage: { 8: 55, 4: 70, 2: 20, 6: 18, 1: 3, 3: 3, 5: 3 },
   tank: { 8: 45, 2: 82, 6: 78, 4: 14, 1: 10, 5: 7, 3: 3 },
   support: { 8: 88, 2: 58, 6: 55, 4: 18, 1: 5, 5: 4, 3: 3 },
@@ -41,7 +41,7 @@ const WEIGHTS: Record<GrindProfile, Record<number, number>> = {
 /** 判斷「這顆符文有幾條好副屬性」用的權重（含不能精煉的屬性） */
 const SUB_VALUE_WEIGHTS: Record<GrindProfile, Record<number, number>> = {
   speed: { 8: 100, 2: 50, 6: 45, 4: 35, 9: 35, 10: 25, 11: 15, 12: 20, 1: 3, 3: 3, 5: 3 },
-  balanced: { 8: 70, 2: 55, 6: 50, 4: 45, 9: 40, 10: 40, 11: 25, 12: 25, 1: 5, 3: 4, 5: 4 },
+  score: { 8: 100, 9: 100, 10: 86, 2: 75, 6: 75, 4: 75, 11: 75, 12: 75, 1: 3, 3: 3, 5: 3 },
   damage: { 8: 55, 4: 70, 9: 60, 10: 65, 2: 20, 6: 18, 11: 10, 12: 10, 1: 3, 3: 3, 5: 3 },
   tank: { 8: 45, 2: 82, 6: 78, 11: 35, 12: 25, 4: 14, 9: 15, 10: 15, 1: 8, 3: 3, 5: 6 },
   support: { 8: 88, 2: 58, 6: 55, 12: 45, 11: 40, 4: 18, 9: 15, 10: 15, 1: 5, 3: 3, 5: 4 },
@@ -71,7 +71,7 @@ export const GRIND_STONE_MAX: Record<number, { magic: number; rare: number; hero
 
 const PROFILE_SETS: Record<GrindProfile, number[]> = {
   speed: [3, 15, 13],
-  balanced: [13, 15, 3],
+  score: [13, 15, 3],
   damage: [5, 4, 8, 13],
   tank: [1, 2, 16, 13],
   support: [13, 15, 6, 7],
@@ -188,6 +188,10 @@ export interface GrindTarget {
   subScores: SubScoreInfo[];
   /** 可精煉副屬性中最低的分數（沒有可評分項目時為 null） */
   acceptScore: number | null;
+  /** 目前遊戲內符文分數 */
+  gameScore: number;
+  /** 全部可精煉屬性都精煉到傳說上限後的遊戲分數 */
+  maxGameScore: number;
 }
 
 export interface GrindFilter {
@@ -197,6 +201,8 @@ export interface GrindFilter {
   stat?: number | number[] | null;
   /** 速度優先模式：只留下未達此接受程度的符文 */
   accept?: GrindAccept;
+  /** 分數模式：只留下精煉後能達到此分數的符文 */
+  targetScore?: number;
 }
 
 const GRADE_FACTOR = [0, 0.35, 0.5, 0.68, 0.82, 0.92, 1];
@@ -264,6 +270,11 @@ export function analyzeRune(
   const acceptScore = scoredGrindable.length ? Math.min(...scoredGrindable.map((s) => s.score)) : null;
   const speed = runeSpeed(rune);
 
+  const gameScoreRaw = runeScoreRaw(rune);
+  let maxGameScoreRaw = gameScoreRaw;
+  // 只計算畫面上實際可用的精煉選項（會受屬性篩選影響）
+  for (const o of options) maxGameScoreRaw += o.headroom * scoreOfStat(o.t, 1);
+
   const effNow = rune.eff;
   const effAfter = runeEfficiency(
     { ...rune, subs: rune.subs.map((s) => (s.t === best.t ? { ...s, g: best.maxGrind } : s)) },
@@ -308,7 +319,69 @@ export function analyzeRune(
     speed,
     subScores,
     acceptScore,
+    gameScore: Math.round(gameScoreRaw),
+    maxGameScore: Math.round(maxGameScoreRaw),
   };
+}
+
+export interface ScorePlanStep {
+  t: number;
+  label: string;
+  suffix: string;
+  /** 副屬性目前數值（不含精煉） */
+  base: number;
+  /** 目前精煉值 */
+  from: number;
+  /** 要精煉到的值 */
+  to: number;
+  /** 這一步能增加的分數 */
+  gain: number;
+  /** 至少需要的磨石等級 */
+  grade: string;
+}
+
+/**
+ * 計算「要到達目標分數，最少要精煉哪幾條、各加到多少」。
+ * 依每點數值的分數效益由高到低分配（速度 3.33／暴傷 2.86／體攻防% 2.5…）。
+ */
+export function planScore(target: GrindTarget, targetScore: number): ScorePlanStep[] {
+  let need = targetScore - target.gameScore;
+  if (need <= 0) return [];
+  const candidates = target.options
+    .filter((o) => o.headroom > 0)
+    .map((o) => ({ o, per: scoreOfStat(o.t, 1) }))
+    .filter((c) => c.per > 0)
+    .sort((a, b) => b.per - a.per);
+
+  const steps: ScorePlanStep[] = [];
+  for (const { o, per } of candidates) {
+    if (need <= 0) break;
+    const add = Math.min(o.headroom, Math.ceil(need / per - 1e-9));
+    if (add <= 0) continue;
+    const to = o.grind + add;
+    const stone = GRIND_STONE_MAX[o.t];
+    const grade = !stone
+      ? "—"
+      : to <= stone.magic
+        ? "魔法"
+        : to <= stone.rare
+          ? "稀有"
+          : to <= stone.hero
+            ? "英雄"
+            : "傳說";
+    steps.push({
+      t: o.t,
+      label: o.label,
+      suffix: o.suffix,
+      base: o.current,
+      from: o.grind,
+      to,
+      gain: add * per,
+      grade,
+    });
+    need -= add * per;
+  }
+  return steps;
 }
 
 /** 分析全部符文；速度優先模式依「未達接受程度 → 符文速度」排序 */
@@ -331,6 +404,23 @@ export function analyzeGrind(runes: Rune[], filter: GrindFilter): GrindTarget[] 
           b.rune.grade - a.rune.grade ||
           b.effNow - a.effNow,
       );
+  }
+  // 分數：只留下精煉後能達到目標分數的符文；先列還未達標的，再列已達標的
+  if (filter.profile === "score") {
+    const targetScore = filter.targetScore ?? 0;
+    return out
+      .filter((t) => t.maxGameScore >= targetScore)
+      .sort((a, b) => {
+        const aMet = a.gameScore >= targetScore ? 1 : 0;
+        const bMet = b.gameScore >= targetScore ? 1 : 0;
+        return (
+          aMet - bMet ||
+          b.gameScore - a.gameScore ||
+          b.maxGameScore - a.maxGameScore ||
+          b.rune.grade - a.rune.grade ||
+          b.effNow - a.effNow
+        );
+      });
   }
   out.sort((a, b) => b.rawScore - a.rawScore || b.rune.grade - a.rune.grade || b.effNow - a.effNow);
   return out;

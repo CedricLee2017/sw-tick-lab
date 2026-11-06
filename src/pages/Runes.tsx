@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Gem, Search, X } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
 import { RUNE_SETS, SET_BY_ID, STAT_TYPES } from "../lib/constants";
+import { runeScore } from "../lib/stats";
 import { Modal, RuneCard, fmt, setColor, statText } from "../components/ui";
 import type { Rune } from "../lib/types";
 
@@ -20,7 +21,7 @@ export default function RunesPage() {
   const [onlyLocked, setOnlyLocked] = useState(false);
   const [onlyExcluded, setOnlyExcluded] = useState(false);
   const [minEff, setMinEff] = useState(0);
-  const [sort, setSort] = useState<"eff" | "grade" | "spd" | "slot">("eff");
+  const [sort, setSort] = useState<"eff" | "score" | "grade" | "spd" | "slot">("eff");
   const [take, setTake] = useState(150);
   const [detail, setDetail] = useState<Rune | null>(null);
 
@@ -49,6 +50,7 @@ export default function RunesPage() {
     });
     arr = arr.sort((a, b) => {
       if (sort === "eff") return b.eff - a.eff;
+      if (sort === "score") return runeScore(b) - runeScore(a) || b.eff - a.eff;
       if (sort === "grade") return b.grade - a.grade || b.eff - a.eff;
       if (sort === "slot") return a.slot - b.slot || b.eff - a.eff;
       const sa = a.subs.find((s) => s.t === 8)?.v ?? 0;
@@ -91,6 +93,7 @@ export default function RunesPage() {
             </select>
             <select className="select" style={{ width: 120 }} value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
               <option value="eff">效率排序</option>
+              <option value="score">遊戲分數排序</option>
               <option value="spd">速度排序</option>
               <option value="grade">星級排序</option>
               <option value="slot">位置排序</option>
@@ -154,6 +157,7 @@ export default function RunesPage() {
               <div className="kv"><span className="k">套裝</span><span className="v">{SET_BY_ID[detail.set]?.name}（{SET_BY_ID[detail.set]?.pieces} 件）</span></div>
               <div className="kv"><span className="k">位置</span><span className="v">#{detail.slot}</span></div>
               <div className="kv"><span className="k">星級 / 等級</span><span className="v">{detail.grade}★ +{detail.level}</span></div>
+              <div className="kv"><span className="k">遊戲分數</span><span className="v gold">◆ {runeScore(detail)}</span></div>
               <div className="kv"><span className="k">效率</span><span className="v gold">{detail.eff.toFixed(1)}%</span></div>
               <div className="kv"><span className="k">主屬性</span><span className="v">{statText(detail.main.t, detail.main.v)}</span></div>
               {detail.prefix.t > 0 && <div className="kv"><span className="k">固有屬性</span><span className="v">{statText(detail.prefix.t, detail.prefix.v)}</span></div>}

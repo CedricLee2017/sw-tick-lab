@@ -71,6 +71,56 @@ export function runeEfficiency(rune: Rune, includeGrind = false): { current: num
   return { current: max > 0 ? (cur / max) * 100 : 0, max: 100 };
 }
 
+/**
+ * 遊戲內符文分數（社群反推公式，與遊戲顯示的「◆ 分數」一致）。
+ *
+ * 每條副屬性／固有屬性先除以該屬性的 6★ 上限，固定值再乘 0.35：
+ *   體攻防% / 命中 / 抵抗 → 40
+ *   速度 / 暴擊率 → 30
+ *   暴擊傷害 → 35
+ *   固定體力 → 1875；固定攻擊 / 防禦 → 100
+ *
+ * 不含主屬性與套裝效果；副屬性與固有屬性都計入，含精煉。
+ */
+const SCORE_DIVISOR: Record<number, number> = {
+  2: 40, // 體力%
+  4: 40, // 攻擊力%
+  6: 40, // 防禦力%
+  9: 40, // 暴擊率
+  11: 40, // 效果抵抗
+  12: 40, // 效果命中
+  8: 30, // 速度
+  10: 35, // 暴擊傷害
+  1: 1875, // 固定體力
+  3: 100, // 固定攻擊
+  5: 100, // 固定防禦
+};
+
+const SCORE_FLAT_TYPES = new Set([1, 3, 5]);
+
+/** 固定值在遊戲分數中的權重 */
+export const RUNE_SCORE_FLAT_WEIGHT = 0.35;
+
+/** 單一屬性數值對應的遊戲分數（未四捨五入） */
+export function scoreOfStat(t: number, value: number): number {
+  const divisor = SCORE_DIVISOR[t];
+  if (!divisor) return 0;
+  return (value / divisor) * 100 * (SCORE_FLAT_TYPES.has(t) ? RUNE_SCORE_FLAT_WEIGHT : 1);
+}
+
+/** 遊戲分數的原始值（未四捨五入） */
+export function runeScoreRaw(rune: Rune, includeGrind = true): number {
+  let total = 0;
+  for (const s of rune.subs) total += scoreOfStat(s.t, s.v + (includeGrind ? (s.g ?? 0) : 0));
+  if (rune.prefix?.t) total += scoreOfStat(rune.prefix.t, rune.prefix.v);
+  return total;
+}
+
+/** 遊戲內符文分數（四捨五入到整數） */
+export function runeScore(rune: Rune, includeGrind = true): number {
+  return Math.round(runeScoreRaw(rune, includeGrind));
+}
+
 export interface StatAccum {
   flatHp: number;
   flatAtk: number;
