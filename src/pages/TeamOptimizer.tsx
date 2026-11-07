@@ -17,7 +17,7 @@ import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
 import { loadSkillData, skillsForMonster, type DamageOptions, type Skill, type SkillData } from "../lib/damage";
 import { autoAssignRoles, roleSetup, type RoleUnit } from "../lib/teamRoles";
-import { computeFollowPlan, leadBonus, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
+import { battleSpeedForPanelExtra, computeFollowPlan, leadBonus, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
 import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply,
   type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
@@ -1008,12 +1008,18 @@ export default function TeamOptimizerPage() {
       }
 
       const min: Partial<Record<StatKey, number>> = { ...m.min };
-      // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度與隊長技以外的額外速度」
-      const panelSpd =
+      // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度與隊長技以外的額外速度」。
+      // 引擎的 min.spd 比對的是戰鬥速度（含圖騰 / 隊長 / 速度強化），
+      // 因此先把面板額外速度換算成戰鬥速度，否則圖騰 / Buff 會把不足的速度補掉。
+      const battleSpdMin =
         m.speedMode !== "tick" && m.panelExtra > 0
-          ? v.base.spd + leadBonus(v.base.spd, leadPctOf(i)) + m.panelExtra
+          ? battleSpeedForPanelExtra(
+              v.base.spd,
+              m.panelExtra,
+              bonus.towerSpd + leadPctOf(i) + bonus.buffSpd,
+            )
           : 0;
-      if (panelSpd > 0) min.spd = panelSpd;
+      if (battleSpdMin > 0) min.spd = battleSpdMin;
       else if (m.speedMode === "tick" && m.tick > 0) min.spd = speedForTick(m.tick, rta);
       else delete min.spd;
 
@@ -1569,8 +1575,8 @@ export default function TeamOptimizerPage() {
                       onChange={(e) => updateMember(i, { panelExtra: Math.max(0, Number(e.target.value) || 0) })}
                       title={
                         v
-                          ? `基礎速度 ${v.base.spd} + 隊長技 ${leadBonus(v.base.spd, leadPctOf(i))} + 額外速度；例如要 391 就輸入 ${Math.max(0, 391 - v.base.spd - leadBonus(v.base.spd, leadPctOf(i)))}`
-                          : "輸入基礎速度與隊長技以外的額外速度"
+                          ? `基礎速度 ${v.base.spd} + 隊長技 ${leadBonus(v.base.spd, leadPctOf(i))} + 額外速度；例如要 391 就輸入 ${Math.max(0, 391 - v.base.spd - leadBonus(v.base.spd, leadPctOf(i)))}。下限以「額外速度」為準，速度圖騰 / 強化會另外計入戰鬥速度。`
+                          : "輸入基礎速度與隊長技以外的額外速度（下限以此為準）"
                       }
                     />
                   </label>
@@ -2144,7 +2150,7 @@ export default function TeamOptimizerPage() {
                       </div>
                       <RuneBoard
                         runes={runes}
-                        renderRune={(r) => <RuneCard rune={r} compact owner={monsterLabel(m.master)} />}
+                        renderRune={(r) => <RuneCard rune={r} owner={monsterLabel(m.master)} />}
                       />
                     </div>
                   </div>

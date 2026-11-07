@@ -65,6 +65,28 @@ export function panelExtraFor(baseSpd: number, totalSpd: number, leadPct = 0): n
 }
 
 /**
+ * 「面板額外速度」下限 → 配符引擎比較用的戰鬥速度下限。
+ *
+ * 一鍵配隊的面板速度欄位輸入的是「基礎速度與隊長技以外的額外速度」，
+ * 但 optimizer 的 `min.spd` 是拿戰鬥速度比較（會再加上速度圖騰、隊長技與速度強化）。
+ * 若直接把面板數字丟給引擎，圖騰 / Buff 會把不足的速度補掉，
+ * 造成「設定 +200 速，結果只有 +191 速」。
+ *
+ * 這裡用與 `finalizeStats` 相同的公式換算：
+ *   戰鬥速度 = 基礎速度 + 額外速度 + ceil(基礎速度 × (圖騰 + 隊長 + 強化)%)
+ */
+export function battleSpeedForPanelExtra(
+  baseSpd: number,
+  extra: number,
+  bonusPct: number,
+): number {
+  const base = Math.max(0, finite(baseSpd));
+  const add = Math.max(0, finite(extra));
+  const pct = Math.max(0, finite(bonusPct));
+  return base + add + Math.ceil((base * pct) / 100);
+}
+
+/**
  * 依 Buff 起始 Tick 計算第 n 個 Tick 的等效攻擊條進度（未乘上每 Tick %）。
  * 起始 Tick 之前的 Tick 不受速度強化影響；之後每 Tick 多 buff%。
  * 例如 buffStart=5、buff=30%、n=6 → 6 + 0.3 × 1 = 6.3 個 Tick 的進度。

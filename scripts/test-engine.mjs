@@ -41,7 +41,7 @@ const {
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
   computeFollowPlan, mirrorTimeline, followSpeedAgainstOpponent, opponentAttackBar,
-  panelSpeed, panelExtraFor, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost,
+  panelSpeed, panelExtraFor, battleSpeedForPanelExtra, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
   autoAssignRoles, roleSetup, hasAtbBoost,
@@ -1612,6 +1612,38 @@ check("topK 模式只回傳前 K 組，且依目標分數排序", () => {
   assert.equal(objectiveOf(res.topBuilds[0].stats, "spd"), res.topBuilds[0].stats.spd);
 });
 
+check("topK：先滿足速度下限，再依目標（綜合）排序", () => {
+  // 面板額外 40 速；沒有圖騰 / 隊長 / 強化時，戰鬥速度下限就是 100 + 40。
+  const minSpd = battleSpeedForPanelExtra(100, 40, 0);
+  const res = optimize({
+    base: { hp: 12000, atk: 700, def: 600, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 },
+    runes: teamRuneList,
+    required: [],
+    min: { spd: minSpd },
+    max: {},
+    bonus: teamBonus,
+    pool: 7,
+    allowEquipped: true,
+    targetUnit: 0,
+    rta: false,
+    maxNodes: 400_000,
+    topK: 5,
+    objective: "support",
+  });
+  assert.equal(res.topBuilds.length, 5);
+  for (const b of res.topBuilds) {
+    assert.ok(b.stats.spd >= minSpd, `速度 ${b.stats.spd} 低於下限 ${minSpd}`);
+    assert.ok(b.stats.panelSpd - 100 >= 40, `面板額外速度只有 ${b.stats.panelSpd - 100}`);
+  }
+  for (let i = 1; i < res.topBuilds.length; i++) {
+    assert.ok(
+      objectiveOf(res.topBuilds[i - 1].stats, "support") >=
+        objectiveOf(res.topBuilds[i].stats, "support"),
+      "符合下限後應依綜合目標由高到低排序",
+    );
+  }
+});
+
 check("隊長技只影響速度目標（leadSpd 逐隻帶入）", () => {
   const noLead = planOf(optimizeTeam(teamReq(1, { members: [mkTeamMember(900, { role: "speed" })] })));
   const withLead = planOf(
@@ -1747,6 +1779,16 @@ check("一鍵配隊：角色預設配裝", () => {
       `${role}＝迅速＋刀刃、速傷攻、暴率 100%`,
     );
   }
+});
+
+check("面板速度下限換算：圖騰 / 隊長 / 強化會另外計入戰鬥速度", () => {
+  // 一鍵配隊的「面板速度（額外）」下限：使用者輸入 200 就是要符文多 200 速，
+  // 不能讓速度圖騰 / 隊長 / Buff 把不足的符文速度補掉。
+  assert.equal(battleSpeedForPanelExtra(100, 200, 0), 300);
+  assert.equal(battleSpeedForPanelExtra(100, 200, 15), 315);
+  assert.equal(battleSpeedForPanelExtra(60, 200, 15), 269); // 60 × 15% = 9 → 269
+  assert.equal(battleSpeedForPanelExtra(111, 230, 45), 391); // 隊長 30 + 圖騰 15
+  assert.equal(battleSpeedForPanelExtra(100, 0, 15), 115);
 });
 
 check("接速：面板速度與速度強化倍率", () => {

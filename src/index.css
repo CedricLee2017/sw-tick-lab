@@ -1050,7 +1050,7 @@ p { margin: 0; }
 .team-member-stats { min-width: 0; }
 .stat-rows-flat { margin-top: 0; }
 .team-member-runes { min-width: 0; }
-.team-member-runes .rune-hex { --rune-stagger: 30px; gap: 8px; padding: 0; max-width: 720px; }
+.team-member-runes .rune-hex { gap: 8px; padding: 0; max-width: 720px; }
 .team-member-artifacts {
   margin-top: 10px;
   border-top: 1px dashed var(--line-soft);
