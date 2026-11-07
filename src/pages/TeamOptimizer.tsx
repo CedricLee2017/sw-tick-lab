@@ -308,6 +308,28 @@ export default function TeamOptimizerPage() {
   const [importDeckSetup, setImportDeckSetup] = useState(true);
   /** 鏡像對手（防守提條角）速度；0 = 自動使用起手速度 */
   const [oppSpd, setOppSpd] = useState(saved?.oppSpd ?? 0);
+  /** 手機版：展開中的隊員設定（桌機一律全部顯示） */
+  const [openMembers, setOpenMembers] = useState<Set<number>>(() => new Set([0]));
+  /** 手機版：展開中的配隊結果（以 unitId 為 key） */
+  const [openResults, setOpenResults] = useState<Set<number>>(() => new Set());
+  /** 手機版：接速檢查是否展開 */
+  const [openFollow, setOpenFollow] = useState(false);
+
+  const toggleMemberOpen = (index: number) =>
+    setOpenMembers((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+
+  const toggleResultOpen = (unitId: number) =>
+    setOpenResults((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) next.delete(unitId);
+      else next.add(unitId);
+      return next;
+    });
 
   /** 玩家自訂的預設定位 */
   const presets = useRolePresets((s) => s.presets);
@@ -1158,6 +1180,14 @@ export default function TeamOptimizerPage() {
       }
       setPlan(out.plan);
       setAltIndex(0);
+      setOpenResults(new Set(out.plan.members.slice(0, 1).map((m) => m.unitId)));
+      // 手機版：按下配隊後收合設定、直接帶到結果，省掉再往下滑一長段
+      if (window.matchMedia("(max-width: 820px)").matches) {
+        setOpenMembers(new Set());
+        window.setTimeout(() => {
+          document.getElementById("team-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 80);
+      }
       done();
     };
     worker.onerror = (ev) => {
@@ -1262,7 +1292,7 @@ export default function TeamOptimizerPage() {
           <div className="card-title row" style={{ gap: 7 }}>
             <Zap size={15} className="gold" /> 一鍵配隊
           </div>
-          <div className="card-sub">
+          <div className="card-sub team-page-sub">
             每隊 3～5 隻、最多 3 隊（合計 15 隻），再一次配好所有隊伍的符文；同一顆符文不會重複分配給兩隻魔靈。RTA 用 1 隊 5 隻，混沌 PVE 可用 2～3 隊。
           </div>
         </div>
@@ -1270,6 +1300,24 @@ export default function TeamOptimizerPage() {
           <button type="button" className="btn btn-sm" onClick={() => setDeckOpen(true)}>
             <Layers size={13} /> 從儲存庫載入
           </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={run}
+            disabled={running || members.some((m) => !m.unitId)}
+            title="不用滑到頁面底部，直接開始配隊"
+          >
+            {running ? <Loader2 size={13} className="spin" /> : <Wand2 size={13} />} 開始配隊
+          </button>
+          {activePlan && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => document.getElementById("team-result")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              <Check size={13} /> 看結果
+            </button>
+          )}
           <span className="chip gold">符文衝突 0</span>
           <span className="chip muted">隊長技：速度</span>
           <span className="chip muted">{rta ? "RTA Tick 1.5%" : "一般 Tick 7%"}</span>
@@ -1281,7 +1329,7 @@ export default function TeamOptimizerPage() {
         <div className="row between wrap" style={{ gap: 10 }}>
           <div>
             <div className="card-title row" style={{ gap: 7 }}><Layers size={14} className="gold" /> 隊型</div>
-            <div className="tiny dim" style={{ marginTop: 3, maxWidth: 620 }}>{template.desc}</div>
+            <div className="tiny dim team-template-desc" style={{ marginTop: 3, maxWidth: 620 }}>{template.desc}</div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
             <span className="tiny dim">隊伍數</span>
@@ -1336,11 +1384,11 @@ export default function TeamOptimizerPage() {
             {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => <option key={k} value={k}>預算：{BUDGETS[k].label}（{BUDGETS[k].hint}）</option>)}
           </select>
         </div>
-        <div className="tiny dim" style={{ marginTop: 6 }}>
+        <div className="tiny dim team-help" style={{ marginTop: 6 }}>
           自訂隊型會保存這台裝置的第一隊設定（定位稱呼、出手順序、套裝 3×2／主屬性、面板速度或 Tick、面板下限、目標技能）；不綁定魔靈，套用時再選隊員。
         </div>
 
-        <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
+        <div className="row wrap team-help" style={{ gap: 8, marginTop: 8 }}>
           <span className="tiny" style={{ color: "var(--gold, #f2c65c)" }}>
             速度隊長技 % 改成每隊各自設定（在下方每一隊的標題列），每隻也能在卡片上個別覆寫，留空 = 跟隨該隊。
           </span>
@@ -1404,9 +1452,21 @@ export default function TeamOptimizerPage() {
                     <div className="tiny dim">{m.title}</div>
                   </div>
                 </div>
-                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPickerIndex(i)}>
-                  <Search size={12} /> {v ? "更換" : "選擇"}
-                </button>
+                <div className="row" style={{ gap: 6 }}>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPickerIndex(i)}>
+                    <Search size={12} /> {v ? "更換" : "選擇"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost team-collapse-toggle"
+                    aria-expanded={openMembers.has(i)}
+                    onClick={() => toggleMemberOpen(i)}
+                    title={openMembers.has(i) ? "收合這隻的設定" : "展開這隻的設定"}
+                  >
+                    {openMembers.has(i) ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    {openMembers.has(i) ? "收合" : "設定"}
+                  </button>
+                </div>
               </div>
 
               {v && (
@@ -1437,6 +1497,7 @@ export default function TeamOptimizerPage() {
                 </div>
               )}
 
+              <div className={`team-member-fields ${openMembers.has(i) ? "open" : ""}`}>
               <div className="team-fields">
                 <label>
                   <span>定位</span>
@@ -1790,6 +1851,7 @@ export default function TeamOptimizerPage() {
                 </div>
               )}
               </div>
+              </div>
             </Fragment>
           );
         })}
@@ -1803,7 +1865,7 @@ export default function TeamOptimizerPage() {
             <div className="card-title row" style={{ gap: 7 }}>
               <Gauge size={14} className="gold" /> 接速：鏡像防守檢查
             </div>
-            <div className="tiny dim" style={{ marginTop: 3, maxWidth: 780 }}>
+            <div className="tiny dim team-follow-desc" style={{ marginTop: 3, maxWidth: 780 }}>
               提條角先出手後，對手的防守提條角仍會繼續累積攻擊條（可以溢出 100%）。只要接速成員在輪到它的 Tick 攻擊條高過對手，就不會被插隊；攻擊條相同時進攻方先動。預設對手＝和你起手同速的鏡像防守。提條與速度強化都在起手之後才生效。
             </div>
           </div>
@@ -1825,9 +1887,19 @@ export default function TeamOptimizerPage() {
             <button type="button" className="btn btn-sm" onClick={applyAllFollow}>
               <Gauge size={12} /> 全部套用接速
             </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost team-collapse-toggle"
+              aria-expanded={openFollow}
+              onClick={() => setOpenFollow((v) => !v)}
+            >
+              {openFollow ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {openFollow ? "收合檢查" : "展開檢查"}
+            </button>
           </div>
         </div>
 
+        <div className={`team-follow-body ${openFollow ? "open" : ""}`}>
         {followInfo.map((info, t) => (
           <div key={t} className={teams > 1 ? "team-follow" : undefined}>
             {teams > 1 && (
@@ -1968,6 +2040,7 @@ export default function TeamOptimizerPage() {
             </div>
           </div>
         ))}
+        </div>
       </div>
 
       {/* 供給檢查 + 執行 */}
@@ -2020,7 +2093,7 @@ export default function TeamOptimizerPage() {
       )}
 
       {activePlan && (
-        <div className="card card-pad team-result" style={{ marginTop: 14 }}>
+        <div id="team-result" className="card card-pad team-result" style={{ marginTop: 14 }}>
           <div className="row between wrap" style={{ gap: 8 }}>
             <div>
               <div className="card-title row" style={{ gap: 7 }}>
@@ -2054,6 +2127,25 @@ export default function TeamOptimizerPage() {
                   隊伍 {idx + 1}
                 </button>
               ))}
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost team-collapse-toggle"
+                onClick={() =>
+                  setOpenResults((prev) =>
+                    prev.size > 0 ? new Set() : new Set(activePlan.members.map((m) => m.unitId)),
+                  )
+                }
+              >
+                {openResults.size > 0 ? "收合全部" : "展開全部"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost team-collapse-toggle"
+                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                title="回到上面的隊伍設定"
+              >
+                ↑ 設定
+              </button>
             </div>
           </div>
 
@@ -2119,9 +2211,21 @@ export default function TeamOptimizerPage() {
                         </div>
                       </div>
                     </div>
-                    <TickBadge spd={m.stats.spd} rta={rta} />
+                    <div className="row" style={{ gap: 6 }}>
+                      <TickBadge spd={m.stats.spd} rta={rta} />
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost team-collapse-toggle"
+                        aria-expanded={openResults.has(m.unitId)}
+                        onClick={() => toggleResultOpen(m.unitId)}
+                      >
+                        {openResults.has(m.unitId) ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        {openResults.has(m.unitId) ? "收合" : "詳情"}
+                      </button>
+                    </div>
                   </div>
 
+                  <div className={`team-result-body ${openResults.has(m.unitId) ? "open" : ""}`}>
                   <div className="team-member-body">
                     <div className="team-member-stats">
                       <StatRows
@@ -2146,7 +2250,10 @@ export default function TeamOptimizerPage() {
                     <div className="team-member-runes">
                       <div className="rune-wheel-head">
                         <span className="rune-wheel-title">符文</span>
-                        <span className="tiny dim">{runes.length}/6 · 依遊戲位置 1 → 6</span>
+                        <span className="tiny dim">
+                          {runes.length}/6 · 依遊戲位置 1 → 6
+                          <span className="mobile-only"> · 左右滑動</span>
+                        </span>
                       </div>
                       <RuneBoard
                         runes={runes}
@@ -2171,6 +2278,7 @@ export default function TeamOptimizerPage() {
                     <button type="button" className="btn btn-sm btn-ghost" onClick={() => pinMember(m.unitId)} title="固定這隻的符文，重新配其他魔靈">
                       <Pin size={12} /> 固定這隻
                     </button>
+                  </div>
                   </div>
                 </div>
               );
@@ -2503,6 +2611,7 @@ export default function TeamOptimizerPage() {
               // 隊型指定的技能欄位（S1～S4）換成新魔靈對應的技能
               ...(prevMember?.objectiveMode === "skill" ? { skillId: slotSkill?.id ?? 0 } : {}),
             });
+            setOpenMembers(new Set([pickerIndex]));
             setPickerIndex(-1);
           }}
           onClose={() => setPickerIndex(-1)}

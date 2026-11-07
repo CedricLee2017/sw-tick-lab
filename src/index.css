@@ -1051,6 +1051,12 @@ p { margin: 0; }
 .stat-rows-flat { margin-top: 0; }
 .team-member-runes { min-width: 0; }
 .team-member-runes .rune-hex { gap: 8px; padding: 0; max-width: 720px; }
+/* 手機版折疊：桌機一律顯示，收合按鈕只在窄螢幕出現 */
+.team-collapse-toggle,
+.mobile-only { display: none; }
+.team-member-fields { display: flex; flex-direction: column; gap: 8px; }
+.team-result-body,
+.team-follow-body { display: block; }
 .team-member-artifacts {
   margin-top: 10px;
   border-top: 1px dashed var(--line-soft);
@@ -1067,6 +1073,53 @@ p { margin: 0; }
 @media (max-width: 820px) {
   .team-fields { grid-template-columns: 1fr; }
   .team-result-grid { grid-template-columns: 1fr; }
+}
+
+/* ── 一鍵配隊：手機版（縮短頁面長度） ─────────────── */
+@media (max-width: 820px) {
+  .team-page-sub,
+  .team-template-desc,
+  .team-help { display: none; }
+  .team-collapse-toggle { display: inline-flex; align-items: center; gap: 3px; }
+  .mobile-only { display: inline; }
+
+  .team-member-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .team-member { padding: 10px; }
+  .team-member-fields { display: none; }
+  .team-member-fields.open { display: flex; }
+  .team-result-body,
+  .team-follow-body { display: none; }
+  .team-result-body.open { display: block; }
+  .team-follow-body.open { display: block; }
+  .team-follow-desc { display: none; }
+
+  /* 兩欄輸入比單欄短很多；數值欄位仍夠寬 */
+  .team-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .team-fields > label > span { font-size: 10px; }
+  .team-fields .input,
+  .team-fields .select { padding: 6px 8px; font-size: 12px; }
+  .team-fields .select { padding-right: 22px; }
+
+  .team-result-member { padding: 9px; }
+  .team-member-body { margin-top: 8px; }
+
+  /* 符文改成橫向滑動，一張一張看完整副屬性，不再往下疊 6 張 */
+  .team-member-runes .rune-hex {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 0 6px;
+    max-width: none;
+  }
+  .team-member-runes .rune-hex-cell {
+    flex: 0 0 min(78%, 270px);
+    scroll-snap-align: start;
+  }
+  .team-member-runes .rune-hex-cell[data-slot] { margin-top: 0 !important; }
+  .team-member-runes .rune { min-width: 0; }
 }
 
 .mobile-nav { display: none; }
