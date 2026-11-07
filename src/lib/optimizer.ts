@@ -409,6 +409,17 @@ interface Cand {
   idx: number;
 }
 
+/** 合併重複的套裝需求（例如三個 2 件套同套裝 → 6 件） */
+export function normalizeRequiredSets(
+  required: { set: number; count: number }[],
+): { set: number; count: number }[] {
+  const map = new Map<number, number>();
+  for (const r of required) {
+    if (r.set > 0 && r.count > 0) map.set(r.set, (map.get(r.set) ?? 0) + r.count);
+  }
+  return [...map.entries()].map(([set, count]) => ({ set, count }));
+}
+
 export function optimize(req: OptRequest): OptResult {
   const t0 = Date.now();
   const {
@@ -447,7 +458,7 @@ export function optimize(req: OptRequest): OptResult {
   /** 焦點契合度對最終分數的加分上限（只用來小幅調整同分排序） */
   const FOCUS_BONUS = 2;
 
-  const allRequired = required.filter((r) => r.count > 0);
+  const allRequired = normalizeRequiredSets(required);
   const requiredSets = relaxSub ? allRequired.filter((r) => r.count >= 4) : allRequired;
   const softIds = new Set(relaxSub ? allRequired.filter((r) => r.count < 4).map((r) => r.set) : []);
   const requiredIds = new Set(requiredSets.map((r) => r.set));
@@ -961,7 +972,7 @@ export function maxSpeedBound(req: {
   includeRunes?: number[];
   lockedRunes?: number[];
 }): { speed: number; panelSpeed: number; tick: number; perSlot: number[]; missingSlots: number[] } {
-  const requiredSets = req.required.filter((r) => (req.relaxSub ? r.count >= 4 : r.count > 0));
+  const requiredSets = normalizeRequiredSets(req.required).filter((r) => (req.relaxSub ? r.count >= 4 : r.count > 0));
   const requiredTotal = requiredSets.reduce((s, r) => s + r.count, 0);
   const strict = requiredSets.length > 0 && requiredTotal >= 6;
   const ids = new Set(requiredSets.map((r) => r.set));

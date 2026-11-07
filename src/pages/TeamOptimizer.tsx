@@ -1,14 +1,15 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Gauge, Layers, Loader2, Lock, Pin, Save, Search,
+  AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Gauge, Layers, Loader2, Lock, Pin, Plus, Save, Search,
   Shirt, Trash2, Users, Wand2, Zap,
 } from "lucide-react";
-import { monsterLabel, useStore, type DeckFav } from "../store";
+import { monsterLabel, useStore, type DeckFav, type DeckFavUnit } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
 import { MonsterIcon, Modal, NumberInput, RuneCard, RuneBoard, StatRows, TickBadge, fmt, ArtifactCard } from "../components/ui";
 import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPicker";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
-import { setSummary, speedForTick } from "../lib/stats";
+import { setSummary, speedForTick, statsForRunes } from "../lib/stats";
+import { deckSetupFromRunes } from "../lib/deckSetup";
 import {
   DECK_CONTEXT_LABEL, deckContext, type DeckContext,
 } from "../lib/deckSpeed";
@@ -21,7 +22,8 @@ import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply,
   type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
 } from "../lib/teamOptimizer";
-import { TEAM_TEMPLATES, teamTemplateOf, templateMembers, type TeamMemberTemplate } from "../lib/teamTemplates";
+import { TEAM_TEMPLATES, teamTemplateOf, templateMembers, type TeamMemberTemplate, type TeamTemplate } from "../lib/teamTemplates";
+import { useTeamPresets } from "../lib/teamPresets";
 import { useRolePresets, type RolePreset } from "../lib/rolePresets";
 import type { FocusEntry } from "../lib/types";
 
@@ -36,6 +38,17 @@ const OBJECTIVE_LABELS: Record<ObjectiveMode, string> = {
   tank: "坦度 EHP",
   support: "綜合",
   score: "符文評分",
+};
+
+const MIN_LABELS: Record<StatKey, string> = {
+  hp: "體力",
+  atk: "攻擊",
+  def: "防禦",
+  spd: "速度",
+  cr: "暴率",
+  cd: "暴傷",
+  res: "抵抗",
+  acc: "命中",
 };
 
 /** 技能傷害目標固定使用的傷害選項（只用來排序，與實際對手無關） */
@@ -84,10 +97,16 @@ interface MemberDraft {
   objectiveMode: ObjectiveMode;
   /** 技能傷害目標的技能 id；0 = 自動選最後一招（通常是 S3） */
   skillId: number;
+  /** 技能傷害目標的技能欄位（S1～S4）；0 = 沒有指定，套用隊型時用來跨魔靈對應技能 */
+  skillSlot: number;
   /** 4 件套；0 = 不指定 */
   set4: number;
-  /** 2 件套；0 = 不指定 */
+  /** 2 件套（第一組）；0 = 不指定 */
   set2: number;
+  /** 2 件套（第二組）；set4 = 0 時可用來組 3×2 */
+  set2b: number;
+  /** 2 件套（第三組）；set4 = 0 時可用來組 3×2 */
+  set2c: number;
   mains: Partial<Record<number, number>>;
   min: Partial<Record<StatKey, number>>;
   /** 目標 Tick；0 = 不限（只在「目標 Tick」模式生效） */
@@ -148,22 +167,27 @@ const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
 };
 
 function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
+  const set4 = t.sets.find((s) => s.count >= 4)?.set ?? 0;
+  const twos = t.sets.filter((s) => s.set > 0 && s.count < 4);
   return {
     unitId,
     role: t.role,
     title: t.title,
     weight: t.weight,
-    priority: 0,
-    objectiveMode: "role",
+    priority: t.priority ?? 0,
+    objectiveMode: t.objective ?? "role",
     skillId: 0,
-    set4: t.sets.find((s) => s.count >= 4)?.set ?? 0,
-    set2: t.sets.find((s) => s.count < 4)?.set ?? 0,
+    skillSlot: t.skillSlot ?? 0,
+    set4,
+    set2: twos[0]?.set ?? 0,
+    set2b: set4 ? 0 : twos[1]?.set ?? 0,
+    set2c: set4 ? 0 : twos[2]?.set ?? 0,
     mains: { ...t.mains },
     min: { ...t.min },
     tick: t.tick,
-    // 面板速度與目標 Tick 二選一，預設面板速度（模板的 Tick 保留在欄位裡，切換後即可使用）
-    speedMode: "panel",
-    panelExtra: 0,
+    // 面板速度與目標 Tick 二選一；隊型可指定要哪一種
+    speedMode: t.speedMode === "tick" ? "tick" : "panel",
+    panelExtra: t.panelExtra ?? 0,
     order: t.order ?? 1,
     boostPct: t.boostPct ?? 0,
     speedBuff: t.speedBuff ?? false,
@@ -209,7 +233,7 @@ function loadSaved(): SavedState | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const v = JSON.parse(raw) as Partial<SavedState> & { leadPct?: number };
-    const templateId = TEAM_TEMPLATES.some((t) => t.id === v.templateId) ? (v.templateId as string) : "guild-speed";
+    const templateId = typeof v.templateId === "string" && v.templateId ? v.templateId : "guild-speed";
     const size: Size = v.size === 4 || v.size === 5 ? v.size : 3;
     const teams: TeamCount = v.teams === 2 || v.teams === 3 ? v.teams : 1;
     const content: DeckContext = CONTEXTS.includes(v.content as DeckContext) ? (v.content as DeckContext) : "guild";
@@ -280,6 +304,8 @@ export default function TeamOptimizerPage() {
   const [pickerIndex, setPickerIndex] = useState(-1);
   const [deckOpen, setDeckOpen] = useState(false);
   const [pinDeckRunes, setPinDeckRunes] = useState(false);
+  /** 從預設隊載入時，把目前的套裝、主屬性與面板下限一起帶入 */
+  const [importDeckSetup, setImportDeckSetup] = useState(true);
   /** 鏡像對手（防守提條角）速度；0 = 自動使用起手速度 */
   const [oppSpd, setOppSpd] = useState(saved?.oppSpd ?? 0);
 
@@ -291,9 +317,30 @@ export default function TeamOptimizerPage() {
   const removeRolePreset = useRolePresets((s) => s.remove);
   const [presetModal, setPresetModal] = useState<{ index: number; name: string } | null>(null);
 
+  /** 玩家自訂的隊型（存在這台裝置的 IndexedDB） */
+  const customTemplates = useTeamPresets((s) => s.templates);
+  const teamPresetsReady = useTeamPresets((s) => s.ready);
+  const hydrateTeamPresets = useTeamPresets((s) => s.hydrate);
+  const saveTeamPreset = useTeamPresets((s) => s.save);
+  const removeTeamPreset = useTeamPresets((s) => s.remove);
+  const [teamPresetModal, setTeamPresetModal] = useState<{ name: string; desc: string } | null>(null);
+
   useEffect(() => {
     void hydratePresets();
-  }, [hydratePresets]);
+    void hydrateTeamPresets();
+  }, [hydratePresets, hydrateTeamPresets]);
+
+  const allTemplates = useMemo<TeamTemplate[]>(
+    () => [...TEAM_TEMPLATES, ...customTemplates],
+    [customTemplates],
+  );
+  const templateOf = (id: string) => allTemplates.find((t) => t.id === id) ?? teamTemplateOf(id);
+
+  // 自訂隊型被刪除（或換裝置）時，回到內建自訂隊型，避免下拉選單空白
+  useEffect(() => {
+    if (!teamPresetsReady) return;
+    if (!allTemplates.some((t) => t.id === templateId)) setTemplateId("custom");
+  }, [teamPresetsReady, allTemplates, templateId]);
 
   // 預設定位被刪除時，正在使用它的成員回到內建定位（要等讀取完成才判斷，避免誤清）
   useEffect(() => {
@@ -316,7 +363,8 @@ export default function TeamOptimizerPage() {
   /** 技能下拉選單用（與 skillRef 同步） */
   const [skillData, setSkillData] = useState<SkillData | null>(null);
 
-  const template = teamTemplateOf(templateId);
+  const template = templateOf(templateId);
+  const activeCustomTemplate = customTemplates.find((t) => t.id === templateId);
   const budget = BUDGETS[budgetKey];
 
   // 換帳號時清掉舊結果與已不存在的魔靈（上符只會改 account，不會改 importedAt）
@@ -407,6 +455,8 @@ export default function TeamOptimizerPage() {
         weight: setup.weight,
         set4: setup.set4,
         set2: setup.set2,
+        set2b: 0,
+        set2c: 0,
         mains: { ...setup.mains },
         min: { ...setup.min },
         tick: setup.tick,
@@ -429,10 +479,37 @@ export default function TeamOptimizerPage() {
       .join("、");
 
   const applyTemplate = async (id: string, nextSize?: Size) => {
-    const t = teamTemplateOf(id);
+    const t = templateOf(id);
+    const isCustom = customTemplates.some((c) => c.id === id);
     const s = nextSize ?? size;
     const slots = templateMembers(t, s);
     const skills = await ensureSkills();
+
+    /** 自訂隊型以使用者設定的定位、順序與配裝為準，只保留自動判定的隊長技 */
+    const mergeCustomMember = (m: MemberDraft, d: MemberDraft): MemberDraft => ({
+      ...m,
+      role: d.role,
+      presetId: undefined,
+      title: d.title,
+      weight: d.weight,
+      priority: d.priority,
+      set4: d.set4,
+      set2: d.set2,
+      set2b: d.set2b,
+      set2c: d.set2c,
+      mains: { ...d.mains },
+      min: { ...d.min },
+      tick: d.tick,
+      speedMode: d.speedMode,
+      panelExtra: d.panelExtra,
+      objectiveMode: d.objectiveMode,
+      skillId: d.skillId,
+      skillSlot: d.skillSlot,
+      order: d.order,
+      boostPct: d.boostPct,
+      speedBuff: d.speedBuff,
+      focus: d.focus.map((f) => ({ ...f })),
+    });
 
     const nextMembers: MemberDraft[] = [];
     const nextLead = [...leadPcts];
@@ -443,11 +520,17 @@ export default function TeamOptimizerPage() {
         const d = draftFromTemplate(tm, existing?.unitId ?? 0);
         // 神器速度增加效果是跟著魔靈走的，換隊型時保留已自動帶入的數值
         if (existing?.unitId && existing.unitId === d.unitId) d.artifactPct = existing.artifactPct;
+        // 隊型指定技能欄位時，依目前選到的魔靈換算成實際技能 id
+        if (d.unitId && d.skillSlot && skills) {
+          const v = viewOf(d.unitId);
+          const sk = v ? skillsForMonster(skills, v.monster.id).find((x) => x.slot === d.skillSlot) : undefined;
+          if (sk) d.skillId = sk.id;
+        }
         return d;
       });
       const auto = withAutoRoles(drafts, t.content, slots.map((tm) => tm.role), skills);
       if (auto) {
-        nextMembers.push(...auto.members);
+        nextMembers.push(...auto.members.map((m, k) => (isCustom ? mergeCustomMember(m, drafts[k]) : m)));
         nextLead[team] = auto.leadPct;
       } else {
         nextMembers.push(...drafts);
@@ -471,7 +554,7 @@ export default function TeamOptimizerPage() {
   /** 改變隊數 / 每隊人數：保留每一隊已選的魔靈，不足的用隊型預設補滿 */
   const changeShape = (nextTeams: TeamCount, nextSize: Size) => {
     const prevSize = size;
-    const defaults = templateMembers(teamTemplateOf(templateId), nextSize);
+    const defaults = templateMembers(templateOf(templateId), nextSize);
     setMembers((prev) => {
       const next: MemberDraft[] = [];
       for (let t = 0; t < nextTeams; t++) {
@@ -506,6 +589,20 @@ export default function TeamOptimizerPage() {
     notify(`已依技能安排第 ${team + 1} 隊的定位：${roleSummary(auto.members)}`);
   };
 
+  /** 從預設隊快照回推一鍵配隊的設定（套裝／主屬性／數值下限） */
+  const deckSetupOf = (v: UnitView, du: DeckFavUnit) => {
+    const runes = (du.runeIds ?? [])
+      .map((id) => runeMap.get(id))
+      .filter((r): r is NonNullable<typeof r> => !!r);
+    const artifactMap = new Map((account?.artifacts ?? []).map((a) => [a.id, a]));
+    const artifacts = (du.artifactIds ?? [])
+      .map((id) => artifactMap.get(id))
+      .filter((a): a is NonNullable<typeof a> => !!a);
+    // 用實戰數值（不含公會）當下限，和一鍵配隊引擎的比較基準一致
+    const stats = statsForRunes(v.base, runes, { ...bonus, leadSpd: 0, useGuild: false }, rta, true, artifacts);
+    return deckSetupFromRunes(runes, stats);
+  };
+
   /** 從預設隊儲存庫載入整隊（可選擇固定當時的符文），並依技能自動安排角色 */
   const loadDeck = async (d: DeckFav) => {
     if (!summary) return;
@@ -517,7 +614,7 @@ export default function TeamOptimizerPage() {
     const byMaster = new Map<number, UnitView>();
     for (const v of summary.views) if (!byMaster.has(v.monster.id)) byMaster.set(v.monster.id, v);
 
-    const t = teamTemplateOf(templateId);
+    const t = templateOf(templateId);
     const slots = templateMembers(t, nextSize);
     let matched = 0;
     const next = slots.map((tm, i) => {
@@ -542,24 +639,39 @@ export default function TeamOptimizerPage() {
     const ctx = d.type === 0 ? content : deckContext(d.type);
     const skills = await ensureSkills();
     const auto = withAutoRoles(next, ctx, slots.map((tm) => tm.role), skills);
+    const leadPct = auto?.leadPct ?? 0;
+
+    const finalMembers = (auto ? auto.members : next).map((m, i) => {
+      if (!importDeckSetup) return m;
+      const v = m.unitId ? byUnit.get(m.unitId) : undefined;
+      const du = deckUnits[i];
+      if (!v || !du) return m;
+      const setup = deckSetupOf(v, du);
+      return {
+        ...m,
+        set4: setup.set4,
+        set2: setup.set2,
+        set2b: setup.set2b,
+        set2c: setup.set2c,
+        mains: setup.mains,
+        min: setup.min,
+      };
+    });
 
     setSize(nextSize);
     setTeams(1);
     setContent(ctx);
-    setLeadPcts((prev) => [auto?.leadPct ?? prev[0], prev[1], prev[2]]);
-    if (auto) {
-      setMembers(auto.members);
-    } else {
-      setMembers(next);
-    }
+    setLeadPcts((prev) => [leadPct, prev[1], prev[2]]);
+    setMembers(finalMembers);
     setPlan(null);
     setError(null);
     setDeckOpen(false);
     const roleText = auto
-      ? `；自動角色：${roleSummary(auto.members)}${auto.leadPct > 0 ? `（速度隊長技 +${auto.leadPct}%）` : ""}`
+      ? `；自動角色：${roleSummary(finalMembers)}${leadPct > 0 ? `（速度隊長技 +${leadPct}%）` : ""}`
       : "";
+    const setupText = importDeckSetup ? "；已帶入套裝、主屬性與數值下限" : "";
     notify(
-      `已載入${deckTypeLabel(d.type)}第 ${d.seq} 隊（${matched} 隻${d.units.length > 5 ? "，超過 5 隻只取前 5 隻" : ""}${matched < deckUnits.length ? `，${deckUnits.length - matched} 隻不在目前帳號` : ""}）${roleText}`,
+      `已載入${deckTypeLabel(d.type)}第 ${d.seq} 隊（${matched} 隻${d.units.length > 5 ? "，超過 5 隻只取前 5 隻" : ""}${matched < deckUnits.length ? `，${deckUnits.length - matched} 隻不在目前帳號` : ""}）${roleText}${setupText}`,
       matched < deckUnits.length ? "err" : "ok",
     );
   };
@@ -599,7 +711,7 @@ export default function TeamOptimizerPage() {
 
   /** 手動改到定位相關的欄位時，視為偏離原本的預設定位 */
   const PRESET_FIELDS: (keyof MemberDraft)[] = [
-    "role", "weight", "set4", "set2", "mains", "min", "tick", "focus", "objectiveMode", "speedMode",
+    "role", "weight", "set4", "set2", "set2b", "set2c", "mains", "min", "tick", "focus", "objectiveMode", "speedMode",
   ];
 
   const updateMember = (i: number, patch: Partial<MemberDraft>) => {
@@ -627,6 +739,8 @@ export default function TeamOptimizerPage() {
       weight: preset.weight,
       set4: preset.set4,
       set2: preset.set2,
+      set2b: preset.set2b ?? 0,
+      set2c: preset.set2c ?? 0,
       mains: { ...preset.mains },
       min: { ...preset.min },
       tick: preset.tick,
@@ -647,6 +761,8 @@ export default function TeamOptimizerPage() {
       weight: member.weight,
       set4: member.set4,
       set2: member.set2,
+      set2b: member.set2b,
+      set2c: member.set2c,
       mains: { ...member.mains },
       min: { ...member.min },
       tick: member.tick,
@@ -658,6 +774,61 @@ export default function TeamOptimizerPage() {
     updateMember(presetModal.index, { presetId: saved.id, title: saved.name });
     setPresetModal(null);
     notify(`已儲存定位「${saved.name}」，之後可從「定位」選單直接套用`);
+  };
+
+  /** 把目前這一隻的設定轉成可儲存的隊型成員 */
+  const memberToTemplate = (m: MemberDraft): TeamMemberTemplate => {
+    const v = m.unitId ? viewOf(m.unitId) : undefined;
+    const skills = v && skillData ? skillsForMonster(skillData, v.monster.id) : [];
+    const skillSlot =
+      m.skillSlot || (m.objectiveMode === "skill" ? skills.find((s) => s.id === m.skillId)?.slot ?? 0 : 0);
+    const twos = m.set4 ? [m.set2] : [m.set2, m.set2b, m.set2c];
+    return {
+      role: m.role,
+      title: m.title,
+      weight: m.weight,
+      sets: m.set4
+        ? [{ set: m.set4, count: 4 }, ...(m.set2 ? [{ set: m.set2, count: 2 }] : [])]
+        : twos.filter((id) => id > 0).map((set) => ({ set, count: 2 })),
+      mains: { ...m.mains },
+      min: { ...m.min },
+      tick: m.tick,
+      focus: m.focus.map((f) => ({ ...f })),
+      objective: m.objectiveMode === "role" ? undefined : m.objectiveMode,
+      order: m.order,
+      boostPct: m.boostPct,
+      speedBuff: m.speedBuff,
+      artifactPct: m.artifactPct,
+      speedMode: m.speedMode,
+      panelExtra: m.panelExtra,
+      skillSlot,
+      priority: m.priority,
+    };
+  };
+
+  /** 把目前第一隊的設定存成自訂隊型 */
+  const submitTeamPreset = () => {
+    if (!teamPresetModal) return;
+    const name = teamPresetModal.name.trim();
+    if (!name) return notify("請先輸入隊型名稱", "err");
+    const saved = saveTeamPreset({
+      name,
+      desc: teamPresetModal.desc.trim(),
+      size,
+      content,
+      members: members.slice(0, size).map(memberToTemplate),
+    });
+    if (!saved) return notify("隊型名稱不能空白", "err");
+    setTemplateId(saved.id);
+    setTeamPresetModal(null);
+    notify(`已儲存隊型「${saved.name}」（${size} 隻），之後可從隊型選單直接套用`, "ok");
+  };
+
+  const deleteTeamPreset = (id: string) => {
+    const t = customTemplates.find((c) => c.id === id);
+    removeTeamPreset(id);
+    if (templateId === id) setTemplateId("custom");
+    notify(`已刪除隊型「${t?.name ?? ""}」`);
   };
 
   /** 把這一隻提供的提條 % 與速度強化帶入「同一隊」後面出手的成員（來源自己不套用） */
@@ -826,8 +997,15 @@ export default function TeamOptimizerPage() {
       const v = viewOf(m.unitId);
       if (!v) return null;
       const sets: { set: number; count: number }[] = [];
-      if (m.set4) sets.push({ set: m.set4, count: 4 });
-      if (m.set2 && m.set2 !== m.set4) sets.push({ set: m.set2, count: 2 });
+      if (m.set4) {
+        sets.push({ set: m.set4, count: 4 });
+        if (m.set2 && m.set2 !== m.set4) sets.push({ set: m.set2, count: 2 });
+      } else {
+        // 4 件套不指定時，可用三個 2 件套組成 3×2；重複的套裝由引擎合併件數
+        if (m.set2) sets.push({ set: m.set2, count: 2 });
+        if (m.set2b) sets.push({ set: m.set2b, count: 2 });
+        if (m.set2c) sets.push({ set: m.set2c, count: 2 });
+      }
 
       const min: Partial<Record<StatKey, number>> = { ...m.min };
       // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度與隊長技以外的額外速度」
@@ -846,11 +1024,12 @@ export default function TeamOptimizerPage() {
         bySlot.set(r.slot, id);
       }
 
-      // 技能傷害目標：優先使用指定技能，否則自動選最後一招（通常是 S3）
+      // 技能傷害目標：優先使用指定技能；隊型用技能欄位（S1～S4）跨魔靈對應
       const skills = skillData ? skillsForMonster(skillData, v.monster.id) : [];
+      const slotSkill = m.skillSlot ? skills.find((s) => s.slot === m.skillSlot) : undefined;
       const skill =
         m.objectiveMode === "skill"
-          ? (skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills))
+          ? (slotSkill ?? skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills))
           : undefined;
 
       specs.push({
@@ -1117,14 +1296,42 @@ export default function TeamOptimizerPage() {
 
         <div className="row wrap form-selects" style={{ gap: 8, marginTop: 10 }}>
           <select className="select" style={{ minWidth: 300 }} value={templateId} onChange={(e) => void applyTemplate(e.target.value)}>
-            {TEAM_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            <optgroup label="內建隊型">
+              {TEAM_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </optgroup>
+            {customTemplates.length > 0 && (
+              <optgroup label="我的隊型">
+                {customTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </optgroup>
+            )}
           </select>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setTeamPresetModal({ name: "", desc: "" })}
+            title="把目前這一隊的定位稱呼、出手順序、套裝、速度條件與面板要求存成隊型"
+          >
+            <Plus size={12} /> 新增隊型
+          </button>
+          {activeCustomTemplate && (
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost btn-icon"
+              title={`刪除隊型「${activeCustomTemplate.name}」`}
+              onClick={() => deleteTeamPreset(activeCustomTemplate.id)}
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
           <select className="select" style={{ width: 180 }} value={content} onChange={(e) => { setContent(e.target.value as DeckContext); setPlan(null); }}>
             {(["arena", "guild", "dungeon"] as DeckContext[]).map((c) => <option key={c} value={c}>{DECK_CONTEXT_LABEL[c]}</option>)}
           </select>
           <select className="select" style={{ width: 170 }} value={budgetKey} onChange={(e) => setBudgetKey(e.target.value as BudgetKey)}>
             {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => <option key={k} value={k}>預算：{BUDGETS[k].label}（{BUDGETS[k].hint}）</option>)}
           </select>
+        </div>
+        <div className="tiny dim" style={{ marginTop: 6 }}>
+          自訂隊型會保存這台裝置的第一隊設定（定位稱呼、出手順序、套裝 3×2／主屬性、面板速度或 Tick、面板下限、目標技能）；不綁定魔靈，套用時再選隊員。
         </div>
 
         <div className="row wrap" style={{ gap: 8, marginTop: 8 }}>
@@ -1144,7 +1351,8 @@ export default function TeamOptimizerPage() {
           const isTeamStart = i === teamIndex * size;
           const laterCount = members.filter((x, j) => j !== i && Math.floor(j / size) === teamIndex && x.order > m.order).length;
           const skills = skillData && v ? skillsForMonster(skillData, v.monster.id) : [];
-          const effSkill = skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills);
+          const effSkill = (m.skillSlot ? skills.find((s) => s.slot === m.skillSlot) : undefined) ??
+            skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills);
           const appliedPreset = presets.find((p) => p.id === m.presetId);
           return (
             <Fragment key={i}>
@@ -1266,6 +1474,17 @@ export default function TeamOptimizerPage() {
                   </button>
                 </label>
                 <label>
+                  <span>定位稱呼</span>
+                  <input
+                    className="input"
+                    value={m.title}
+                    maxLength={20}
+                    placeholder="例如：一速打手"
+                    onChange={(e) => updateMember(i, { title: e.target.value })}
+                    title="顯示在卡片上的角色名稱；儲存自訂隊型時會一起保存"
+                  />
+                </label>
+                <label>
                   <span>權重</span>
                   <NumberInput className="input mono" min={1} max={10} value={m.weight} onChange={(v) => updateMember(i, { weight: Math.max(1, Math.min(10, v)) })} />
                 </label>
@@ -1300,7 +1519,10 @@ export default function TeamOptimizerPage() {
                     <select
                       className="select"
                       value={effSkill?.id ?? 0}
-                      onChange={(e) => updateMember(i, { skillId: Number(e.target.value) || 0 })}
+                      onChange={(e) => {
+                        const id = Number(e.target.value) || 0;
+                        updateMember(i, { skillId: id, skillSlot: skills.find((s) => s.id === id)?.slot ?? 0 });
+                      }}
                       disabled={skills.length === 0}
                       title={skills.length === 0 ? "技能資料載入中…" : "選擇要用來最大化的技能"}
                     >
@@ -1461,22 +1683,49 @@ export default function TeamOptimizerPage() {
                     <span>4 件套</span>
                     <select className="select" value={m.set4} onChange={(e) => {
                       const set4 = Number(e.target.value);
-                      updateMember(i, { set4, ...(set4 === m.set2 ? { set2: 0 } : {}) });
+                      updateMember(i, {
+                        set4,
+                        set2b: 0,
+                        set2c: 0,
+                        ...(set4 === m.set2 ? { set2: 0 } : {}),
+                      });
                     }}>
                       <option value={0}>不指定</option>
                       {FOUR_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </label>
-                  <label>
-                    <span>2 件套</span>
-                    <select className="select" value={m.set2} onChange={(e) => {
-                      const set2 = Number(e.target.value);
-                      updateMember(i, { set2, ...(set2 === m.set4 ? { set4: 0 } : {}) });
-                    }}>
-                      <option value={0}>不指定</option>
-                      {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </label>
+                  {m.set4 === 0 ? (
+                    <>
+                      {([
+                        ["set2", "2 件套 ①"],
+                        ["set2b", "2 件套 ②"],
+                        ["set2c", "2 件套 ③"],
+                      ] as const).map(([key, label]) => (
+                        <label key={key}>
+                          <span>{label}</span>
+                          <select
+                            className="select"
+                            value={m[key]}
+                            onChange={(e) => updateMember(i, { [key]: Number(e.target.value) })}
+                          >
+                            <option value={0}>不指定</option>
+                            {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          </select>
+                        </label>
+                      ))}
+                    </>
+                  ) : (
+                    <label>
+                      <span>2 件套</span>
+                      <select className="select" value={m.set2} onChange={(e) => {
+                        const set2 = Number(e.target.value);
+                        updateMember(i, { set2, ...(set2 === m.set4 ? { set4: 0 } : {}) });
+                      }}>
+                        <option value={0}>不指定</option>
+                        {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </label>
+                  )}
                   {([2, 4, 6] as number[]).map((slot) => (
                     <label key={slot}>
                       <span>{slot} 號主屬性</span>
@@ -1488,6 +1737,36 @@ export default function TeamOptimizerPage() {
                       }}>
                         {MAIN_OPTIONS[slot].map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
                       </select>
+                    </label>
+                  ))}
+                </div>
+                {m.set4 === 0 && (
+                  <div className="tiny dim" style={{ marginTop: 4 }}>
+                    4 件套選「不指定」時，可用 ①②③ 三個 2 件套組成 3×2（例如意志 ×3）；同一套裝可重複選。
+                  </div>
+                )}
+                <div className="tiny dim" style={{ marginTop: 8 }}>
+                  數值下限（0 = 不限；從預設隊載入時會自動帶入目前面板）
+                </div>
+                <div className="team-fields">
+                  {([
+                    ["hp", "體力"],
+                    ["atk", "攻擊"],
+                    ["def", "防禦"],
+                    ["cr", "暴率"],
+                    ["cd", "暴傷"],
+                    ["res", "抵抗"],
+                    ["acc", "命中"],
+                  ] as [StatKey, string][]).map(([key, label]) => (
+                    <label key={key}>
+                      <span>{label}下限</span>
+                      <NumberInput
+                        className="input mono"
+                        min={0}
+                        max={key === "cr" || key === "res" || key === "acc" ? 100 : 100000}
+                        value={m.min[key] ?? 0}
+                        onChange={(v) => patchMin(i, key, Math.max(0, v))}
+                      />
                     </label>
                   ))}
                 </div>
@@ -1969,8 +2248,13 @@ export default function TeamOptimizerPage() {
                       <div style={{ fontWeight: 600, fontSize: 12.5 }}>{p.name}</div>
                       <div className="tiny dim">
                         {TEAM_ROLE_LABELS[p.role]}
-                        {p.set4 ? ` · ${SET_BY_ID[p.set4]?.name ?? `#${p.set4}`} ×4` : ""}
-                        {p.set2 ? ` + ${SET_BY_ID[p.set2]?.name ?? `#${p.set2}`} ×2` : ""}
+                        {p.set4
+                          ? ` · ${SET_BY_ID[p.set4]?.name ?? `#${p.set4}`} ×4`
+                          : [p.set2, p.set2b, p.set2c]
+                              .filter((id): id is number => !!id)
+                              .map((id) => ` · ${SET_BY_ID[id]?.name ?? `#${id}`} ×2`)
+                              .join("")}
+                        {p.set4 && p.set2 ? ` + ${SET_BY_ID[p.set2]?.name ?? `#${p.set2}`} ×2` : ""}
                         {p.tick > 0 ? ` · Tick ${p.tick}` : ""}
                       </div>
                     </div>
@@ -2005,6 +2289,125 @@ export default function TeamOptimizerPage() {
         </Modal>
       )}
 
+      {/* 新增自訂隊型 */}
+      {teamPresetModal && (
+        <Modal title="新增自訂隊型" onClose={() => setTeamPresetModal(null)} width={640}>
+          <div className="st-modal-sec">
+            <div className="st-modal-label">隊型名稱</div>
+            <input
+              className="input"
+              value={teamPresetModal.name}
+              maxLength={24}
+              autoFocus
+              placeholder="例如：公會戰 雙提條一波"
+              onChange={(e) => setTeamPresetModal({ ...teamPresetModal, name: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submitTeamPreset();
+                }
+              }}
+            />
+            <div className="st-modal-label" style={{ marginTop: 10 }}>說明（選填）</div>
+            <input
+              className="input"
+              value={teamPresetModal.desc}
+              maxLength={80}
+              placeholder="例如：提條先手，打手打 S3"
+              onChange={(e) => setTeamPresetModal({ ...teamPresetModal, desc: e.target.value })}
+            />
+            <div className="tiny dim" style={{ marginTop: 8, lineHeight: 1.7 }}>
+              會儲存目前第 1 隊的 {size} 隻設定（定位稱呼、出手順序、套裝、主屬性、速度或 Tick、面板下限與目標技能）。
+              隊型不綁定魔靈，套用後再選隊員；同名隊型會直接覆寫。
+            </div>
+          </div>
+
+          <div className="st-modal-sec">
+            <div className="row between wrap" style={{ gap: 8 }}>
+              <div className="st-modal-label">隊型內容</div>
+              <span className="chip gold">第 1 隊 · {size} 隻</span>
+            </div>
+            <div className="col" style={{ gap: 6, marginTop: 8 }}>
+              {members.slice(0, size).map((m, i) => {
+                const setText = m.set4
+                  ? `${SET_BY_ID[m.set4]?.name ?? `#${m.set4}`} ×4${m.set2 ? ` + ${SET_BY_ID[m.set2]?.name ?? `#${m.set2}`} ×2` : ""}`
+                  : [m.set2, m.set2b, m.set2c]
+                      .filter((id): id is number => !!id)
+                      .map((id) => `${SET_BY_ID[id]?.name ?? `#${id}`} ×2`)
+                      .join(" + ") || "不限套裝";
+                const speedText =
+                  m.speedMode === "tick"
+                    ? `Tick ${m.tick || "不限"}`
+                    : m.panelExtra > 0
+                      ? `面板 +${m.panelExtra} 速`
+                      : "面板不限";
+                const minText = (Object.keys(m.min) as StatKey[])
+                  .filter((k) => (m.min[k] ?? 0) > 0)
+                  .map((k) => `${MIN_LABELS[k]} ${m.min[k]}`)
+                  .join(" · ");
+                const skillText =
+                  m.objectiveMode === "skill"
+                    ? `技能傷害${m.skillSlot ? `（S${m.skillSlot}）` : ""}`
+                    : OBJECTIVE_LABELS[m.objectiveMode];
+                return (
+                  <div key={i} className="row between wrap" style={{ gap: 8, fontSize: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <b>{i + 1}. {m.title || TEAM_ROLE_LABELS[m.role]}</b>
+                      <span className="tiny dim"> · 順序 {m.order} · {TEAM_ROLE_LABELS[m.role]}</span>
+                    </div>
+                    <div className="tiny dim" style={{ textAlign: "right" }}>
+                      {setText} · {speedText} · {skillText}{minText ? ` · 下限 ${minText}` : ""}
+                    </div>
+                    {m.objectiveMode === "skill" && (
+                      <label className="row" style={{ gap: 4 }}>
+                        <span className="tiny dim">技能</span>
+                        <select
+                          className="select"
+                          style={{ width: 90 }}
+                          value={m.skillSlot}
+                          onChange={(e) => {
+                            const slot = Number(e.target.value) || 0;
+                            const v = m.unitId ? viewOf(m.unitId) : undefined;
+                            const sk =
+                              v && skillData
+                                ? skillsForMonster(skillData, v.monster.id).find((s) => s.slot === slot)
+                                : undefined;
+                            updateMember(i, { skillSlot: slot, skillId: sk?.id ?? 0 });
+                          }}
+                          title="以傷害為目標時要最大化的技能（S1～S4）；換魔靈時會自動對應同一個技能欄位"
+                        >
+                          <option value={0}>自動</option>
+                          {[1, 2, 3, 4].map((s) => <option key={s} value={s}>S{s}</option>)}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="st-modal-sec">
+            <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setTeamPresetModal(null)}>取消</button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={!teamPresetModal.name.trim()}
+                onClick={submitTeamPreset}
+              >
+                <Save size={12} /> 儲存隊型
+              </button>
+            </div>
+            {teamPresetModal.name.trim() && customTemplates.some((t) => t.name === teamPresetModal.name.trim()) && (
+              <div className="tiny" style={{ marginTop: 6, color: "var(--gold)" }}>
+                已有同名隊型，儲存會覆寫它目前的內容。
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
       {/* 從預設隊儲存庫載入 */}
       {deckOpen && (
         <Modal title="從預設隊儲存庫載入" onClose={() => setDeckOpen(false)} width={820}>
@@ -2020,6 +2423,13 @@ export default function TeamOptimizerPage() {
               <input type="checkbox" checked={pinDeckRunes} onChange={(e) => setPinDeckRunes(e.target.checked)} />
               同時固定儲存庫中的符文（預設關閉，讓引擎重新分配）
             </label>
+            <label className="row tiny" style={{ gap: 6, marginTop: 6, cursor: "pointer" }}>
+              <input type="checkbox" checked={importDeckSetup} onChange={(e) => setImportDeckSetup(e.target.checked)} />
+              同時帶入目前的套裝、2/4/6 主屬性與數值下限（HP／攻擊／防禦／暴率／暴傷／抵抗／命中）
+            </label>
+            <div className="tiny dim" style={{ marginTop: 4 }}>
+              會依預設隊快照的符文回推；例如「意志＋保護＋保護」會自動帶入 3×2 套裝（保護×2＋意志×1）。下限會換算成實戰數值，確保新配裝的面板不低於目前；速度另外用面板速度／目標 Tick 設定，不會被覆寫。
+            </div>
           </div>
 
           <div className="st-modal-sec">
@@ -2072,6 +2482,11 @@ export default function TeamOptimizerPage() {
           onPick={(e) => {
             const unitId = Number(e.key);
             const picked = viewOf(unitId);
+            const prevMember = members[pickerIndex];
+            const pickedSkills = picked && skillData ? skillsForMonster(skillData, picked.monster.id) : [];
+            const slotSkill = prevMember?.skillSlot
+              ? pickedSkills.find((s) => s.slot === prevMember.skillSlot)
+              : undefined;
             updateMember(pickerIndex, {
               unitId,
               includeRunes: [],
@@ -2079,6 +2494,8 @@ export default function TeamOptimizerPage() {
               panelExtra: 0,
               // 自動帶入該魔靈神器上的「速度增加效果 +%」
               artifactPct: picked ? artifactSpeedBuffPct(picked.artifacts) : 0,
+              // 隊型指定的技能欄位（S1～S4）換成新魔靈對應的技能
+              ...(prevMember?.objectiveMode === "skill" ? { skillId: slotSkill?.id ?? 0 } : {}),
             });
             setPickerIndex(-1);
           }}

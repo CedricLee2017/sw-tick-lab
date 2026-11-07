@@ -14,6 +14,7 @@
 import type { StatKey } from "./constants";
 import {
   normalizeFocus,
+  normalizeRequiredSets,
   objectiveOf,
   optimize,
   type OptObjective,
@@ -211,7 +212,7 @@ export function teamSetsOf(
   }
   if (intangible) {
     let wild = sets[INTANGIBLE_ID] ?? 0;
-    for (const rs of required) {
+    for (const rs of normalizeRequiredSets(required)) {
       const have = sets[rs.set] ?? 0;
       if (have < rs.count && wild > 0 && rs.count - have === 1) {
         sets[rs.set] = have + 1;

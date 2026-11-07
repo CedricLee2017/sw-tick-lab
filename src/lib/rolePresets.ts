@@ -26,8 +26,12 @@ export interface RolePresetValues {
   weight: number;
   /** 4 件套；0 = 不指定 */
   set4: number;
-  /** 2 件套；0 = 不指定 */
+  /** 2 件套（第一組）；0 = 不指定 */
   set2: number;
+  /** 2 件套（第二組）；set4 = 0 時可用來組 3×2 */
+  set2b?: number;
+  /** 2 件套（第三組）；set4 = 0 時可用來組 3×2 */
+  set2c?: number;
   mains: Partial<Record<number, number>>;
   min: Partial<Record<StatKey, number>>;
   tick: number;
@@ -91,6 +95,8 @@ function cleanValues(values: RolePresetValues): RolePresetValues {
     weight: clampInt(values.weight, 1, 10, 10),
     set4: clampInt(values.set4, 0, 200, 0),
     set2: clampInt(values.set2, 0, 200, 0),
+    set2b: clampInt(values.set2b, 0, 200, 0),
+    set2c: clampInt(values.set2c, 0, 200, 0),
     mains,
     min,
     tick: clampInt(values.tick, 0, 20, 0),

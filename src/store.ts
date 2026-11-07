@@ -64,6 +64,8 @@ export interface Settings {
   excludedRunes: number[];
   /** 配符時固定要使用的符文 */
   includedRunes: number[];
+  /** 配神器時排除的神器（儲存庫可一鍵把整隻魔靈或整隊的神器排除） */
+  excludedArtifacts: number[];
 }
 
 export type RuneFlag = "locked" | "excluded" | "included";
@@ -82,6 +84,7 @@ const DEFAULT_SETTINGS = (): Settings => ({
   lockedRunes: [],
   excludedRunes: [],
   includedRunes: [],
+  excludedArtifacts: [],
 });
 
 const ACCOUNT_KEY = "swtick:account";
@@ -117,6 +120,8 @@ interface Store {
   toggleRuneFlag: (kind: RuneFlag, id: number) => void;
   /** 一次設定多顆符文的鎖定 / 排除 / 固定 */
   setRuneFlag: (kind: RuneFlag, ids: number[], on: boolean) => void;
+  /** 一次設定多件神器是否排除（配神器時不會選用） */
+  setArtifactExcluded: (ids: number[], on: boolean) => void;
   /** 將收藏配裝的符文「上符」到指定魔靈（只修改本工具的本機資料） */
   equipRunes: (unitId: number, runeIds: number[]) => number;
   /** 一次將整隊符文上符；同一顆符文只會分配給一隻魔靈 */
@@ -169,6 +174,7 @@ export const useStore = create<Store>((setState, getState) => ({
             lockedRunes: settings.lockedRunes ?? [],
             excludedRunes: settings.excludedRunes ?? [],
             includedRunes: settings.includedRunes ?? [],
+            excludedArtifacts: settings.excludedArtifacts ?? [],
           }
         : DEFAULT_SETTINGS();
       // 候選符文上限已改為 15 顆，舊設定若存了 18 要在載入時收斂
@@ -225,6 +231,7 @@ export const useStore = create<Store>((setState, getState) => ({
       lockedRunes: [],
       excludedRunes: [],
       includedRunes: [],
+      excludedArtifacts: [],
     };
     setState({
       account,
@@ -243,7 +250,7 @@ export const useStore = create<Store>((setState, getState) => ({
   },
 
   clearAccount: async () => {
-    const settings = { ...getState().settings, lockedRunes: [], excludedRunes: [], includedRunes: [] };
+    const settings = { ...getState().settings, lockedRunes: [], excludedRunes: [], includedRunes: [], excludedArtifacts: [] };
     setState({ account: null, runeMap: new Map(), settings });
     void set(SETTINGS_KEY, settings);
     await del(ACCOUNT_KEY);
@@ -291,6 +298,19 @@ export const useStore = create<Store>((setState, getState) => ({
     // include 與 exclude 互斥；鎖定則可與兩者並存
     if (kind === "included" && on) settings.excludedRunes = settings.excludedRunes.filter((id) => !ids.includes(id));
     if (kind === "excluded" && on) settings.includedRunes = settings.includedRunes.filter((id) => !ids.includes(id));
+    setState({ settings });
+    void set(SETTINGS_KEY, settings);
+  },
+
+  setArtifactExcluded: (ids, on) => {
+    if (ids.length === 0) return;
+    const settings = { ...getState().settings };
+    const next = new Set(settings.excludedArtifacts);
+    for (const id of ids) {
+      if (on) next.add(id);
+      else next.delete(id);
+    }
+    settings.excludedArtifacts = [...next];
     setState({ settings });
     void set(SETTINGS_KEY, settings);
   },
@@ -506,7 +526,7 @@ export const useStore = create<Store>((setState, getState) => ({
   },
 
   resetForNewAccount: async () => {
-    const settings = { ...getState().settings, lockedRunes: [], excludedRunes: [], includedRunes: [] };
+    const settings = { ...getState().settings, lockedRunes: [], excludedRunes: [], includedRunes: [], excludedArtifacts: [] };
     setState({ account: null, runeMap: new Map(), settings, loadouts: [], deckFavs: [] });
     void set(SETTINGS_KEY, settings);
     await Promise.all([del(ACCOUNT_KEY), del(LOADOUT_KEY), del(DECK_FAV_KEY)]);

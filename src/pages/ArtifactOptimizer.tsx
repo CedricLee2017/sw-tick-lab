@@ -78,6 +78,12 @@ export default function ArtifactOptimizerPage() {
   }, [monsterSkills, skillId]);
 
   const artifactMap = useMemo(() => new Map((account?.artifacts ?? []).map((a) => [a.id, a])), [account]);
+  /** 儲存庫標記為排除的神器不會進入配神器候選 */
+  const excludedArtifacts = useStore((s) => s.settings.excludedArtifacts ?? []);
+  const candidateArtifacts = useMemo(
+    () => (account?.artifacts ?? []).filter((a) => !excludedArtifacts.includes(a.id)),
+    [account, excludedArtifacts],
+  );
 
   /** 有選收藏配裝時用收藏的符文；否則用魔靈目前裝備 */
   const sourceRunes = useMemo(() => {
@@ -189,6 +195,9 @@ export default function ArtifactOptimizerPage() {
             <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
               <span className="chip muted">{sourceRunes.length}/6 符文</span>
               <span className="chip muted">目前神器 {currentArtifacts.length}/2</span>
+              {excludedArtifacts.length > 0 && (
+                <span className="chip muted" title="可在「儲存庫」解除排除">已排除 {excludedArtifacts.length} 件神器</span>
+              )}
               {saved && <span className="chip gold" title={saved.name}>使用收藏：{saved.name}</span>}
             </div>
             {saved && (
@@ -274,7 +283,7 @@ export default function ArtifactOptimizerPage() {
           bonus={{ ...settings.bonus, useGuild: dmgOpts.useGuild, grind: true }}
           rta={settings.rta}
           monster={monster!}
-          artifacts={account.artifacts}
+          artifacts={candidateArtifacts}
           skill={dmgSkill}
           dmgOpts={dmgOpts}
           autoRunKey={autoRunKey}

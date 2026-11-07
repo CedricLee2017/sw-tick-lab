@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bookmark, Layers, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
+import { Ban, Bookmark, Layers, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
 import { MONSTER_MAP, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary, baseStats } from "../lib/stats";
@@ -22,6 +22,8 @@ export default function BuildsPage() {
   const lockedRunes = useStore((s) => s.settings.lockedRunes);
   const excludedRunes = useStore((s) => s.settings.excludedRunes);
   const includedRunes = useStore((s) => s.settings.includedRunes);
+  const excludedArtifacts = useStore((s) => s.settings.excludedArtifacts ?? []);
+  const setArtifactExcluded = useStore((s) => s.setArtifactExcluded);
   const [open, setOpen] = useState<Loadout | null>(null);
   const [openDeck, setOpenDeck] = useState<DeckFav | null>(null);
 
@@ -35,6 +37,67 @@ export default function BuildsPage() {
     return m;
   }, [account]);
   const artifactMap = useMemo(() => new Map((account?.artifacts ?? []).map((a) => [a.id, a])), [account]);
+
+  /**
+   * 找出魔靈要排除的裝備：優先用儲存庫快照，快照沒有時才用目前裝備。
+   * 只保留目前帳號真的存在的符文 / 神器，避免舊資料把不存在的 id 寫進排除清單。
+   */
+  const unitEquipOf = (
+    unitId: number,
+    master: number,
+    snapshotRunes: number[] = [],
+    snapshotArtifacts: number[] = [],
+  ) => {
+    const current =
+      (unitId ? account?.units.find((u) => u.id === unitId) : undefined) ??
+      account?.units.find((u) => u.master === master);
+    const runes = (snapshotRunes.length > 0 ? snapshotRunes : current?.runes ?? []).filter((id) => runeMap.has(id));
+    const artifacts = (snapshotArtifacts.length > 0 ? snapshotArtifacts : current?.artifacts ?? []).filter((id) =>
+      artifactMap.has(id),
+    );
+    return { runes, artifacts };
+  };
+
+  const loadoutEquipOf = (l: Loadout) => ({
+    runes: l.runeIds.filter((id) => runeMap.has(id)),
+    artifacts: (l.unitId ? account?.units.find((u) => u.id === l.unitId)?.artifacts ?? [] : []).filter((id) =>
+      artifactMap.has(id),
+    ),
+  });
+
+  const deckEquipOf = (d: DeckFav) => {
+    const runes = new Set<number>();
+    const artifacts = new Set<number>();
+    for (const u of d.units) {
+      const eq = unitEquipOf(u.unitId, u.master, u.runeIds, u.artifactIds);
+      for (const id of eq.runes) runes.add(id);
+      for (const id of eq.artifacts) artifacts.add(id);
+    }
+    return { runes: [...runes], artifacts: [...artifacts] };
+  };
+
+  const allExcluded = (runes: number[], artifacts: number[]) =>
+    runes.length + artifacts.length > 0 &&
+    runes.every((id) => excludedRunes.includes(id)) &&
+    artifacts.every((id) => excludedArtifacts.includes(id));
+
+  /** 一鍵排除 / 解除排除：符文與神器一起處理 */
+  const toggleExclusion = (runes: number[], artifacts: number[], label: string) => {
+    if (runes.length + artifacts.length === 0) {
+      notify(`${label} 沒有可排除的符文或神器`, "err");
+      return;
+    }
+    const off = allExcluded(runes, artifacts);
+    setRuneFlag("excluded", runes, !off);
+    setArtifactExcluded(artifacts, !off);
+    const detail = `${runes.length} 顆符文 / ${artifacts.length} 件神器`;
+    notify(
+      off
+        ? `已解除 ${label} 的排除（${detail}）`
+        : `已排除 ${label} 的 ${detail}；配符與一鍵配隊不會再使用`,
+      "ok",
+    );
+  };
 
   /** 檢視配裝時用來顯示「基礎＋綠色加成」的魔靈與等級 */
   const openMonster = open ? MONSTER_MAP.get(open.monsterId) : undefined;
@@ -85,6 +148,15 @@ export default function BuildsPage() {
     notify(n > 0 ? `已解除 ${n} 顆符文的排除／包括限制` : "這組符文目前沒有排除／包括限制");
   };
 
+  /** 目前開啟的預設隊要排除的裝備（給詳細視窗的整隊按鈕用） */
+  const openDeckEquip = openDeck ? deckEquipOf(openDeck) : null;
+  const openDeckExcluded = openDeckEquip ? allExcluded(openDeckEquip.runes, openDeckEquip.artifacts) : false;
+  /** 目前開啟的配裝要排除的裝備 */
+  const openLoadoutEquip = open ? loadoutEquipOf(open) : null;
+  const openLoadoutExcluded = openLoadoutEquip
+    ? allExcluded(openLoadoutEquip.runes, openLoadoutEquip.artifacts)
+    : false;
+
   if (!account) return <div className="empty"><Bookmark size={40} /><div>尚未匯入存檔</div></div>;
 
   return (
@@ -118,12 +190,15 @@ export default function BuildsPage() {
           {sortedDecks.map((d) => {
             const runeCount = d.units.reduce((s, u) => s + u.runeIds.length, 0);
             const artifactCount = d.units.reduce((s, u) => s + u.artifactIds.length, 0);
+            const eq = deckEquipOf(d);
+            const off = allExcluded(eq.runes, eq.artifacts);
             return (
               <div key={d.id} className="card card-pad build-fav">
                 <div className="row between" style={{ gap: 8 }}>
                   <div className="row" style={{ gap: 6, minWidth: 0 }}>
                     <span className="chip gold">{deckTypeLabel(d.type)}</span>
                     <span className="tiny dim">第 {d.seq} 隊 · {d.units.length} 人</span>
+                    {off && <span className="chip muted">已排除</span>}
                   </div>
                   <span className="tiny dim">{new Date(d.createdAt).toLocaleDateString("zh-TW")}</span>
                 </div>
@@ -142,6 +217,13 @@ export default function BuildsPage() {
                 </div>
                 <div className="row" style={{ gap: 6, marginTop: 10 }}>
                   <button className="btn btn-sm btn-primary" onClick={() => setOpenDeck(d)}>查看</button>
+                  <button
+                    className={`btn btn-sm ${off ? "" : "btn-ghost"}`}
+                    title={off ? "解除整隊的符文與神器排除" : "排除整隊已裝備的符文與神器（配符與一鍵配隊不會使用）"}
+                    onClick={() => toggleExclusion(eq.runes, eq.artifacts, `第 ${d.seq} 隊`)}
+                  >
+                    {off ? <RotateCcw size={12} /> : <Ban size={12} />} {off ? "解除排除" : "一鍵排除"}
+                  </button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="刪除" style={{ marginLeft: "auto" }} onClick={() => removeDeckFav(d.id)}>
                     <Trash2 size={13} />
                   </button>
@@ -171,6 +253,8 @@ export default function BuildsPage() {
             const monster = MONSTER_MAP.get(l.monsterId);
             const runes = l.runeIds.map((id) => runeMap.get(id)).filter(Boolean);
             const sets = runes.reduce((m, r) => ({ ...m, [r!.set]: (m[r!.set] ?? 0) + 1 }), {} as Record<number, number>);
+            const eq = loadoutEquipOf(l);
+            const off = allExcluded(eq.runes, eq.artifacts);
             return (
               <div key={l.id} className="card card-pad build-fav">
                 <div className="row" style={{ gap: 10 }}>
@@ -181,6 +265,7 @@ export default function BuildsPage() {
                       {new Date(l.createdAt).toLocaleString("zh-TW")} · {runes.length}/6 符文
                     </div>
                   </div>
+                  {off && <span className="chip muted">已排除</span>}
                   <TickBadge spd={l.stats.spd} />
                 </div>
                 <div className="row wrap tiny" style={{ gap: 8, marginTop: 8, color: "var(--muted)" }}>
@@ -200,6 +285,13 @@ export default function BuildsPage() {
                   <button className="btn btn-sm btn-primary" onClick={() => apply(l)}><Wand2 size={12} /> 帶入配符</button>
                   <button className="btn btn-sm" onClick={() => setOpen(l)}>查看</button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="一鍵上符（本機模擬）" onClick={() => equip(l)}><Shirt size={13} /></button>
+                  <button
+                    className={`btn btn-sm btn-icon ${off ? "" : "btn-ghost"}`}
+                    title={off ? "解除這組配裝的符文與神器排除" : "排除這組配裝的符文與神器（配符與一鍵配隊不會使用）"}
+                    onClick={() => toggleExclusion(eq.runes, eq.artifacts, `配裝「${monster?.name ?? l.name}」`)}
+                  >
+                    {off ? <RotateCcw size={13} /> : <Ban size={13} />}
+                  </button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="一鍵解鎖" onClick={() => clearLocks(l)}><Unlock size={13} /></button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="一鍵解符（解除排除／包括）" onClick={() => clearRestrictions(l)}><RotateCcw size={13} /></button>
                   <button className="btn btn-sm btn-ghost btn-icon" title="刪除" style={{ marginLeft: "auto" }} onClick={() => removeLoadout(l.id)}>
@@ -219,6 +311,14 @@ export default function BuildsPage() {
             <div className="row" style={{ gap: 6 }}>
               <button className="btn btn-sm btn-primary" onClick={() => apply(open)}><Wand2 size={12} /> 帶入配符</button>
               <button className="btn btn-sm" onClick={() => equip(open)}><Shirt size={12} /> 一鍵上符</button>
+              <button
+                className={`btn btn-sm ${openLoadoutExcluded ? "" : "btn-ghost"}`}
+                onClick={() => openLoadoutEquip && toggleExclusion(openLoadoutEquip.runes, openLoadoutEquip.artifacts, `配裝「${MONSTER_MAP.get(open.monsterId)?.name ?? open.name}」`)}
+                title={openLoadoutExcluded ? "解除這組配裝的符文與神器排除" : "排除這組配裝的符文與神器"}
+              >
+                {openLoadoutExcluded ? <RotateCcw size={12} /> : <Ban size={12} />}
+                {openLoadoutExcluded ? "解除排除" : "一鍵排除"}
+              </button>
               <button className="btn btn-sm" onClick={() => clearLocks(open)}><Unlock size={12} /> 一鍵解鎖</button>
               <button className="btn btn-sm" onClick={() => clearRestrictions(open)}><RotateCcw size={12} /> 一鍵解符</button>
               <button className="btn btn-sm btn-ghost" onClick={() => { removeLoadout(open.id); setOpen(null); }}>
@@ -258,20 +358,34 @@ export default function BuildsPage() {
               共 {openDeck.units.length} 隻
               {openDeck.battlePower ? ` · 戰力 ${fmt(openDeck.battlePower)}` : ""} · 儲存於 {new Date(openDeck.createdAt).toLocaleString("zh-TW")}
             </span>
-            <button
-              className="btn btn-sm btn-ghost"
-              onClick={() => {
-                removeDeckFav(openDeck.id);
-                setOpenDeck(null);
-              }}
-            >
-              <Trash2 size={12} /> 刪除這一隊
-            </button>
+            <div className="row" style={{ gap: 6 }}>
+              {openDeckEquip && (
+                <button
+                  className={`btn btn-sm ${openDeckExcluded ? "" : "btn-ghost"}`}
+                  title={openDeckExcluded ? "解除整隊的符文與神器排除" : "排除整隊已裝備的符文與神器"}
+                  onClick={() => toggleExclusion(openDeckEquip.runes, openDeckEquip.artifacts, `第 ${openDeck.seq} 隊`)}
+                >
+                  {openDeckExcluded ? <RotateCcw size={12} /> : <Ban size={12} />}
+                  {openDeckExcluded ? "解除整隊排除" : "一鍵排除整隊"}
+                </button>
+              )}
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={() => {
+                  removeDeckFav(openDeck.id);
+                  setOpenDeck(null);
+                }}
+              >
+                <Trash2 size={12} /> 刪除這一隊
+              </button>
+            </div>
           </div>
           <div className="col" style={{ gap: 14 }}>
             {openDeck.units.map((u) => {
               const runes = u.runeIds.map((id) => runeMap.get(id)).filter((r): r is Rune => !!r);
               const artifacts = u.artifactIds.map((id) => artifactMap.get(id)).filter((a): a is Artifact => !!a);
+              const eq = unitEquipOf(u.unitId, u.master, u.runeIds, u.artifactIds);
+              const off = allExcluded(eq.runes, eq.artifacts);
               return (
                 <div key={u.unitId} className="deck-detail">
                   <div className="row between" style={{ gap: 10 }}>
@@ -281,16 +395,26 @@ export default function BuildsPage() {
                         <div className="row wrap" style={{ gap: 6 }}>
                           <b>{monsterLabel(u.master)}</b>
                           <span className="tiny dim">{runes.length}/6 符文 · {artifacts.length}/2 神器</span>
+                          {off && <span className="chip muted">已排除</span>}
                         </div>
                       </div>
                     </div>
-                    <button
-                      className="btn btn-sm btn-ghost"
-                      title="把這隻魔靈的符文帶到配符頁"
-                      onClick={() => applyDeckUnit(u.master, u.runeIds)}
-                    >
-                      <Wand2 size={12} /> 帶入配符
-                    </button>
+                    <div className="row" style={{ gap: 6 }}>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        title="把這隻魔靈的符文帶到配符頁"
+                        onClick={() => applyDeckUnit(u.master, u.runeIds)}
+                      >
+                        <Wand2 size={12} /> 帶入配符
+                      </button>
+                      <button
+                        className={`btn btn-sm ${off ? "" : "btn-ghost"}`}
+                        title={off ? "解除這隻魔靈的符文與神器排除" : "排除這隻魔靈已裝備的符文與神器"}
+                        onClick={() => toggleExclusion(eq.runes, eq.artifacts, monsterLabel(u.master))}
+                      >
+                        {off ? <RotateCcw size={12} /> : <Ban size={12} />} {off ? "解除排除" : "排除這隻"}
+                      </button>
+                    </div>
                   </div>
                   {runes.length === 0 && artifacts.length === 0 ? (
                     <div className="tiny dim" style={{ padding: "6px 0 0 56px" }}>這隻魔靈在儲存時沒有符文 / 神器配置。</div>

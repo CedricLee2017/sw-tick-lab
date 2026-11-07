@@ -25,6 +25,14 @@ export interface TeamMemberTemplate {
   speedBuff?: boolean;
   /** 預設神器「速度增加效果 +%」 */
   artifactPct?: number;
+  /** 速度條件：面板速度或目標 Tick（預設面板速度） */
+  speedMode?: "panel" | "tick";
+  /** 面板額外速度（speedMode = panel 時使用） */
+  panelExtra?: number;
+  /** 技能傷害目標的技能欄位（S1～S4）；0 = 自動 */
+  skillSlot?: number;
+  /** 優先順序；0 = 不指定 */
+  priority?: number;
 }
 
 export interface TeamTemplate {

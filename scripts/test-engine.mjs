@@ -45,6 +45,7 @@ const {
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
   autoAssignRoles, roleSetup, hasAtbBoost,
+  deckSetupFromRunes, normalizeRequiredSets,
 } = engine;
 
 /** 技能資料（判斷提條技能用） */
@@ -517,6 +518,128 @@ check("3×2 件套（祝福 + 刀刃 + 意志）", () => {
     assert.ok((b.sets[15] ?? 0) >= 2, "意志不足 2 件");
     assert.equal(Object.values(b.sets).reduce((s, c) => s + c, 0), 6);
   }
+});
+
+/* ── 4c. 3×2 套裝與預設隊回推 ─────────────────── */
+console.log("\n[4c] 3×2 套裝與預設隊回推");
+
+const deckBonus = {
+  towerSpd: 0, towerAtk: 0, towerHp: 0, towerDef: 0,
+  guildAtk: 0, guildHp: 0, guildDef: 0, guildCd: 0,
+  leadSpd: 0, buffSpd: 0, useGuild: false, useElementTower: false, grind: true,
+};
+const deckBase = { hp: 10000, atk: 700, def: 700, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
+
+/** 用 SWEX 格式建立測試符文（id, 位置, 套裝, 主屬性 type, 主屬性值） */
+const deckRunes = (specs) => {
+  const raw = {
+    unit_list: [],
+    runes: specs.map(([id, slot, set, mainT, mainV]) => ({
+      rune_id: id, slot_no: slot, set_id: set, class: 6, rank: 5, upgrade_curr: 15,
+      pri_eff: [mainT, mainV], prefix_eff: [0, 0], sec_eff: [],
+    })),
+    building_list: [],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "deck-setup.json");
+  assert.equal(p.error, undefined, p.error);
+  return p.account.runes;
+};
+
+check("normalizeRequiredSets：重複套裝會合併件數", () => {
+  const merged = normalizeRequiredSets([
+    { set: 15, count: 2 }, { set: 15, count: 2 }, { set: 16, count: 2 },
+    { set: 0, count: 4 }, { set: 3, count: 0 },
+  ]).sort((a, b) => a.set - b.set);
+  assert.deepEqual(merged, [{ set: 15, count: 4 }, { set: 16, count: 2 }]);
+});
+
+check("同一套裝 3×2（意志 ×3）可組成 6 件", () => {
+  const runes = deckRunes([1, 2, 3, 4, 5, 6].map((slot, i) => [
+    9610 + i, slot, 15, slot === 2 ? 8 : 1, slot === 2 ? 42 : 500,
+  ]));
+  const res = optimize({
+    base: deckBase, runes,
+    required: [{ set: 15, count: 2 }, { set: 15, count: 2 }, { set: 15, count: 2 }],
+    min: {}, max: {}, bonus: deckBonus,
+    pool: 18, allowEquipped: true, targetUnit: 0, rta: false, maxNodes: 100_000,
+  });
+  assert.ok(res.count > 0, "意志 ×3 沒有任何結果");
+  assert.equal(buildsOf(res, runes, false, 1)[0].sets[15], 6, "意志應為 6 件");
+});
+
+check("預設隊回推：保護 ×4 + 意志 ×2 → 3×2 套裝", () => {
+  const runes = deckRunes([
+    [9701, 1, 16, 1, 2448],
+    [9702, 2, 16, 8, 42],
+    [9703, 3, 16, 1, 2448],
+    [9704, 4, 16, 2, 63],
+    [9705, 5, 15, 1, 2448],
+    [9706, 6, 15, 2, 63],
+  ]);
+  const stats = statsForRunes(deckBase, runes, deckBonus, false, true);
+  const setup = deckSetupFromRunes(runes, stats);
+  assert.equal(setup.set4, 0, "保護是 2 件套，不應變成 4 件套");
+  assert.deepEqual([setup.set2, setup.set2b, setup.set2c], [16, 16, 15], "應帶入保護、保護、意志");
+  assert.deepEqual(setup.mains, { 2: 8, 4: 2, 6: 2 }, "2/4/6 主屬性回推錯誤");
+  assert.equal(setup.min.hp, Math.floor(stats.hp), "HP 下限應等於目前實戰 HP");
+  assert.equal(setup.min.res, Math.round(stats.res), "抵抗下限應等於目前抗性");
+  assert.equal(setup.min.spd, undefined, "速度不應寫進數值下限");
+});
+
+check("預設隊回推：4 件套 + 2 件套", () => {
+  const runes = deckRunes([
+    [9711, 1, 3, 1, 2448],
+    [9712, 2, 3, 8, 42],
+    [9713, 3, 3, 1, 2448],
+    [9714, 4, 3, 2, 63],
+    [9715, 5, 15, 1, 2448],
+    [9716, 6, 15, 2, 63],
+  ]);
+  const stats = statsForRunes(deckBase, runes, deckBonus, false, true);
+  const setup = deckSetupFromRunes(runes, stats);
+  assert.equal(setup.set4, 3, "應回推迅速 4 件套");
+  assert.equal(setup.set2, 15, "應回推意志 2 件套");
+  assert.equal(setup.set2b, 0);
+  assert.equal(setup.set2c, 0);
+});
+
+check("預設隊回推：6 件同套裝 → 3×2 同套裝", () => {
+  const runes = deckRunes([1, 2, 3, 4, 5, 6].map((slot, i) => [
+    9721 + i, slot, 15, slot === 2 ? 8 : 1, slot === 2 ? 42 : 500,
+  ]));
+  const stats = statsForRunes(deckBase, runes, deckBonus, false, true);
+  const setup = deckSetupFromRunes(runes, stats);
+  assert.equal(setup.set4, 0);
+  assert.deepEqual([setup.set2, setup.set2b, setup.set2c], [15, 15, 15]);
+});
+
+check("預設隊回推的下限可以用來重新配符", () => {
+  const runes = deckRunes([
+    [9731, 1, 16, 1, 2448],
+    [9732, 2, 16, 8, 42],
+    [9733, 3, 16, 1, 2448],
+    [9734, 4, 16, 2, 63],
+    [9735, 5, 15, 1, 2448],
+    [9736, 6, 15, 2, 63],
+  ]);
+  const stats = statsForRunes(deckBase, runes, deckBonus, false, true);
+  const setup = deckSetupFromRunes(runes, stats);
+  const res = optimize({
+    base: deckBase, runes,
+    required: [
+      { set: setup.set2, count: 2 },
+      { set: setup.set2b, count: 2 },
+      { set: setup.set2c, count: 2 },
+    ],
+    min: setup.min, max: {}, bonus: deckBonus, mainFilters: setup.mains,
+    pool: 18, allowEquipped: true, targetUnit: 0, rta: false, maxNodes: 100_000,
+  });
+  assert.ok(res.count > 0, "依回推下限重新配符沒有任何結果");
+  const b = buildsOf(res, runes, false, 1)[0];
+  assert.ok(b.stats.hp >= setup.min.hp, "HP 低於目前");
+  assert.ok(b.stats.res >= setup.min.res, "抵抗低於目前");
+  assert.equal(b.sets[16], 4);
+  assert.equal(b.sets[15], 2);
 });
 
 check("無形符文補足缺少的套裝", () => {
