@@ -140,6 +140,32 @@ export default function App() {
     void syncLibrary();
   }, [ready, authReady, user, config?.uploads, syncLibrary]);
 
+  // 從手機改完儲存庫後，電腦切回分頁 / 每分鐘自動拉一次，不必重新整理。
+  useEffect(() => {
+    if (!ready || !authReady || !user || !config?.uploads) return;
+    let last = 0;
+    let disposed = false;
+    const run = () => {
+      if (disposed || document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - last < 15_000) return;
+      last = now;
+      void syncLibrary();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", onVisibility);
+    const timer = window.setInterval(run, 60_000);
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", run);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.clearInterval(timer);
+    };
+  }, [ready, authReady, user, config?.uploads, syncLibrary]);
+
   useEffect(() => {
     if (user) setLoginOpen(false);
   }, [user]);

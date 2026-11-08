@@ -378,7 +378,7 @@ export default function SettingsPage() {
                     <td className="num mono gold">{l.stats.spd}</td>
                     <td className="num mono">T{Number.isFinite(l.stats.tick) ? l.stats.tick : "—"}</td>
                     <td className="num mono">{fmt(l.stats.hp)}</td>
-                    <td className="tiny dim">{new Date(l.createdAt).toLocaleString("zh-TW")}</td>
+                    <td className="tiny dim">{new Date(l.updatedAt ?? l.createdAt).toLocaleString("zh-TW")}</td>
                     <td className="num">
                       <button className="btn btn-sm btn-ghost btn-icon" onClick={() => removeLoadout(l.id)} title="刪除">
                         <Trash2 size={13} />

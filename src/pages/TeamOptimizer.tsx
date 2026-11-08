@@ -2554,7 +2554,7 @@ export default function TeamOptimizerPage() {
             ) : (
               <div className="col" style={{ gap: 8 }}>
                 {[...deckFavs]
-                  .sort((a, b) => b.createdAt - a.createdAt)
+                  .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
                   .map((d) => (
                     <div key={d.id} className="row between wrap" style={{ gap: 8 }}>
                       <div className="row" style={{ gap: 8, minWidth: 0 }}>

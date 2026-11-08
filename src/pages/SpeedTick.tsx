@@ -1290,7 +1290,7 @@ export default function SpeedTickPage() {
             ) : (
               <div className="col" style={{ gap: 6, marginTop: 8 }}>
                 {[...loadouts]
-                  .sort((a, b) => b.createdAt - a.createdAt)
+                  .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
                   .map((l) => (
                     <div key={l.id} className="row between" style={{ gap: 8 }}>
                       <div className="row" style={{ gap: 8, minWidth: 0 }}>
@@ -1298,7 +1298,7 @@ export default function SpeedTickPage() {
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontWeight: 600 }}>{MONSTER_MAP.get(l.monsterId)?.name ?? l.name}</div>
                           <div className="tiny dim">
-                            {l.runeIds.length}/6 符文 · {l.stats?.spd ?? 0} 速 · {new Date(l.createdAt).toLocaleDateString("zh-TW")}
+                            {l.runeIds.length}/6 符文 · {l.stats?.spd ?? 0} 速 · {new Date(l.updatedAt ?? l.createdAt).toLocaleDateString("zh-TW")}
                           </div>
                         </div>
                       </div>
@@ -1326,7 +1326,7 @@ export default function SpeedTickPage() {
             ) : (
               <div className="col" style={{ gap: 6, marginTop: 8 }}>
                 {[...deckFavs]
-                  .sort((a, b) => b.createdAt - a.createdAt)
+                  .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
                   .map((d) => (
                     <div key={d.id} className="row between" style={{ gap: 8 }}>
                       <div className="row" style={{ gap: 8, minWidth: 0 }}>

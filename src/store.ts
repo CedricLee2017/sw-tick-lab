@@ -28,6 +28,8 @@ export interface Loadout {
   runeIds: number[];
   stats: Stats;
   createdAt: number;
+  /** 最後修改時間；舊資料沒有時會退回 createdAt */
+  updatedAt?: number;
   note?: string;
 }
 
@@ -49,6 +51,8 @@ export interface DeckFav {
   units: DeckFavUnit[];
   battlePower?: number;
   createdAt: number;
+  /** 最後修改時間；舊資料沒有時會退回 createdAt */
+  updatedAt?: number;
   note?: string;
 }
 
@@ -93,11 +97,22 @@ const LOADOUT_KEY = "swtick:loadouts";
 const DECK_FAV_KEY = "swtick:deckfavorites";
 /** 這台裝置的本機資料屬於哪個會員，用來避免換帳號時把別人的資料帶過去 */
 const OWNER_KEY = "swtick:owner";
+/** 每個會員上次成功同步儲存庫的時間（用來判斷雲端缺少的項目是「新資料」還是「已刪除」） */
+const lastSyncKey = (userId: number) => `swtick:library-sync:${userId}`;
 
 interface Toast {
   id: number;
   msg: string;
   kind: "ok" | "err";
+}
+
+export interface LibrarySyncResult {
+  ok: boolean;
+  error?: string;
+  /** 這次是否把雲端資料合併進本機 */
+  pulled?: boolean;
+  /** 這次是否把本機資料上傳到雲端 */
+  pushed?: boolean;
 }
 
 interface Store {
@@ -135,14 +150,18 @@ interface Store {
   /** 儲存整隊預設隊到預設隊儲存庫 */
   saveDeckFav: (d: Omit<DeckFav, "id" | "createdAt">, opts?: { silent?: boolean }) => void;
   removeDeckFav: (id: string) => void;
-  /** 登入後把本機與雲端儲存庫合併（本機優先），必要時回寫雲端 */
-  syncLibrary: () => Promise<void>;
+  /** 登入後把本機與雲端儲存庫合併（以 updatedAt 較新者為準），必要時回寫雲端 */
+  syncLibrary: () => Promise<LibrarySyncResult>;
   /** 換帳號時清掉前一個會員留在這台裝置的存檔與儲存庫 */
   resetForNewAccount: () => Promise<void>;
   notify: (msg: string, kind?: "ok" | "err") => void;
 }
 
 let toastSeq = 1;
+/** 同時間只跑一次儲存庫同步，避免自動同步與手動同步互相覆蓋 */
+let librarySyncPromise: Promise<LibrarySyncResult> | null = null;
+/** 儲存庫上傳依序執行，確保刪除 / 修改一定先送到雲端再拉取 */
+let libraryPushChain: Promise<void> = Promise.resolve();
 
 export const useStore = create<Store>((setState, getState) => ({
   ready: false,
@@ -458,7 +477,13 @@ export const useStore = create<Store>((setState, getState) => ({
   },
 
   saveLoadout: (l) => {
-    const loadout: Loadout = { ...l, id: `lo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, createdAt: Date.now() };
+    const now = Date.now();
+    const loadout: Loadout = {
+      ...l,
+      id: `lo_${now}_${Math.random().toString(36).slice(2, 7)}`,
+      createdAt: now,
+      updatedAt: now,
+    };
     const loadouts = [loadout, ...getState().loadouts].slice(0, 60);
     setState({ loadouts });
     void set(LOADOUT_KEY, loadouts);
@@ -473,10 +498,13 @@ export const useStore = create<Store>((setState, getState) => ({
     const sig = signature(d);
     const prev = getState().deckFavs;
     const existing = prev.find((x) => signature(x) === sig);
+    const now = Date.now();
     const fav: DeckFav = {
       ...d,
-      id: existing?.id ?? `dk_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      createdAt: Date.now(),
+      id: existing?.id ?? `dk_${now}_${Math.random().toString(36).slice(2, 7)}`,
+      // 建立時間保留第一次儲存的時間；修改時間另外記錄，雲端合併才不會用舊資料蓋新資料
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
     };
     const deckFavs = [fav, ...prev.filter((x) => x.id !== fav.id)].slice(0, 60);
     setState({ deckFavs });
@@ -489,40 +517,69 @@ export const useStore = create<Store>((setState, getState) => ({
     const loadouts = getState().loadouts.filter((x) => x.id !== id);
     setState({ loadouts });
     void set(LOADOUT_KEY, loadouts);
-    scheduleLibraryPush();
+    // 刪除要立刻上傳，避免自動同步先拉到舊資料又把它復活
+    void pushLibraryNow().catch((err) => console.warn("儲存庫刪除上傳失敗", err));
   },
 
   removeDeckFav: (id) => {
     const deckFavs = getState().deckFavs.filter((x) => x.id !== id);
     setState({ deckFavs });
     void set(DECK_FAV_KEY, deckFavs);
-    scheduleLibraryPush();
+    void pushLibraryNow().catch((err) => console.warn("儲存庫刪除上傳失敗", err));
   },
 
-  syncLibrary: async () => {
-    const { user, config } = useAuth.getState();
-    if (!user || !config?.uploads) return;
+  syncLibrary: () => {
+    if (librarySyncPromise) return librarySyncPromise;
 
-    await ensureOwner(user.id);
-    const local = { loadouts: getState().loadouts, deckFavs: getState().deckFavs };
-    try {
-      const remote = await pullLibrary();
-      const loadouts = mergeLibrary(local.loadouts, remote.loadouts);
-      const deckFavs = mergeLibrary(local.deckFavs, remote.deckFavs);
-      const grew = loadouts.length !== local.loadouts.length || deckFavs.length !== local.deckFavs.length;
-
-      if (grew) {
-        setState({ loadouts, deckFavs });
-        void set(LOADOUT_KEY, loadouts);
-        void set(DECK_FAV_KEY, deckFavs);
+    librarySyncPromise = (async (): Promise<LibrarySyncResult> => {
+      const { user, config } = useAuth.getState();
+      if (!user || !config?.uploads) {
+        return { ok: false, error: "尚未登入或雲端儲存庫未啟用" };
       }
 
-      // 本機有雲端沒有的項目（或雲端還是空的）就回寫，避免只存在這台裝置
-      const needsPush = loadouts.length > remote.loadouts.length || deckFavs.length > remote.deckFavs.length;
-      if (needsPush) await pushLibrary({ loadouts, deckFavs });
-    } catch (err) {
-      console.warn("儲存庫同步失敗", err);
-    }
+      try {
+        await ensureOwner(user.id);
+        // 先把已排隊的本機變更（尤其是刪除）送上去，再拉雲端，避免舊資料復活
+        await libraryPushChain.catch(() => {});
+        const local = { loadouts: getState().loadouts, deckFavs: getState().deckFavs };
+        const remote = await pullLibrary();
+
+        // 第一次同步（這台裝置還沒有同步紀錄）用雲端的上傳時間當基準：
+        // 比它舊、且雲端已經沒有的本機項目，視為在別台被刪除。
+        const savedLastSync = await get<number>(lastSyncKey(user.id));
+        const lastSyncAt = typeof savedLastSync === "number" && savedLastSync > 0
+          ? savedLastSync
+          : (remote.updatedAt ?? 0);
+
+        const mergedLoadouts = mergeLibrary(local.loadouts, remote.loadouts, lastSyncAt);
+        const mergedDecks = mergeLibrary(local.deckFavs, remote.deckFavs, lastSyncAt);
+        const loadouts = mergedLoadouts.items;
+        const deckFavs = mergedDecks.items;
+        const changed = mergedLoadouts.changed || mergedDecks.changed;
+        const needsPush = mergedLoadouts.push || mergedDecks.push;
+
+        if (changed) {
+          setState({ loadouts, deckFavs });
+          void set(LOADOUT_KEY, loadouts);
+          void set(DECK_FAV_KEY, deckFavs);
+        }
+
+        if (needsPush) await pushLibrary({ loadouts, deckFavs });
+
+        // 只有成功完成（含必要時的上傳）才更新同步時間
+        await set(lastSyncKey(user.id), Date.now());
+        return { ok: true, pulled: changed, pushed: needsPush };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "儲存庫同步失敗";
+        console.warn("儲存庫同步失敗", err);
+        return { ok: false, error: message };
+      }
+    })();
+
+    void librarySyncPromise.finally(() => {
+      librarySyncPromise = null;
+    });
+    return librarySyncPromise;
   },
 
   resetForNewAccount: async () => {
@@ -542,15 +599,25 @@ export const useStore = create<Store>((setState, getState) => ({
 /** 儲存庫變更後延遲回寫雲端，避免連續操作打出多次請求。 */
 let libraryPushTimer: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleLibraryPush(): void {
+/** 立即把目前本機儲存庫排進上傳佇列；會依序執行，不會互相覆蓋。 */
+function pushLibraryNow(): Promise<void> {
+  const { user, config } = useAuth.getState();
+  if (!user || !config?.uploads) return Promise.resolve();
+  libraryPushChain = libraryPushChain.catch(() => {}).then(() => {
+    const { loadouts, deckFavs } = useStore.getState();
+    return pushLibrary({ loadouts, deckFavs });
+  });
+  return libraryPushChain;
+}
+
+function scheduleLibraryPush(delay = 1200): void {
   const { user, config } = useAuth.getState();
   if (!user || !config?.uploads) return;
   if (libraryPushTimer) clearTimeout(libraryPushTimer);
   libraryPushTimer = setTimeout(() => {
     libraryPushTimer = null;
-    const { loadouts, deckFavs } = useStore.getState();
-    void pushLibrary({ loadouts, deckFavs }).catch((err) => console.warn("儲存庫上傳失敗", err));
-  }, 1200);
+    void pushLibraryNow().catch((err) => console.warn("儲存庫上傳失敗", err));
+  }, delay);
 }
 
 let ownerCheckedFor: number | null = null;

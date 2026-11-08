@@ -45,7 +45,7 @@ const {
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
   autoAssignRoles, roleSetup, hasAtbBoost,
-  deckSetupFromRunes, normalizeRequiredSets,
+  deckSetupFromRunes, normalizeRequiredSets, mergeLibrary,
 } = engine;
 
 /** 技能資料（判斷提條技能用） */
@@ -2073,6 +2073,63 @@ check("teamSetsOf / scoreTeam 與候選配裝一致", () => {
     { unitId: 900, runeIds: [], stats: { spd: 250, atk: 0, hp: 0, def: 0, cr: 0, cd: 0, res: 0, acc: 0 } },
   ]);
   assert.equal(score, 500, "scoreTeam = 權重 × 角色目標值");
+});
+
+/* ── 14. 儲存庫跨裝置合併 ─────────────────────── */
+console.log("\n[14] 儲存庫跨裝置合併");
+const libItem = (id, name, updatedAt) => ({ id, name, createdAt: 100, updatedAt });
+
+check("同一 id：雲端較新會覆蓋本機（修改跨裝置同步）", () => {
+  const local = [libItem("dk_1", "舊名稱", 100)];
+  const remote = [libItem("dk_1", "手機改的新名稱", 200)];
+  const r = mergeLibrary(local, remote, 150);
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].name, "手機改的新名稱");
+  assert.equal(r.changed, true);
+  assert.equal(r.push, false, "雲端已是最新，不需要再上傳");
+});
+
+check("同一 id：本機較新會保留並上傳", () => {
+  const local = [libItem("dk_1", "電腦剛改的", 300)];
+  const remote = [libItem("dk_1", "雲端舊的", 200)];
+  const r = mergeLibrary(local, remote, 150);
+  assert.equal(r.items[0].name, "電腦剛改的");
+  assert.equal(r.changed, false);
+  assert.equal(r.push, true);
+});
+
+check("雲端獨有的項目會補進本機", () => {
+  const r = mergeLibrary([], [libItem("dk_2", "手機新增", 200)], 150);
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].id, "dk_2");
+  assert.equal(r.changed, true);
+  assert.equal(r.push, false);
+});
+
+check("上次同步後才新增的本機項目會保留並上傳", () => {
+  const r = mergeLibrary([libItem("dk_3", "電腦新增", 300)], [], 200);
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].id, "dk_3");
+  assert.equal(r.push, true);
+});
+
+check("上次同步前就存在、雲端已刪除的本機項目會移除", () => {
+  const r = mergeLibrary([libItem("dk_4", "手機已刪除", 100)], [], 200);
+  assert.equal(r.items.length, 0, "不應把別台刪除的項目復活");
+  assert.equal(r.changed, true);
+  assert.equal(r.push, false);
+});
+
+check("第一次同步（沒有同步紀錄）保留全部本機資料", () => {
+  const r = mergeLibrary([libItem("dk_5", "本機舊資料", 100)], [], 0);
+  assert.equal(r.items.length, 1);
+  assert.equal(r.push, true);
+});
+
+check("修改時間相同時保留本機，並回寫一次讓兩邊一致", () => {
+  const r = mergeLibrary([libItem("dk_6", "本機", 200)], [libItem("dk_6", "雲端", 200)], 150);
+  assert.equal(r.items[0].name, "本機");
+  assert.equal(r.push, true);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

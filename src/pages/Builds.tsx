@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Ban, Bookmark, Layers, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
+import { Ban, Bookmark, Layers, Loader2, RefreshCw, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
 import { MONSTER_MAP, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary, baseStats } from "../lib/stats";
@@ -17,6 +17,7 @@ export default function BuildsPage() {
   const deckFavs = useStore((s) => s.deckFavs);
   const removeDeckFav = useStore((s) => s.removeDeckFav);
   const notify = useStore((s) => s.notify);
+  const syncLibrary = useStore((s) => s.syncLibrary);
   const setRuneFlag = useStore((s) => s.setRuneFlag);
   const equipRunes = useStore((s) => s.equipRunes);
   const lockedRunes = useStore((s) => s.settings.lockedRunes);
@@ -26,10 +27,27 @@ export default function BuildsPage() {
   const setArtifactExcluded = useStore((s) => s.setArtifactExcluded);
   const [open, setOpen] = useState<Loadout | null>(null);
   const [openDeck, setOpenDeck] = useState<DeckFav | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
-  const sortedDecks = useMemo(() => [...deckFavs].sort((a, b) => b.createdAt - a.createdAt), [deckFavs]);
+  const syncNow = async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    const res = await syncLibrary();
+    setSyncing(false);
+    setSyncMsg(res.ok ? (res.pushed ? "已同步（已上傳本機變更）" : "已同步") : res.error ?? "同步失敗");
+    if (res.ok) notify(res.pushed ? "儲存庫已同步並上傳" : "儲存庫已同步");
+  };
 
-  const sorted = useMemo(() => [...loadouts].sort((a, b) => b.createdAt - a.createdAt), [loadouts]);
+  const sortedDecks = useMemo(
+    () => [...deckFavs].sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt)),
+    [deckFavs],
+  );
+
+  const sorted = useMemo(
+    () => [...loadouts].sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt)),
+    [loadouts],
+  );
   const owner = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
@@ -166,7 +184,17 @@ export default function BuildsPage() {
           <div className="card-title">儲存庫</div>
           <div className="card-sub">整隊存到預設隊儲存庫，單隻魔靈存到配裝儲存庫；隨時查看或帶回配符頁</div>
         </div>
-        <div className="row" style={{ gap: 6 }}>
+        <div className="row wrap" style={{ gap: 6, alignItems: "center" }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => void syncNow()}
+            disabled={syncing}
+            title="從雲端拉取其他裝置的變更，並上傳本機的新增 / 修改"
+          >
+            {syncing ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />} 同步雲端
+          </button>
+          {syncMsg && <span className="tiny dim">{syncMsg}</span>}
           <span className="chip gold">預設隊 {deckFavs.length} 組</span>
           <span className="chip gold">配裝 {loadouts.length} 組</span>
         </div>
@@ -200,7 +228,7 @@ export default function BuildsPage() {
                     <span className="tiny dim">第 {d.seq} 隊 · {d.units.length} 人</span>
                     {off && <span className="chip muted">已排除</span>}
                   </div>
-                  <span className="tiny dim">{new Date(d.createdAt).toLocaleDateString("zh-TW")}</span>
+                  <span className="tiny dim">{new Date(d.updatedAt ?? d.createdAt).toLocaleDateString("zh-TW")}</span>
                 </div>
                 <div className="deck-units" style={{ marginTop: 8 }}>
                   {d.units.map((u) => (
@@ -262,7 +290,7 @@ export default function BuildsPage() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{monster?.name ?? l.name}</div>
                     <div className="tiny dim">
-                      {new Date(l.createdAt).toLocaleString("zh-TW")} · {runes.length}/6 符文
+                      {new Date(l.updatedAt ?? l.createdAt).toLocaleString("zh-TW")} · {runes.length}/6 符文
                     </div>
                   </div>
                   {off && <span className="chip muted">已排除</span>}
@@ -307,7 +335,7 @@ export default function BuildsPage() {
       {open && (
         <Modal title={`${MONSTER_MAP.get(open.monsterId)?.name ?? "配裝"} · ${open.name}`} onClose={() => setOpen(null)} width={760}>
           <div className="row between wrap" style={{ gap: 8, marginBottom: 10 }}>
-            <div className="tiny dim">儲存於 {new Date(open.createdAt).toLocaleString("zh-TW")}</div>
+            <div className="tiny dim">更新於 {new Date(open.updatedAt ?? open.createdAt).toLocaleString("zh-TW")}</div>
             <div className="row" style={{ gap: 6 }}>
               <button className="btn btn-sm btn-primary" onClick={() => apply(open)}><Wand2 size={12} /> 帶入配符</button>
               <button className="btn btn-sm" onClick={() => equip(open)}><Shirt size={12} /> 一鍵上符</button>
@@ -356,7 +384,7 @@ export default function BuildsPage() {
           <div className="row between wrap" style={{ gap: 8, marginBottom: 12 }}>
             <span className="tiny dim">
               共 {openDeck.units.length} 隻
-              {openDeck.battlePower ? ` · 戰力 ${fmt(openDeck.battlePower)}` : ""} · 儲存於 {new Date(openDeck.createdAt).toLocaleString("zh-TW")}
+              {openDeck.battlePower ? ` · 戰力 ${fmt(openDeck.battlePower)}` : ""} · 更新於 {new Date(openDeck.updatedAt ?? openDeck.createdAt).toLocaleString("zh-TW")}
             </span>
             <div className="row" style={{ gap: 6 }}>
               {openDeckEquip && (

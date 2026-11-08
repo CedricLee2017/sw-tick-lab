@@ -13,5 +13,6 @@ export * from "../src/lib/teamOptimizer";
 export * from "../src/lib/teamTemplates";
 export * from "../src/lib/teamRoles";
 export * from "../src/lib/deckSetup";
+export * from "../src/lib/librarySync";
 export { parseAccountJSON, exportAccount } from "../src/lib/parse";
 export { default as MONSTERS } from "../src/data/monsters.json";
