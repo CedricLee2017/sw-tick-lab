@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight,
 } from "lucide-react";
 import { ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
@@ -15,6 +15,7 @@ import RtaPage from "./pages/Rta";
 import BuildsPage from "./pages/Builds";
 import ArtifactOptimizerPage from "./pages/ArtifactOptimizer";
 import AdCalculatorPage from "./pages/AdCalculator";
+import DamageComparePage from "./pages/DamageCompare";
 import DecksPage from "./pages/Decks";
 import SpeedTickPage from "./pages/SpeedTick";
 import OptimizerPage from "./pages/Optimizer";
@@ -28,7 +29,7 @@ import { MonsterIcon } from "./components/ui";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -40,6 +41,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "team-opt", label: "一鍵配隊", icon: <Zap size={17} />, title: "配置預設隊", sub: "最多 3 隊、15 隻魔靈一次配好，符文不重複" },
   { key: "artifact-opt", label: "配神器", icon: <Sparkles size={17} />, title: "配神器", sub: "使用目前魔靈的裝備符文，直接最佳化神器" },
   { key: "artifact-ad", label: "神器追傷", icon: <Calculator size={17} />, title: "神器追傷計算器", sub: "依三圍與段數計算神器追加傷害" },
+  { key: "damage-compare", label: "傷害比較", icon: <ArrowLeftRight size={17} />, title: "傷害比較", sub: "比較兩套配裝在同一技能與神器追傷下的傷害" },
   { key: "builds", label: "儲存庫", icon: <Bookmark size={17} />, title: "儲存庫", sub: "預設隊與配裝收藏，隨時查看或帶回配符" },
   { key: "decks", label: "預設隊", icon: <Layers size={17} />, title: "預設隊", sub: "遊戲內 deck_list：所有已儲存的隊伍與配置" },
   { key: "monsters", label: "魔靈", icon: <Users size={17} />, title: "魔靈圖鑑", sub: "你的魔靈盒與目前配裝" },
@@ -72,6 +74,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   "team-opt": TeamOptimizerPage,
   "artifact-opt": ArtifactOptimizerPage,
   "artifact-ad": AdCalculatorPage,
+  "damage-compare": DamageComparePage,
   builds: BuildsPage,
   decks: DecksPage,
   monsters: MonstersPage,

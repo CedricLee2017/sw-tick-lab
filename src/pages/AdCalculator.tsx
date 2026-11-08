@@ -151,6 +151,9 @@ export default function AdCalculatorPage() {
             <div className="card-sub">
               依三圍與段數計算追加傷害；可手動輸入，或選魔靈帶入目前面板，再從下方神器表加入效果。
             </div>
+            <div className="tiny dim" style={{ marginTop: 4 }}>
+              想比較兩套配裝的總傷害？<a href="#/damage-compare">使用傷害比較 →</a>
+            </div>
           </div>
           <div style={{ minWidth: 250, flex: "0 1 340px" }}>
             <label className="tiny dim">快速帶入魔靈目前面板</label>

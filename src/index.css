@@ -900,6 +900,18 @@ p { margin: 0; }
   border-top: 1px dashed var(--line-soft); padding-top: 8px;
   display: flex; flex-direction: column; gap: 4px;
 }
+/* ── 傷害比較 ─────────────────────────────────────── */
+.dmg-build-badge {
+  display: inline-grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 6px;
+  background: rgba(242, 198, 92, .16); border: 1px solid rgba(242, 198, 92, .38);
+  color: var(--gold); font-size: 11px; font-weight: 800;
+}
+.dmg-diff-up { color: var(--green); font-weight: 700; }
+.dmg-diff-down { color: var(--red); font-weight: 700; }
+.dmg-compare-table td { vertical-align: top; }
+.dmg-skill-sub { margin-top: 3px; font-size: 10.5px; line-height: 1.5; color: var(--muted-2); }
+.dmg-compare-table .num { white-space: nowrap; }
 
 .set-group-row { display: flex; gap: 6px; align-items: center; }
 .set-group-row .select { flex: 1; min-width: 0; }
