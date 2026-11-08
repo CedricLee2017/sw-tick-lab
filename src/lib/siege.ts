@@ -34,6 +34,8 @@ export interface SiegeTower {
   /** 0–100 */
   hpPercentage: number;
   buildingSeconds: string;
+  /** 敵方在這座塔上的攻擊進度（劍數）0–4；1 = 種劍 */
+  swords: number;
 }
 
 export interface SiegeStats {
@@ -168,6 +170,7 @@ export function createSiegeTowers(): SiegeTower[] {
     defenseCount: isHQ ? 0 : 5,
     hpPercentage: isHQ ? 0 : 100,
     buildingSeconds: "",
+    swords: 0,
   }));
 }
 
@@ -264,11 +267,40 @@ export function clampInt(value: unknown, min: number, max: number, fallback = mi
   return Math.max(min, Math.min(max, Math.round(n)));
 }
 
+export function otherSiegeGuild(color: SiegeGuild): SiegeGuild {
+  return color === "Blue" ? "Red" : "Blue";
+}
+
+/** 這座塔目前是哪一方在進攻（劍數的擁有者）。 */
+export function siegeSwordOwner(tower: Pick<SiegeTower, "color">): SiegeGuild {
+  return otherSiegeGuild(tower.color);
+}
+
+/**
+ * 設定敵方在這座塔上的劍數。
+ * 0–4 只記錄進度；5 代表爆塔：塔會變成進攻方顏色、劍數歸零、HP / 防守重置。
+ */
+export function setTowerSwords(tower: SiegeTower, swords: number): SiegeTower {
+  const next = clampInt(swords, 0, 5, 0);
+  if (next < 5) return { ...tower, swords: next };
+  return {
+    ...tower,
+    color: otherSiegeGuild(tower.color),
+    swords: 0,
+    hpPercentage: tower.isHQ ? 0 : 100,
+    defenseCount: tower.isHQ ? 0 : 5,
+    showProgressBar: !tower.isHQ,
+    buildingSeconds: "",
+    pingNumber: 0,
+    prohibit: false,
+  };
+}
+
 function normalizeTower(input: unknown, template: SiegeTemplate, base: SiegeTower): SiegeTower {
   const raw = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const color = raw.color === "Blue" || raw.color === "Red" ? raw.color : base.color;
   const memo = typeof raw.memo === "string" ? raw.memo.replace(/"/g, "").slice(0, 100) : "";
-  return {
+  const tower: SiegeTower = {
     ...base,
     connections: [...template.connections],
     color,
@@ -279,7 +311,9 @@ function normalizeTower(input: unknown, template: SiegeTemplate, base: SiegeTowe
     defenseCount: template.isHQ ? 0 : clampInt(raw.defenseCount, 0, 5, 5),
     hpPercentage: template.isHQ ? 0 : clampInt(raw.hpPercentage, 0, 100, 100),
     buildingSeconds: typeof raw.buildingSeconds === "string" ? raw.buildingSeconds.slice(0, 20) : "",
+    swords: 0,
   };
+  return setTowerSwords(tower, clampInt(raw.swords, 0, 5, 0));
 }
 
 export interface SiegeImportResult {
@@ -373,6 +407,7 @@ export function exportSiegeJSON(state: SiegeState): string {
       defenseCount: t.defenseCount,
       hpPercentage: t.hpPercentage,
       buildingSeconds: t.buildingSeconds,
+      swords: t.swords,
     })),
   };
   return JSON.stringify([payload]);

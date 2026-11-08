@@ -48,6 +48,7 @@ const {
   deckSetupFromRunes, normalizeRequiredSets, mergeLibrary,
   analyzeSiege, createSiegeState, createSiegeTowers, siegeScoreIncrement, siegeSecondsToWin,
   formatSiegeDuration, importSiegeJSON, exportSiegeJSON, SIEGE_MAP_VERSION,
+  setTowerSwords, otherSiegeGuild, siegeSwordOwner,
 } = engine;
 
 /** 技能資料（判斷提條技能用） */
@@ -2232,6 +2233,52 @@ check("舊版或缺少欄位的存檔會套用目前地圖並夾住數值", () =
 check("無效的 JSON 會回報錯誤", () => {
   assert.equal(importSiegeJSON("{").ok, false);
   assert.equal(importSiegeJSON(JSON.stringify({ foo: 1 })).ok, false);
+});
+
+check("劍數：0–4 記錄進度，5 自動爆塔", () => {
+  const t4 = createSiegeTowers().find((t) => t.id === 4);
+  assert.equal(t4.swords, 0);
+  assert.equal(otherSiegeGuild("Blue"), "Red");
+  assert.equal(siegeSwordOwner(t4), "Red");
+
+  const progress = setTowerSwords(t4, 3);
+  assert.equal(progress.swords, 3);
+  assert.equal(progress.color, "Blue");
+  assert.equal(progress.hpPercentage, 100);
+
+  const captured = setTowerSwords(t4, 5);
+  assert.equal(captured.swords, 0);
+  assert.equal(captured.color, "Red", "5 劍會變成進攻方顏色");
+  assert.equal(captured.hpPercentage, 100);
+  assert.equal(captured.pingNumber, 0);
+  assert.equal(captured.prohibit, false);
+
+  const clamped = setTowerSwords(t4, 99);
+  assert.equal(clamped.color, "Red", "超過 5 也視為爆塔");
+  assert.equal(clamped.swords, 0);
+  assert.equal(setTowerSwords(t4, -3).swords, 0);
+});
+
+check("匯出／匯入會保留劍數；5 劍存檔會直接爆塔", () => {
+  const state = createSiegeState();
+  state.towers.find((t) => t.id === 38).swords = 4;
+  const text = exportSiegeJSON(state);
+  const back = importSiegeJSON(text);
+  assert.equal(back.ok, true);
+  assert.equal(back.state.towers.find((t) => t.id === 38).swords, 4);
+
+  const captured = importSiegeJSON(JSON.stringify([{
+    siege_map_data: [{ id: 0, color: "Blue", swords: 5 }],
+    siegeMapStatsData: {},
+  }]));
+  assert.equal(captured.ok, true);
+  const hq = captured.state.towers.find((t) => t.id === 0);
+  assert.equal(hq.color, "Red");
+  assert.equal(hq.swords, 0);
+  assert.equal(hq.hpPercentage, 0, "本營沒有 HP 條");
+
+  const old = importSiegeJSON(JSON.stringify([{ siege_map_data: [{ id: 1, color: "Blue" }] }]));
+  assert.equal(old.state.towers.find((t) => t.id === 1).swords, 0, "舊存檔沒有 swords 時預設 0");
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

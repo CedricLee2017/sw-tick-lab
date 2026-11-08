@@ -1514,3 +1514,80 @@ p { margin: 0; }
   .siege-legend { display: none; }
   .siege-score-input { width: 120px; font-size: 21px; }
 }
+
+/* 據點戰：劍數 / 種劍 */
+.siege-pips {
+  position: absolute; top: -9px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 2px; padding: 2px 3px; border-radius: 999px;
+  background: rgba(3, 7, 15, .82); border: 1px solid rgba(139, 156, 192, .25);
+  z-index: 6;
+}
+.siege-pips i { width: 4px; height: 4px; border-radius: 50%; background: rgba(139, 156, 192, .3); }
+.siege-pips i.on { background: var(--gold); box-shadow: 0 0 4px rgba(242, 198, 92, .7); }
+.siege-pips.seed i.on { background: var(--green); box-shadow: 0 0 4px rgba(67, 217, 138, .7); }
+.siege-pips.ready { border-color: rgba(249, 115, 22, .7); box-shadow: 0 0 10px rgba(249, 115, 22, .45); }
+.siege-pips.ready i.on { background: #f97316; box-shadow: 0 0 4px rgba(249, 115, 22, .8); }
+
+.siege-tag {
+  position: absolute; top: -24px; left: 50%; transform: translateX(-50%);
+  padding: 1px 5px; border-radius: 999px; border: 1px solid #0b1120;
+  font-size: 8.5px; font-weight: 800; line-height: 1.4; white-space: nowrap; z-index: 7;
+}
+.siege-tag-seed { background: #43d98a; color: #042315; }
+.siege-tag-ready { background: #f97316; color: #2b1103; }
+.siege-tower.is-ready .siege-tower-face {
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, .55), 0 0 14px -2px rgba(249, 115, 22, .75), inset 0 0 0 1px rgba(255, 255, 255, .25);
+}
+
+/* 劍數看板 */
+.siege-sword-board { display: flex; flex-direction: column; gap: 14px; }
+.siege-sword-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.siege-sword-side {
+  border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px 12px;
+  background: rgba(11, 17, 32, .45); display: flex; flex-direction: column; gap: 8px;
+}
+.siege-sword-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.siege-sword-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px;
+  border-radius: 7px; border: 1px solid var(--line); background: rgba(11, 17, 32, .7);
+  color: var(--text); font-size: 11px; font-weight: 600;
+}
+.siege-sword-chip b { font-size: 10px; padding: 0 4px; border-radius: 4px; }
+.siege-sword-chip.is-seed { border-color: rgba(67, 217, 138, .35); }
+.siege-sword-chip.is-seed b { background: rgba(67, 217, 138, .16); color: var(--green); }
+.siege-sword-chip.is-ready { border-color: rgba(249, 115, 22, .45); }
+.siege-sword-chip.is-ready b { background: rgba(249, 115, 22, .16); color: #ffb27a; }
+.siege-sword-chip:hover { border-color: #2f416b; background: var(--panel-3); }
+.siege-sword-building { font-size: 11px; color: var(--muted-2); }
+
+/* 戰術頁 */
+.siege-tactic-hero { overflow: hidden; }
+.siege-tactic-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.siege-tactic-nums > div {
+  border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px 12px;
+  background: rgba(11, 17, 32, .45); display: flex; flex-direction: column; gap: 2px;
+}
+.siege-tactic-nums span { font-size: 10.5px; color: var(--muted-2); font-weight: 700; letter-spacing: .04em; }
+.siege-tactic-nums b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.siege-tactic-nums em { font-style: normal; font-size: 10.5px; color: var(--muted); }
+.siege-tactic-table th, .siege-tactic-table td { padding: 7px 9px; }
+.siege-tactic-table td:first-child { color: var(--muted); white-space: nowrap; }
+
+/* 5 劍匯率試算 */
+.siege-calc { display: flex; flex-direction: column; gap: 2px; }
+.siege-calc-result { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.siege-calc-result > div {
+  border: 1px solid var(--line-soft); border-radius: 10px; padding: 9px 11px;
+  background: rgba(11, 17, 32, .5); display: flex; flex-direction: column; gap: 2px;
+}
+.siege-calc-result span { font-size: 10.5px; color: var(--muted-2); }
+.siege-calc-result b { font-size: 13px; }
+.siege-calc-result .dim { font-size: 10.5px; }
+
+@media (max-width: 820px) {
+  .siege-sword-grid { grid-template-columns: 1fr; }
+  .siege-tactic-nums { grid-template-columns: 1fr; }
+  .siege-calc-result { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.siege-legend .lg-seed { background: #43d98a; }
+.siege-legend .lg-ready { background: #f97316; }
