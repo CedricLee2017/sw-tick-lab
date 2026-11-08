@@ -46,6 +46,8 @@ const {
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
   autoAssignRoles, roleSetup, hasAtbBoost,
   deckSetupFromRunes, normalizeRequiredSets, mergeLibrary,
+  analyzeSiege, createSiegeState, createSiegeTowers, siegeScoreIncrement, siegeSecondsToWin,
+  formatSiegeDuration, importSiegeJSON, exportSiegeJSON, SIEGE_MAP_VERSION,
 } = engine;
 
 /** 技能資料（判斷提條技能用） */
@@ -2130,6 +2132,106 @@ check("修改時間相同時保留本機，並回寫一次讓兩邊一致", () =
   const r = mergeLibrary([libItem("dk_6", "本機", 200)], [libItem("dk_6", "雲端", 200)], 150);
   assert.equal(r.items[0].name, "本機");
   assert.equal(r.push, true);
+});
+
+/* ── 15. 據點戰錦標賽模擬器 ─────────────────────── */
+console.log("\n[15] 據點戰錦標賽模擬器");
+
+check("預設地圖：藍紅各 13 座、各 12 座連線、24 分/分", () => {
+  const state = createSiegeState();
+  const a = analyzeSiege(state.towers, state.stats);
+  assert.equal(a.Blue.total, 13);
+  assert.equal(a.Blue.towerTotal, 12);
+  assert.equal(a.Blue.connectedTowers, 12);
+  assert.equal(a.Blue.increment, 24);
+  assert.equal(a.Red.connectedTowers, 12);
+  assert.equal(a.Red.increment, 24);
+  assert.equal(Object.keys(a.connected).length, 26);
+});
+
+check("換色後只保留同色連線路徑", () => {
+  const towers = createSiegeTowers();
+  towers.find((t) => t.id === 11).color = "Red";
+  const a = analyzeSiege(towers);
+  assert.equal(a.Blue.connectedTowers, 11, "11 被切掉後藍隊只剩 11 座");
+  assert.equal(a.Blue.increment, 22);
+  assert.equal(a.Red.connectedTowers, 12, "紅隊本營在另一半，不受影響");
+  assert.equal(a.Red.increment, 24);
+  assert.equal(a.connected[10], true, "10 還是從藍隊本營連得到");
+  assert.equal(a.connected[8], true);
+  assert.notEqual(a.connected[11], true, "11 雖然是紅隊，但連不到紅隊本營");
+
+  const towers2 = createSiegeTowers();
+  towers2.find((t) => t.id === 37).color = "Blue";
+  const b = analyzeSiege(towers2);
+  assert.equal(b.Red.connectedTowers, 11, "37 被切掉後紅隊只剩 11 座");
+  assert.equal(b.Red.increment, 22);
+  assert.equal(b.Blue.connectedTowers, 12, "藍隊本營在另一半，不受影響");
+  assert.notEqual(b.connected[37], true, "37 連不到紅隊本營");
+});
+
+check("得分公式：13 座 +20、特殊塔每座 +10%", () => {
+  assert.equal(siegeScoreIncrement(12), 24);
+  assert.equal(siegeScoreIncrement(13), 46);
+  assert.equal(siegeScoreIncrement(10, 2), 24);
+  assert.equal(siegeScoreIncrement(0), 0);
+});
+
+check("勝利時間：20,000 分、∞ 與格式", () => {
+  assert.equal(siegeSecondsToWin(0, 24), 50000);
+  assert.equal(siegeSecondsToWin(20000, 24), Infinity);
+  assert.equal(siegeSecondsToWin(0, 0), Infinity);
+  assert.equal(formatSiegeDuration(50000), "13h 53m 20s");
+  assert.equal(formatSiegeDuration(Infinity), "∞");
+  assert.equal(formatSiegeDuration(900001), "∞");
+});
+
+check("匯出後可再匯入，並相容 SWGT 陣列格式", () => {
+  const state = createSiegeState();
+  state.stats.guildMatchScore = 12345;
+  const t11 = state.towers.find((t) => t.id === 11);
+  t11.color = "Red";
+  t11.pingNumber = 3;
+  t11.memo = '"主力"';
+  const text = exportSiegeJSON(state);
+  const parsed = JSON.parse(text);
+  assert.ok(Array.isArray(parsed));
+  assert.equal(parsed[0].source, "siegeTournamentSimulator");
+  assert.equal(parsed[0].map_version, SIEGE_MAP_VERSION);
+
+  const r = importSiegeJSON(text);
+  assert.equal(r.ok, true);
+  assert.equal(r.state.stats.guildMatchScore, 12345);
+  const back = r.state.towers.find((t) => t.id === 11);
+  assert.equal(back.color, "Red");
+  assert.equal(back.pingNumber, 3);
+  assert.equal(back.memo, "主力", "匯入時會移除雙引號");
+});
+
+check("舊版或缺少欄位的存檔會套用目前地圖並夾住數值", () => {
+  const r = importSiegeJSON(JSON.stringify([{
+    map_version: "2020-01-01",
+    siege_map_data: [
+      { id: 0, color: "Red" },
+      { id: 1, color: "Blue", hpPercentage: 999, pingNumber: 9, memo: "x".repeat(200) },
+    ],
+    siegeMapStatsData: { guildMatchScore: 99999, oppGuild1MatchScore: -5 },
+  }]));
+  assert.equal(r.ok, true);
+  assert.ok(r.warning.includes("2020-01-01"));
+  assert.equal(r.state.towers.length, 26);
+  const t1 = r.state.towers.find((t) => t.id === 1);
+  assert.equal(t1.hpPercentage, 100);
+  assert.equal(t1.pingNumber, 5);
+  assert.equal(t1.memo.length, 100);
+  assert.equal(r.state.stats.guildMatchScore, 20000);
+  assert.equal(r.state.stats.oppGuild1MatchScore, 0);
+  assert.equal(r.state.towers.find((t) => t.id === 0).color, "Red");
+});
+
+check("無效的 JSON 會回報錯誤", () => {
+  assert.equal(importSiegeJSON("{").ok, false);
+  assert.equal(importSiegeJSON(JSON.stringify({ foo: 1 })).ok, false);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
