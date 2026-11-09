@@ -55,7 +55,7 @@ const {
   EMPTY_SKILL_FILTER, matchesSkill, buildBestiary, effectGroups,
   EMPTY_LEADER_FILTER, matchesLeader, isLeaderFilterActive,
   analyzeSiegeBattles, recommendSiegeCounters, recommendSiegeDefenses, siegeDefenseVariants,
-  normalizeSiegeDataset, siegeTeamKey, siegeOverlap, siegeWinRate,
+  normalizeSiegeDataset, mergeSiegeDatasets, siegeSeasonShort, siegeTeamKey, siegeOverlap, siegeWinRate,
 } = engine;
 
 /** 技能資料（判斷提條技能用） */
@@ -2480,16 +2480,19 @@ check("圖鑑：隊長技資料（Lushen / 競技場速度隊長）", () => {
   assert.ok(speedArena.length > 10, `競技場速度隊長應超過 10 隻，實際 ${speedArena.length}`);
 });
 
-check("據點進攻：Nosna44 227 場、224 勝、勝率 98.7%", () => {
+check("據點進攻：Nosna44 近 10 季 2324 場、2264 勝、勝率 97.4%", () => {
   const data = normalizeSiegeDataset(SIEGE_BATTLES);
   const analysis = analyzeSiegeBattles(data);
-  assert.equal(data.battles.length, 227);
-  assert.equal(analysis.overall.wins, 224);
-  assert.equal(analysis.overall.losses, 3);
-  assert.equal(analysis.overall.wr, 98.7);
-  assert.equal(analysis.counterTeams.length, 60);
-  assert.equal(analysis.defenseTeams.length, 101);
-  assert.equal(analysis.losses.length, 3);
+  assert.equal(data.battles.length, 2324);
+  assert.equal(analysis.overall.wins, 2264);
+  assert.equal(analysis.overall.losses, 60);
+  assert.equal(analysis.overall.wr, 97.4);
+  assert.equal(analysis.counterTeams.length, 418);
+  assert.equal(analysis.defenseTeams.length, 979);
+  assert.equal(analysis.losses.length, 60);
+  assert.equal(analysis.seasons.length, 10);
+  assert.equal(analysis.seasons[0].season, "S13");
+  assert.equal(analysis.seasons[9].season, "S22");
 });
 
 check("據點進攻：推薦進攻隊（Sylvia / Daphnis / Wind Qilin Slasher）", () => {
@@ -2511,32 +2514,63 @@ check("據點進攻：推薦進攻隊（Sylvia / Daphnis / Wind Qilin Slasher）
   assert.equal(top.source, "exact");
 });
 
-check("據點防守：Daphnis + Wind Qilin Slasher 為最強核心", () => {
+check("據點防守：Eshir + Fiona 為十季最強核心", () => {
   const data = normalizeSiegeDataset(SIEGE_BATTLES);
   const analysis = analyzeSiegeBattles(data);
   const advice = recommendSiegeDefenses(analysis);
-  assert.equal(advice.losingBattles.length, 3);
+  assert.equal(advice.losingBattles.length, 60);
   const top = advice.corePairs[0];
-  assert.deepEqual([...top.ids].sort((a, b) => a - b), [21112, 32913]);
-  assert.equal(top.battles, 29);
-  assert.equal(top.losses, 2);
-  assert.equal(top.wr, 93.1);
+  assert.deepEqual([...top.ids].sort((a, b) => a - b), [14034, 29715]);
+  assert.equal(top.battles, 119);
+  assert.equal(top.losses, 4);
+  assert.equal(top.wr, 96.6);
 
   const variants = siegeDefenseVariants(data, top.ids);
-  const sylvia = variants.find((v) => v.monsterId === 20115);
-  assert.ok(sylvia);
-  assert.equal(sylvia.battles, 16);
-  assert.equal(sylvia.wins, 15);
-  const velaska = variants.find((v) => v.monsterId === 31315);
-  assert.ok(velaska);
-  assert.equal(velaska.battles, 1);
-  assert.equal(velaska.wins, 0);
+  const vritra = variants.find((v) => v.monsterId === 28515);
+  assert.ok(vritra);
+  assert.equal(vritra.battles, 34);
+  assert.equal(vritra.wins, 31);
+  const emily = variants.find((v) => v.monsterId !== 28515 && v.wr === 91.7);
+  assert.ok(emily);
+  assert.equal(emily.battles, 12);
 });
 
 check("據點進攻：無效資料會回報錯誤", () => {
   assert.throws(() => normalizeSiegeDataset({ battles: [] }), /找不到對戰紀錄/);
   assert.equal(siegeOverlap([1, 2, 3], [2, 3, 4]), 2);
   assert.equal(siegeWinRate(224, 227), 98.7);
+});
+
+check("據點進攻：十季賽季統計與賽季標記", () => {
+  const data = normalizeSiegeDataset(SIEGE_BATTLES);
+  const analysis = analyzeSiegeBattles(data);
+  assert.equal(analysis.seasons.length, 10);
+  const s20 = analysis.seasons.find((s) => s.season === "S20");
+  const s18 = analysis.seasons.find((s) => s.season === "S18");
+  assert.ok(s20 && s18);
+  assert.equal(s20.battles, 227);
+  assert.equal(s20.wr, 99.6);
+  assert.equal(s18.wr, 95.2);
+  assert.equal(siegeSeasonShort("Season 22 - Complete"), "S22");
+  assert.equal(data.battles[0].season, "S22");
+  assert.equal(data.seasons?.length, 10);
+});
+
+check("據點進攻：合併新賽季資料（battleId 去重）", () => {
+  const base = normalizeSiegeDataset(SIEGE_BATTLES);
+  const sample = { ...base.battles[0], battleId: 999999999, season: "S23", seasonName: "Season 23 - Complete" };
+  const incoming = normalizeSiegeDataset({
+    ...base,
+    season: "Season 23 - Complete",
+    seasons: ["S23"],
+    battles: [sample],
+    collectedAt: new Date().toISOString(),
+  });
+  const merged = mergeSiegeDatasets(base, incoming);
+  assert.equal(merged.battles.length, base.battles.length + 1);
+  assert.ok(merged.seasons?.includes("S23"));
+  assert.equal(merged.season, "Season 13 – Season 23");
+  assert.equal(merged.battles.find((b) => b.battleId === 999999999)?.season, "S23");
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

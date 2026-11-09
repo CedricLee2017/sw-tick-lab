@@ -16,6 +16,10 @@ export interface SiegeBattleRecord {
   rank: string;
   battleType: string;
   defenseGuild: string;
+  /** 短賽季標記，例如 S22 */
+  season?: string;
+  /** 完整賽季名稱，例如 Season 22 - Complete */
+  seasonName?: string;
   counter: number[];
   defense: number[];
 }
@@ -25,6 +29,8 @@ export interface SiegeDataset {
   player: string;
   guild: string;
   season: string;
+  /** 這份資料包含的短賽季，例如 ["S13", …, "S22"] */
+  seasons?: string[];
   collectedAt: string;
   reportUrl?: string;
   dateMin: string;
@@ -85,6 +91,14 @@ export interface SiegeGuildStat {
   wr: number;
 }
 
+export interface SiegeSeasonStat {
+  season: string;
+  battles: number;
+  wins: number;
+  losses: number;
+  wr: number;
+}
+
 export interface SiegeOverallStats {
   battles: number;
   wins: number;
@@ -99,6 +113,7 @@ export interface SiegeOverallStats {
 
 export interface SiegeBattleAnalysis {
   overall: SiegeOverallStats;
+  seasons: SiegeSeasonStat[];
   counterTeams: SiegeTeamStat[];
   defenseTeams: SiegeTeamStat[];
   pairs: SiegePairStat[];
@@ -181,6 +196,27 @@ export function siegeWinRate(wins: number, battles: number): number {
   return battles > 0 ? Math.round((wins / battles) * 1000) / 10 : 0;
 }
 
+/** 把 "Season 22 - Complete" 轉成 "S22" */
+export function siegeSeasonShort(label: string): string {
+  const match = label.match(/Season\s*(\d+)/i);
+  return match ? `S${match[1]}` : label;
+}
+
+export function siegeSeasonSort(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true });
+}
+
+/** 用賽季清單產生「Season 13 – Season 22」這種標題 */
+export function siegeSeasonRangeLabel(seasons: string[]): string {
+  const nums = seasons
+    .map((s) => Number(/^S(\d+)/i.exec(s)?.[1] ?? NaN))
+    .filter((n) => Number.isFinite(n));
+  if (nums.length === 0) return seasons.join(" · ");
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  return min === max ? `Season ${min}` : `Season ${min} – Season ${max}`;
+}
+
 export function siegeMonsterName(data: SiegeDataset | null, id: number): string {
   return data?.monsters?.[String(id)]?.name ?? `#${id}`;
 }
@@ -218,6 +254,8 @@ function normalizeBattle(value: unknown): SiegeBattleRecord | null {
     rank: String(row.rank ?? ""),
     battleType: String(row.battleType ?? "Siege"),
     defenseGuild: String(row.defenseGuild ?? ""),
+    season: String(row.season ?? ""),
+    seasonName: String(row.seasonName ?? ""),
     counter,
     defense,
   };
@@ -255,11 +293,14 @@ export function normalizeSiegeDataset(raw: unknown): SiegeDataset {
   }
 
   const range = dateRange(battles);
+  const sourceSeasons = Array.isArray(source.seasons) ? source.seasons.map(String) : [];
+  const seasons = [...new Set([...sourceSeasons, ...battles.map((b) => b.season ?? "").filter(Boolean)])].sort(siegeSeasonSort);
   return {
     source: String(source.source ?? "SWGT 3MDC Battle Logs"),
     player: String(source.player ?? battles[0]?.attacker ?? "Unknown"),
     guild: String(source.guild ?? ""),
-    season: String(source.season ?? ""),
+    season: String(source.season ?? (seasons.length ? siegeSeasonRangeLabel(seasons) : "")),
+    seasons,
     collectedAt: String(source.collectedAt ?? new Date().toISOString()),
     reportUrl: source.reportUrl ? String(source.reportUrl) : undefined,
     dateMin: String(source.dateMin ?? range.dateMin),
@@ -271,6 +312,30 @@ export function normalizeSiegeDataset(raw: unknown): SiegeDataset {
 
 export function parseSiegeJson(text: string): SiegeDataset {
   return normalizeSiegeDataset(JSON.parse(text));
+}
+
+/** 合併同一位玩家的新舊紀錄；不同玩家則直接使用新資料 */
+export function mergeSiegeDatasets(base: SiegeDataset, incoming: SiegeDataset): SiegeDataset {
+  if (base.player && incoming.player && base.player !== incoming.player) return incoming;
+  const monsters = { ...base.monsters, ...incoming.monsters };
+  const map = new Map(base.battles.map((b) => [b.battleId, b]));
+  for (const battle of incoming.battles) map.set(battle.battleId, battle);
+  const battles = [...map.values()].sort((a, b) => siegeDateValue(b.date) - siegeDateValue(a.date));
+  const seasons = [...new Set(battles.map((b) => b.season ?? "").filter(Boolean))].sort(siegeSeasonSort);
+  const range = dateRange(battles);
+  return normalizeSiegeDataset({
+    source: incoming.source || base.source,
+    player: incoming.player || base.player,
+    guild: incoming.guild || base.guild,
+    season: seasons.length ? siegeSeasonRangeLabel(seasons) : incoming.season || base.season,
+    seasons,
+    collectedAt: new Date().toISOString(),
+    reportUrl: incoming.reportUrl || base.reportUrl,
+    dateMin: range.dateMin,
+    dateMax: range.dateMax,
+    monsters,
+    battles,
+  });
 }
 
 function htmlText(el: Element | null | undefined): string {
@@ -320,6 +385,11 @@ export function parseSiegeReportHtml(html: string): SiegeDataset {
     return [...el.querySelectorAll("img")].map(monster).filter((id): id is number => id !== null);
   };
 
+  const seasonLabel = (() => {
+    const el = doc.querySelector("#dateRangeType") as HTMLSelectElement | null;
+    return el?.selectedOptions?.[0]?.textContent?.trim() ?? "";
+  })();
+
   const battles: SiegeBattleRecord[] = [];
   for (const row of rows) {
     const idEl = row.querySelector('[id^="DIV_MD_"]');
@@ -344,6 +414,11 @@ export function parseSiegeReportHtml(html: string): SiegeDataset {
     if (battle) battles.push(battle);
   }
   if (battles.length === 0) throw new Error("HTML 中的對戰紀錄無法解析。");
+  const seasonShort = siegeSeasonShort(seasonLabel);
+  for (const battle of battles) {
+    battle.season = seasonShort;
+    battle.seasonName = seasonLabel;
+  }
 
   const pickSelected = (selector: string): string => {
     const el = doc.querySelector(selector) as HTMLSelectElement | null;
@@ -356,7 +431,8 @@ export function parseSiegeReportHtml(html: string): SiegeDataset {
     source: "SWGT 3MDC Battle Logs (HTML import)",
     player: battles[0]?.attacker || "Unknown",
     guild: pickSelected("#guildID") || titleGuild,
-    season: pickSelected("#dateRangeType"),
+    season: seasonLabel,
+    seasons: seasonShort ? [seasonShort] : [],
     collectedAt: new Date().toISOString(),
     dateMin: range.dateMin,
     dateMax: range.dateMax,
@@ -517,6 +593,22 @@ export function analyzeSiegeBattles(dataset: SiegeDataset): SiegeBattleAnalysis 
   const defenseMonsters = groupMonsters(dataset, "defense").sort((a, b) => b.battles - a.battles || a.wr - b.wr);
   const defensePairs = groupDefensePairs(dataset).sort((a, b) => b.battles - a.battles || a.wr - b.wr);
   const defenseGuilds = groupGuilds(dataset).sort((a, b) => b.battles - a.battles || a.wr - b.wr);
+  const seasonMap = new Map<string, SiegeSeasonStat>();
+  for (const battle of dataset.battles) {
+    const season = battle.season || "未知賽季";
+    let stat = seasonMap.get(season);
+    if (!stat) {
+      stat = { season, battles: 0, wins: 0, losses: 0, wr: 0 };
+      seasonMap.set(season, stat);
+    }
+    stat.battles++;
+    if (battle.result === "Victory") stat.wins++;
+  }
+  for (const stat of seasonMap.values()) {
+    stat.losses = stat.battles - stat.wins;
+    stat.wr = siegeWinRate(stat.wins, stat.battles);
+  }
+  const seasons = [...seasonMap.values()].sort((a, b) => siegeSeasonSort(a.season, b.season));
   const wins = dataset.battles.filter((b) => b.result === "Victory").length;
   const losses = dataset.battles
     .filter((b) => b.result !== "Victory")
@@ -534,6 +626,7 @@ export function analyzeSiegeBattles(dataset: SiegeDataset): SiegeBattleAnalysis 
       dateMin: dataset.dateMin,
       dateMax: dataset.dateMax,
     },
+    seasons,
     counterTeams,
     defenseTeams,
     pairs,
@@ -687,16 +780,18 @@ export function recommendSiegeDefenses(analysis: SiegeBattleAnalysis): SiegeDefe
     }));
 
   const coreMonsters = analysis.defenseMonsters
-    .filter((m) => m.battles >= 5)
+    .filter((m) => m.battles >= 20)
     .sort((a, b) => a.wr - b.wr || b.battles - a.battles)
     .slice(0, 10);
+  const pairDifficulty = (p: SiegeDefensePairStat) => p.losses * Math.sqrt(p.battles);
   const corePairs = analysis.defensePairs
-    .filter((p) => p.battles >= 4)
-    .sort((a, b) => a.wr - b.wr || b.battles - a.battles)
+    .filter((p) => p.battles >= 15)
+    .sort((a, b) => pairDifficulty(b) - pairDifficulty(a) || a.wr - b.wr || b.battles - a.battles)
     .slice(0, 10);
   const guilds = analysis.defenseGuilds
-    .filter((g) => g.battles >= 3)
-    .sort((a, b) => a.wr - b.wr || b.battles - a.battles);
+    .filter((g) => g.battles >= 5)
+    .sort((a, b) => a.wr - b.wr || b.battles - a.battles)
+    .slice(0, 15);
 
   return { losingDefenses, hardDefenses, suggestions, coreMonsters, corePairs, guilds, losingBattles: analysis.losses };
 }

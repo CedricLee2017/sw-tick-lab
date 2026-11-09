@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { fmt } from "../components/ui";
 import {
-  analyzeSiegeBattles, loadSiegeBattles, normalizeSiegeDataset, parseSiegeJson, parseSiegeReportHtml,
+  analyzeSiegeBattles, loadSiegeBattles, mergeSiegeDatasets, normalizeSiegeDataset, parseSiegeJson, parseSiegeReportHtml,
   recommendSiegeCounters, recommendSiegeDefenses, siegeDateValue, siegeDefenseVariants,
   siegeMonsterName, siegeShortDate, siegeTeamKey, siegeTeamLabel,
   type SiegeDataset,
@@ -93,8 +93,10 @@ export default function SiegeAdvicePage() {
   const [tab, setTab] = useState<TabKey>("offense");
   const [selectedKey, setSelectedKey] = useState("");
   const [defenseSearch, setDefenseSearch] = useState("");
+  const [defenseLimit, setDefenseLimit] = useState(60);
   const [logResult, setLogResult] = useState("all");
   const [logGuild, setLogGuild] = useState("");
+  const [logSeason, setLogSeason] = useState("");
   const [logQuery, setLogQuery] = useState("");
   const [logPage, setLogPage] = useState(1);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -145,6 +147,14 @@ export default function SiegeAdvicePage() {
     setSelectedKey(defenseAdvice.suggestions[0]?.key ?? analysis.defenseTeams[0]?.key ?? "");
   }, [analysis, defenseAdvice, selectedKey]);
 
+  useEffect(() => {
+    setLogSeason("");
+    setLogGuild("");
+    setLogResult("all");
+    setLogQuery("");
+    setLogPage(1);
+  }, [dataset]);
+
   const defenseList = useMemo(() => {
     if (!analysis || !dataset) return [];
     const term = defenseSearch.trim().toLowerCase();
@@ -156,6 +166,15 @@ export default function SiegeAdvicePage() {
       })
       .sort((a, b) => b.losses - a.losses || b.battles - a.battles || a.wr - b.wr);
   }, [analysis, dataset, defenseSearch]);
+
+  const defenseVisible = useMemo(() => {
+    const list = defenseList.slice(0, defenseLimit);
+    if (selectedKey && !list.some((d) => d.key === selectedKey)) {
+      const selected = defenseList.find((d) => d.key === selectedKey);
+      if (selected) list.unshift(selected);
+    }
+    return list;
+  }, [defenseList, defenseLimit, selectedKey]);
 
   const primaryPair = useMemo(() => {
     if (!defenseAdvice) return undefined;
@@ -178,6 +197,7 @@ export default function SiegeAdvicePage() {
       .filter((battle) => {
         if (logResult !== "all" && battle.result !== logResult) return false;
         if (logGuild && battle.defenseGuild !== logGuild) return false;
+        if (logSeason && battle.season !== logSeason) return false;
         if (!term) return true;
         const haystack = [
           battle.defenseGuild,
@@ -188,7 +208,7 @@ export default function SiegeAdvicePage() {
         return haystack.includes(term);
       })
       .sort((a, b) => siegeDateValue(b.date) - siegeDateValue(a.date));
-  }, [dataset, logResult, logGuild, logQuery]);
+  }, [dataset, logResult, logGuild, logSeason, logQuery]);
 
   const logPages = Math.max(1, Math.ceil(logBattles.length / LOG_PAGE_SIZE));
   const logPageSafe = Math.min(logPage, logPages);
@@ -197,6 +217,7 @@ export default function SiegeAdvicePage() {
   const resetLogFilters = () => {
     setLogResult("all");
     setLogGuild("");
+    setLogSeason("");
     setLogQuery("");
     setLogPage(1);
   };
@@ -212,12 +233,13 @@ export default function SiegeAdvicePage() {
     try {
       const text = await file.text();
       const next = /\.json$/i.test(file.name) ? parseSiegeJson(text) : parseSiegeReportHtml(text);
+      const merged = dataset ? mergeSiegeDatasets(dataset, next) : next;
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       } catch {
         /* 瀏覽器空間不足時仍可使用本次匯入的資料 */
       }
-      setDataset(next);
+      setDataset(merged);
       setSource("imported");
       setSelectedKey("");
       setTab("offense");
@@ -307,7 +329,7 @@ export default function SiegeAdvicePage() {
 
         <div className="sg-summary">
           <StatTile label="Nosna44 勝率" value={`${overall.wr}%`} sub={`${overall.wins} 勝 / ${overall.losses} 敗`} accent />
-          <StatTile label="對戰場次" value={fmt(overall.battles)} sub={`${overall.counterTeams} 種進攻隊`} />
+          <StatTile label="對戰場次" value={fmt(overall.battles)} sub={`${overall.counterTeams} 種進攻隊 · ${analysis.seasons.length} 季`} />
           <StatTile label="防守隊" value={fmt(overall.defenseTeams)} sub={`${overall.guilds} 個對手公會`} />
           <StatTile label="讓 Nosna44 失手" value={overall.losses} sub="可作為防守靈感" />
         </div>
@@ -342,7 +364,7 @@ export default function SiegeAdvicePage() {
                 <div className="card-title">選擇防守隊</div>
                 <div className="card-sub">點選想分析的防守隊，右側會推薦進攻隊</div>
               </div>
-              <span className="chip muted">{defenseList.length}</span>
+              <span className="chip muted">{defenseVisible.length} / {defenseList.length}</span>
             </div>
             <div className="card-pad" style={{ paddingTop: 10 }}>
               <div style={{ position: "relative" }}>
@@ -352,11 +374,11 @@ export default function SiegeAdvicePage() {
                   style={{ paddingLeft: 28 }}
                   placeholder="搜尋防守怪物 / 公會…"
                   value={defenseSearch}
-                  onChange={(e) => setDefenseSearch(e.target.value)}
+                  onChange={(e) => { setDefenseSearch(e.target.value); setDefenseLimit(60); }}
                 />
               </div>
               <div className="sg-defense-list">
-                {defenseList.map((defense) => (
+                {defenseVisible.map((defense) => (
                   <button
                     key={defense.key}
                     type="button"
@@ -377,6 +399,11 @@ export default function SiegeAdvicePage() {
                 ))}
                 {defenseList.length === 0 && <div className="tiny dim">找不到符合的防守隊。</div>}
               </div>
+              {defenseList.length > defenseVisible.length && (
+                <button type="button" className="btn btn-sm btn-ghost" style={{ width: "100%", marginTop: 8 }} onClick={() => setDefenseLimit((v) => v + 60)}>
+                  顯示更多（還有 {defenseList.length - defenseVisible.length} 種）
+                </button>
+              )}
             </div>
           </div>
 
@@ -531,28 +558,43 @@ export default function SiegeAdvicePage() {
             <div className="card-head">
               <div>
                 <div className="card-title">讓 Nosna44 失手的防守隊</div>
-                <div className="card-sub">共 {defenseAdvice.losingBattles.length} 場敗仗；這是防守建議最有價值的樣本</div>
+                <div className="card-sub">
+                  共 {overall.losses} 場敗仗、{defenseAdvice.losingDefenses.length} 種防守隊；這裡只列失手次數最多的前 8 種
+                </div>
               </div>
-              <span className="chip red">{defenseAdvice.losingBattles.length} 敗</span>
+              <span className="chip red">{overall.losses} 敗</span>
             </div>
             <div className="card-pad sg-loss-list">
-              {defenseAdvice.losingBattles.map((battle) => (
-                <div className="sg-loss-card" key={battle.battleId}>
-                  <div className="row between wrap" style={{ gap: 6 }}>
-                    <span className="sg-result bad"><AlertTriangle size={12} style={{ verticalAlign: "-2px" }} /> {battle.result}</span>
-                    <span className="tiny dim">{battle.date} · {battle.defenseGuild || "未知公會"}</span>
+              {defenseAdvice.losingDefenses.slice(0, 8).map((defense) => {
+                const lostCounters = analysis.pairs
+                  .filter((p) => p.defenseKey === defense.key && p.losses > 0)
+                  .sort((a, b) => b.losses - a.losses || b.battles - a.battles);
+                return (
+                  <div className="sg-loss-card" key={defense.key}>
+                    <div className="row between wrap" style={{ gap: 6 }}>
+                      <SgTeam data={dataset} ids={defense.team} size={28} names />
+                      <div className="row" style={{ gap: 5 }}>
+                        <WrBadge wr={defense.wr} />
+                        <span className="tiny dim">{defense.battles} 場 / {defense.losses} 敗</span>
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => openDefense(defense.key)}>
+                          分析這隊
+                        </button>
+                      </div>
+                    </div>
+                    <div className="tiny dim" style={{ marginTop: 4 }}>
+                      讓 Nosna44 失手的進攻隊{defense.guilds.length ? `（${defense.guilds.slice(0, 2).join(" / ")}）` : ""}：
+                    </div>
+                    <div className="row wrap" style={{ gap: 5, marginTop: 4 }}>
+                      {lostCounters.slice(0, 4).map((counter) => (
+                        <span className="chip red" key={counter.key} title={siegeTeamLabel(dataset, counter.counter)}>
+                          <SgTeam data={dataset} ids={counter.counter} size={18} />
+                          {counter.losses} 敗 / {counter.battles} 場
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="tiny dim" style={{ marginTop: 5 }}>Nosna44 進攻隊</div>
-                  <SgTeam data={dataset} ids={battle.counter} size={28} names />
-                  <div className="tiny dim" style={{ marginTop: 5 }}>防守隊</div>
-                  <div className="row between wrap" style={{ gap: 6 }}>
-                    <SgTeam data={dataset} ids={battle.defense} size={28} names />
-                    <button type="button" className="btn btn-sm btn-ghost" onClick={() => openDefense(siegeTeamKey(battle.defense))}>
-                      分析這隊
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -589,7 +631,7 @@ export default function SiegeAdvicePage() {
 
           <div className="grid split-2" style={{ gap: 12 }}>
             <div className="card">
-              <div className="card-head"><div className="card-title">防守核心怪物</div><span className="tiny dim">出現 ≥5 場</span></div>
+              <div className="card-head"><div className="card-title">防守核心怪物</div><span className="tiny dim">出現 ≥20 場</span></div>
               <div className="table-scroll">
                 <table className="table">
                   <thead><tr><th>怪物</th><th className="num">對戰</th><th className="num">Nosna44 勝率</th><th className="num">失手</th></tr></thead>
@@ -608,7 +650,7 @@ export default function SiegeAdvicePage() {
             </div>
 
             <div className="card">
-              <div className="card-head"><div className="card-title">防守雙人核心</div><span className="tiny dim">出現 ≥4 場</span></div>
+              <div className="card-head"><div className="card-title">防守雙人核心</div><span className="tiny dim">出現 ≥15 場；依失手次數 × 樣本數排序</span></div>
               <div className="table-scroll">
                 <table className="table">
                   <thead><tr><th>組合</th><th className="num">對戰</th><th className="num">Nosna44 勝率</th><th className="num">失手</th></tr></thead>
@@ -628,7 +670,7 @@ export default function SiegeAdvicePage() {
           </div>
 
           <div className="card">
-            <div className="card-head"><div className="card-title">值得參考的對手公會</div><span className="tiny dim">依 Nosna44 勝率由低到高</span></div>
+            <div className="card-head"><div className="card-title">值得參考的對手公會</div><span className="tiny dim">至少 5 場；依 Nosna44 勝率由低到高</span></div>
             <div className="table-scroll">
               <table className="table">
                 <thead><tr><th>公會</th><th className="num">對戰</th><th className="num">Nosna44 勝率</th><th className="num">失手</th></tr></thead>
@@ -649,13 +691,53 @@ export default function SiegeAdvicePage() {
       )}
 
       {tab === "log" && (
-        <div className="card">
+        <>
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div className="card-head">
+              <div>
+                <div className="card-title">賽季統計</div>
+                <div className="card-sub">點擊賽季可直接篩選下方對戰記錄</div>
+              </div>
+              <span className="chip muted">{analysis.seasons.length} 季</span>
+            </div>
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr><th>賽季</th><th className="num">對戰</th><th className="num">勝</th><th className="num">敗</th><th className="num">勝率</th></tr>
+                </thead>
+                <tbody>
+                  {analysis.seasons.map((season) => (
+                    <tr
+                      key={season.season}
+                      style={{ cursor: "pointer", background: logSeason === season.season ? "rgba(242,198,92,.07)" : undefined }}
+                      onClick={() => { setLogSeason(season.season); setLogPage(1); }}
+                    >
+                      <td>
+                        <b>{season.season}</b>
+                        {logSeason === season.season && <span className="chip gold" style={{ marginLeft: 6, padding: "0 6px", fontSize: 9.5 }}>已篩選</span>}
+                      </td>
+                      <td className="num">{season.battles}</td>
+                      <td className="num">{season.wins}</td>
+                      <td className="num">{season.losses}</td>
+                      <td className="num"><WrBadge wr={season.wr} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
           <div className="card-head">
             <div className="card-title">對戰記錄</div>
             <span className="tiny dim">共 {logBattles.length} / {dataset.battles.length} 場</span>
           </div>
           <div className="card-pad" style={{ paddingTop: 10 }}>
             <div className="row wrap" style={{ gap: 7 }}>
+              <select className="select" style={{ width: 120 }} value={logSeason} onChange={(e) => { setLogSeason(e.target.value); setLogPage(1); }}>
+                <option value="">全部賽季</option>
+                {analysis.seasons.map((season) => <option key={season.season} value={season.season}>{season.season}</option>)}
+              </select>
               <select className="select" style={{ width: 130 }} value={logResult} onChange={(e) => { setLogResult(e.target.value); setLogPage(1); }}>
                 <option value="all">全部結果</option>
                 <option value="Victory">Victory</option>
@@ -682,11 +764,12 @@ export default function SiegeAdvicePage() {
           <div className="table-scroll">
             <table className="table sg-log-table">
               <thead>
-                <tr><th>日期</th><th>結果</th><th>對手公會</th><th>Nosna44 進攻隊</th><th>防守隊</th><th /></tr>
+                <tr><th>賽季</th><th>日期</th><th>結果</th><th>對手公會</th><th>Nosna44 進攻隊</th><th>防守隊</th><th /></tr>
               </thead>
               <tbody>
                 {logRows.map((battle) => (
                   <tr key={battle.battleId}>
+                    <td className="mono tiny">{battle.season || "—"}</td>
                     <td className="tiny mono">{siegeShortDate(battle.date)}</td>
                     <td><span className={`sg-result ${battle.result === "Victory" ? "good" : "bad"}`}>{battle.result}</span></td>
                     <td className="tiny">{battle.defenseGuild || "—"}</td>
@@ -695,7 +778,7 @@ export default function SiegeAdvicePage() {
                     <td><button type="button" className="btn btn-sm btn-ghost" onClick={() => openDefense(siegeTeamKey(battle.defense))}>分析</button></td>
                   </tr>
                 ))}
-                {logRows.length === 0 && <tr><td colSpan={6}><div className="empty" style={{ padding: "24px 8px" }}>沒有符合條件的對戰。</div></td></tr>}
+                {logRows.length === 0 && <tr><td colSpan={7}><div className="empty" style={{ padding: "24px 8px" }}>沒有符合條件的對戰。</div></td></tr>}
               </tbody>
             </table>
           </div>
@@ -714,6 +797,7 @@ export default function SiegeAdvicePage() {
             </div>
           )}
         </div>
+        </>
       )}
 
       {tab === "data" && (
@@ -723,6 +807,7 @@ export default function SiegeAdvicePage() {
             <div className="kv"><span className="k">分析對象</span><b>{dataset.player}</b></div>
             <div className="kv"><span className="k">公會</span><b>{dataset.guild || "—"}</b></div>
             <div className="kv"><span className="k">賽季</span><b>{dataset.season || "—"}</b></div>
+            <div className="kv"><span className="k">賽季清單</span><b>{dataset.seasons?.length ? dataset.seasons.join(" · ") : "—"}</b></div>
             <div className="kv"><span className="k">來源</span><b>{dataset.source}</b></div>
             <div className="kv"><span className="k">日期範圍</span><b>{dataset.dateMin} ~ {dataset.dateMax}</b></div>
             <div className="kv"><span className="k">收集時間</span><b>{new Date(dataset.collectedAt).toLocaleString("zh-TW")}</b></div>
@@ -743,12 +828,12 @@ export default function SiegeAdvicePage() {
             <div className="card-title">更新方式</div>
             <ol className="tiny" style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.9, color: "var(--muted)" }}>
               <li>SWGT → 3MDC → Battle Logs。</li>
-              <li>Player 選 <b>Nosna44</b>，Season 選 <b>Season 22 - Complete</b>，Battle Type 選 <b>Siege</b>，Max 選 <b>1,000</b>。</li>
+              <li>Player 選 <b>Nosna44</b>，Season 選要收集的賽季（例如 <b>Season 22 - Complete</b>），Battle Type 選 <b>Siege</b>，Max 選 <b>1,000</b>。</li>
               <li>按 Run Report，將報告頁另存成 HTML（Ctrl + S），或使用此頁下載的 JSON。</li>
-              <li>回到這裡按「匯入更新」，選擇 HTML 或 JSON；資料只會存在這台裝置的瀏覽器。</li>
+              <li>回到這裡按「匯入更新」，選擇 HTML 或 JSON；同一位玩家的資料會以 battleId 合併，重複匯入不會產生重複紀錄。</li>
             </ol>
             <div className="tiny dim" style={{ marginTop: 10 }}>
-              內建快照是 2026-11-09 收集的 Season 22 資料；匯入新檔案後，分析與建議會立即更新。
+              內建快照已包含 <b>Season 13–22</b>（2023/07–2026/10）；要補新賽季時，重複以上步驟並匯入即可。匯入資料只會存在這台裝置的瀏覽器。
             </div>
           </div>
         </div>
