@@ -33,6 +33,7 @@ const {
   tickOf, speedForTick, tickInfo, speedNeededForTick, simulateOrder, optimize, maxSpeedBound,
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
+  runeScore, runeScoreRaw, scoreOfStat, runeEfficiency,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
@@ -338,6 +339,30 @@ check("精煉（磨石）數值完整計入：速度 28 + 5 = 33、防禦 12 + 1
   assert.equal(def.gem, 1, "第 3 欄是寶石標記");
   assert.equal(runeSpeed(r), 33, "速度合計應為 33");
   assert.ok(r.eff > 0);
+});
+
+check("遊戲符文分數：暴擊率與速度同為 30% 上限", () => {
+  // 實際案例：吸血 4 號、暴傷 +80%、固有暴擊率 +6%，
+  // 副屬性 防禦% 29、速度 15、體力% 20、攻擊% 24（含精煉）→ 遊戲顯示 253 分。
+  const rune = {
+    id: 1, set: 11, slot: 4, grade: 6, level: 15,
+    main: { t: 10, v: 80 },
+    prefix: { t: 9, v: 6 },
+    subs: [
+      { t: 6, v: 20, g: 9, gem: 0 },
+      { t: 8, v: 10, g: 5, gem: 0 },
+      { t: 2, v: 11, g: 9, gem: 0 },
+      { t: 4, v: 14, g: 10, gem: 0 },
+    ],
+    occupied: 0, ancient: false, locked: false, eff: 0, effMax: 100,
+  };
+  assert.equal(scoreOfStat(9, 6), 20, "暴擊率 6% 應為 20 分（6★ 上限 30%）");
+  assert.equal(scoreOfStat(8, 15), 50, "速度 15 應為 50 分");
+  assert.equal(scoreOfStat(10, 7), 20, "暴擊傷害 7% 應為 20 分（6★ 上限 35%）");
+  assert.equal(scoreOfStat(2, 8), 20, "體力% 8% 應為 20 分（6★ 上限 40%）");
+  assert.ok(Math.abs(scoreOfStat(1, 100) - 1.8666667) < 1e-4, "固定體力 100 應約 1.867 分");
+  assert.equal(runeScore(rune), 253, "總分應與遊戲顯示的 253 分一致");
+  assert.equal(Math.round(runeScoreRaw(rune)), 253);
 });
 
 check("固定體力/攻擊/防禦主屬性會計入面板與符文價值", () => {
