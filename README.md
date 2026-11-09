@@ -110,7 +110,7 @@ Tick = ceil(10000 / (速度 × 7))
 
 ## 技能傷害估算
 
-- 技能倍率來自 **SWARFARM API**，資料存於 `public/data/skills.json`（可用 `npm run skills` 重新產生；`npm run skills:effects` 只補技能效果名稱、`npm run skills:descriptions` 補完整技能說明）。
+- 技能倍率來自 **SWARFARM API**，資料存於 `public/data/skills.json`（可用 `npm run skills` 重新產生；`npm run skills:effects` 只補技能效果名稱、`npm run skills:descriptions` 補完整技能說明）。`skills.json` 的請求會帶上建置版本，避免瀏覽器或 Service Worker 一直使用舊快取；若技能效果仍顯示成「效果 #xx」，重新整理一次即可。
 - 召喚師技能（Battle）一律計入傷害與 EHP，但不會加進面板數值；競技場圖騰、屬性塔也視為一般技能加成。數值沿用滿等：競技場攻擊 / 體力 / 防禦 20%、暴擊傷害 25%、屬性攻擊塔 21%；速度圖騰 15% 只計入戰鬥速度 / Tick，不計入面板速度。
 - 公會技能（Guild）預設**不計入**：配符頁的「計入公會召喚師技能（傷害 / EHP）」勾選可加入 20% / 25% 公會加成，EHP 與傷害排序會同步切換。
 - 每段傷害：`實戰數值 × 技能倍率 × (烙印 × 暴擊係數 + 滿技傷害%) × 防禦減傷`。滿技與暴擊是**相加**（SWOP 的算法），不是相乘。

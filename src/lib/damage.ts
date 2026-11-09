@@ -95,7 +95,9 @@ let skillPromise: Promise<SkillData> | null = null;
 /** 技能資料只在需要時載入一次（public/data/skills.json） */
 export function loadSkillData(): Promise<SkillData> {
   if (!skillPromise) {
-    const url = `${import.meta.env.BASE_URL}data/skills.json`;
+    // 帶上建置版本，避免瀏覽器 / Service Worker 一直拿到舊的 skills.json。
+    const version = typeof __BUILD_TIME__ === "string" ? __BUILD_TIME__.replace(/[^0-9]/g, "") : "dev";
+    const url = `${import.meta.env.BASE_URL}data/skills.json?v=${version}`;
     skillPromise = fetch(url, { cache: "force-cache" })
       .then((res) => {
         if (!res.ok) throw new Error(`技能資料載入失敗（${res.status}）`);
