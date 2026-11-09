@@ -8,7 +8,7 @@
  */
 import { SET_BY_ID, STAT_TYPES } from "./constants";
 import { runeEfficiency, runeScoreRaw, scoreOfStat } from "./stats";
-import type { Rune } from "./types";
+import type { Grindstone, Rune } from "./types";
 
 export type GrindProfile = "speed" | "score" | "damage" | "tank" | "support";
 
@@ -47,7 +47,7 @@ const SUB_VALUE_WEIGHTS: Record<GrindProfile, Record<number, number>> = {
   support: { 8: 88, 2: 58, 6: 55, 12: 45, 11: 40, 4: 18, 9: 15, 10: 15, 1: 5, 3: 3, 5: 4 },
 };
 
-/** 傳說磨石的最大加成（磨石等級：魔法 < 稀有 < 英雄 < 傳說） */
+/** 一般（非遠古）磨石的最大加成（磨石等級：魔法 < 稀有 < 英雄 < 傳說） */
 export const GRIND_MAX: Record<number, number> = {
   8: 5, // 速度
   2: 10, // 體力%
@@ -58,7 +58,61 @@ export const GRIND_MAX: Record<number, number> = {
   5: 30, // 防禦力
 };
 
-/** 各等級磨石的最大加成，用來說明「用哪種石頭可加多少」 */
+/** 遠古磨石的最大加成（只能用在遠古符文） */
+export const ANCIENT_GRIND_MAX: Record<number, number> = {
+  8: 6,
+  2: 12,
+  4: 12,
+  6: 12,
+  1: 610,
+  3: 34,
+  5: 34,
+};
+
+/** 這顆符文實際可精煉到的上限：遠古符文用遠古磨石的上限 */
+export function grindMax(t: number, ancient = false): number {
+  return (ancient ? ANCIENT_GRIND_MAX[t] : GRIND_MAX[t]) ?? 0;
+}
+
+export const GRIND_GRADE_LABEL: Record<number, string> = {
+  1: "普通",
+  2: "魔法",
+  3: "稀有",
+  4: "英雄",
+  5: "傳說",
+};
+
+/** 各等級磨石的最大加成（[等級][屬性]） */
+const STONE_MAX_NORMAL: Record<number, Record<number, number>> = {
+  1: { 8: 1, 2: 2, 4: 2, 6: 2, 1: 100, 3: 6, 5: 6 },
+  2: { 8: 2, 2: 5, 4: 5, 6: 5, 1: 200, 3: 12, 5: 12 },
+  3: { 8: 3, 2: 6, 4: 6, 6: 6, 1: 250, 3: 18, 5: 18 },
+  4: { 8: 4, 2: 7, 4: 7, 6: 7, 1: 450, 3: 22, 5: 22 },
+  5: { 8: 5, 2: 10, 4: 10, 6: 10, 1: 550, 3: 30, 5: 30 },
+};
+const STONE_MAX_ANCIENT: Record<number, Record<number, number>> = {
+  1: { 8: 2, 2: 5, 4: 5, 6: 5, 1: 180, 3: 12, 5: 12 },
+  2: { 8: 3, 2: 7, 4: 7, 6: 7, 1: 260, 3: 16, 5: 16 },
+  3: { 8: 4, 2: 8, 4: 8, 6: 8, 1: 310, 3: 22, 5: 22 },
+  4: { 8: 5, 2: 9, 4: 9, 6: 9, 1: 510, 3: 26, 5: 26 },
+  5: { 8: 6, 2: 12, 4: 12, 6: 12, 1: 610, 3: 34, 5: 34 },
+};
+
+/** 某個等級（1 普通～5 傳說）的磨石，對這條屬性最多能加多少 */
+export function grindStoneMax(stat: number, grade: number, ancient = false): number {
+  const g = Math.min(5, Math.max(1, Math.round(grade)));
+  return (ancient ? STONE_MAX_ANCIENT[g] : STONE_MAX_NORMAL[g])?.[stat] ?? 0;
+}
+
+/** 要把這條屬性精煉到 need，最低需要哪個等級的磨石 */
+export function grindGradeFor(stat: number, need: number, ancient = false): string {
+  for (let grade = 1; grade <= 5; grade += 1) {
+    if (grindStoneMax(stat, grade, ancient) >= need) return GRIND_GRADE_LABEL[grade];
+  }
+  return "—";
+}
+
+/** 各等級磨石的最大加成（一般符文），用來說明「用哪種石頭可加多少」 */
 export const GRIND_STONE_MAX: Record<number, { magic: number; rare: number; hero: number; legend: number }> = {
   8: { magic: 2, rare: 3, hero: 4, legend: 5 },
   2: { magic: 5, rare: 6, hero: 7, legend: 10 },
@@ -225,8 +279,8 @@ export function analyzeRune(
   const weights = WEIGHTS[profile];
   const options: GrindOption[] = [];
   for (const s of rune.subs) {
-    const maxGrind = GRIND_MAX[s.t];
-    if (maxGrind == null) continue;
+    const maxGrind = grindMax(s.t, rune.ancient);
+    if (maxGrind <= 0) continue;
     if (onlyStat && !onlyStat.has(s.t)) continue;
     const headroom = Math.max(0, maxGrind - (s.g ?? 0));
     if (headroom <= 0) continue;
@@ -262,7 +316,7 @@ export function analyzeRune(
       gem: target.gem,
       grind: target.grind,
       target: target.total,
-      grindable: GRIND_MAX[s.t] != null && GRIND_MAX[s.t] > 0,
+      grindable: grindMax(s.t, rune.ancient) > 0,
     });
   }
   // 未達標只看可用磨石精煉的屬性（速度、體 / 攻 / 防%）
@@ -342,33 +396,33 @@ export interface ScorePlanStep {
 
 /**
  * 計算「要到達目標分數，最少要精煉哪幾條、各加到多少」。
- * 依每點數值的分數效益由高到低分配（速度 3.33／暴傷 2.86／體攻防% 2.5…）。
+ * 依每點數值的分數效益由高到低分配（速度／爆率 3.33、暴傷 2.86、體攻防% 2.5…）。
+ *
+ * `caps` 可指定每條屬性「用目前持有的磨石最多能到多少（含現有精煉值）」；
+ * 未提供時以該符文可用的最高等級磨石（遠古符文用遠古上限）估算。
  */
-export function planScore(target: GrindTarget, targetScore: number): ScorePlanStep[] {
+export function planScore(
+  target: GrindTarget,
+  targetScore: number,
+  caps?: Record<number, number>,
+): ScorePlanStep[] {
   let need = targetScore - target.gameScore;
   if (need <= 0) return [];
   const candidates = target.options
     .filter((o) => o.headroom > 0)
-    .map((o) => ({ o, per: scoreOfStat(o.t, 1) }))
-    .filter((c) => c.per > 0)
+    .map((o) => {
+      const cap = caps ? (caps[o.t] ?? o.grind) : o.maxGrind;
+      return { o, per: scoreOfStat(o.t, 1), headroom: Math.max(0, Math.min(o.headroom, cap - o.grind)) };
+    })
+    .filter((c) => c.headroom > 0 && c.per > 0)
     .sort((a, b) => b.per - a.per);
 
   const steps: ScorePlanStep[] = [];
-  for (const { o, per } of candidates) {
+  for (const { o, per, headroom } of candidates) {
     if (need <= 0) break;
-    const add = Math.min(o.headroom, Math.ceil(need / per - 1e-9));
+    const add = Math.min(headroom, Math.ceil(need / per - 1e-9));
     if (add <= 0) continue;
     const to = o.grind + add;
-    const stone = GRIND_STONE_MAX[o.t];
-    const grade = !stone
-      ? "—"
-      : to <= stone.magic
-        ? "魔法"
-        : to <= stone.rare
-          ? "稀有"
-          : to <= stone.hero
-            ? "英雄"
-            : "傳說";
     steps.push({
       t: o.t,
       label: o.label,
@@ -377,7 +431,7 @@ export function planScore(target: GrindTarget, targetScore: number): ScorePlanSt
       from: o.grind,
       to,
       gain: add * per,
-      grade,
+      grade: grindGradeFor(o.t, to, target.rune.ancient),
     });
     need -= add * per;
   }
@@ -427,13 +481,116 @@ export function analyzeGrind(runes: Rune[], filter: GrindFilter): GrindTarget[] 
 }
 
 /** 目前精煉值距離各等級磨石上限還差多少（給詳細說明用） */
-export function stoneGain(option: GrindOption): { label: string; gain: number }[] {
-  const max = GRIND_STONE_MAX[option.t];
-  if (!max) return [];
+export function stoneGain(option: GrindOption, ancient = false): { label: string; gain: number }[] {
   return [
-    { label: "魔法", gain: Math.max(0, max.magic - option.grind) },
-    { label: "稀有", gain: Math.max(0, max.rare - option.grind) },
-    { label: "英雄", gain: Math.max(0, max.hero - option.grind) },
-    { label: "傳說", gain: Math.max(0, max.legend - option.grind) },
+    { label: "魔法", gain: Math.max(0, grindStoneMax(option.t, 2, ancient) - option.grind) },
+    { label: "稀有", gain: Math.max(0, grindStoneMax(option.t, 3, ancient) - option.grind) },
+    { label: "英雄", gain: Math.max(0, grindStoneMax(option.t, 4, ancient) - option.grind) },
+    { label: "傳說", gain: Math.max(0, grindStoneMax(option.t, 5, ancient) - option.grind) },
   ];
+}
+
+/** 這顆磨石能不能用在這顆符文上 */
+function stoneFitsRune(rune: Rune, stone: Grindstone): boolean {
+  if (stone.amount <= 0) return false;
+  if (rune.ancient) {
+    // 遠古符文只能用同套裝的遠古磨石
+    return stone.ancient && !stone.immemorial && stone.set === rune.set;
+  }
+  // 一般符文：同套裝的一般磨石，或無形磨石（不限套裝）
+  return !stone.ancient && (stone.immemorial || stone.set === rune.set);
+}
+
+/**
+ * 以目前持有的磨石，這顆符文每條可精煉屬性最多能到多少（含現有精煉值）。
+ * 回傳值可直接傳給 planScore 的 caps。
+ */
+export function grindCapsFromStock(rune: Rune, stock: Grindstone[]): Record<number, number> {
+  const caps: Record<number, number> = {};
+  for (const s of rune.subs) {
+    const max = grindMax(s.t, rune.ancient);
+    if (max <= 0) continue;
+    let best = 0;
+    for (const stone of stock) {
+      if (stone.stat !== s.t || !stoneFitsRune(rune, stone)) continue;
+      const value = grindStoneMax(s.t, stone.grade, rune.ancient);
+      if (value > best) best = value;
+    }
+    caps[s.t] = Math.min(max, Math.max(s.g ?? 0, best));
+  }
+  return caps;
+}
+
+/** 符合這條精煉需求（要把精煉值加到 need）的持有磨石，依等級低到高排序 */
+export function matchingGrindstones(
+  rune: Rune,
+  stat: number,
+  need: number,
+  stock: Grindstone[],
+): Grindstone[] {
+  if (need <= 0) return [];
+  return stock
+    .filter(
+      (stone) =>
+        stone.stat === stat &&
+        stoneFitsRune(rune, stone) &&
+        grindStoneMax(stat, stone.grade, rune.ancient) >= need,
+    )
+    .sort(
+      (a, b) =>
+        a.grade - b.grade ||
+        Number(a.immemorial) - Number(b.immemorial) ||
+        b.amount - a.amount,
+    );
+}
+
+export interface GrindMaterialRow {
+  /** 屬性 type id */
+  t: number;
+  label: string;
+  /** 要精煉到的總值（含精煉） */
+  need: number;
+  /** 會用到的持有磨石；沒有素材時為 null */
+  stone: Grindstone | null;
+}
+
+/** 把精煉計畫轉成「需要哪些磨石」；沒有素材的步驟 stone 會是 null */
+export function planMaterials(
+  rune: Rune,
+  steps: ScorePlanStep[],
+  stock: Grindstone[],
+): { ok: boolean; rows: GrindMaterialRow[] } {
+  const rows: GrindMaterialRow[] = steps.map((step) => ({
+    t: step.t,
+    label: step.label,
+    need: step.to,
+    stone: matchingGrindstones(rune, step.t, step.to, stock)[0] ?? null,
+  }));
+  return { ok: rows.every((row) => row.stone !== null), rows };
+}
+
+/**
+ * 依持有素材計算精煉計畫。`reachable` 代表真的能把分數推到目標，
+ * 不只是理論上精煉到傳說上限。
+ */
+export function planWithStock(
+  target: GrindTarget,
+  targetScore: number,
+  stock: Grindstone[],
+): { plan: ScorePlanStep[]; reachable: boolean } {
+  const plan = planScore(target, targetScore, grindCapsFromStock(target.rune, stock));
+  const gain = plan.reduce((sum, step) => sum + step.gain, 0);
+  return { plan, reachable: target.gameScore + gain >= targetScore - 1e-6 };
+}
+
+/** 只用目前持有的磨石，這顆符文最多能到幾分 */
+export function maxScoreWithStock(target: GrindTarget, stock: Grindstone[]): number {
+  const caps = grindCapsFromStock(target.rune, stock);
+  let raw = runeScoreRaw(target.rune);
+  for (const option of target.options) {
+    const cap = caps[option.t] ?? option.grind;
+    const headroom = Math.max(0, Math.min(option.headroom, cap - option.grind));
+    raw += headroom * scoreOfStat(option.t, 1);
+  }
+  return Math.round(raw);
 }

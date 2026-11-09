@@ -3,7 +3,7 @@ import { Gem, Search, X } from "lucide-react";
 import { useStore, monsterLabel } from "../store";
 import { RUNE_SETS, SET_BY_ID, STAT_TYPES } from "../lib/constants";
 import { runeScore } from "../lib/stats";
-import { GRIND_MAX, grindStatSuffix } from "../lib/grind";
+import { grindMax, grindStatSuffix } from "../lib/grind";
 import { Modal, NumberInput, RuneCard, fmt, setColor, statText } from "../components/ui";
 import type { Rune } from "../lib/types";
 
@@ -67,9 +67,9 @@ export default function RunesPage() {
       if (ancient === "only" && !r.ancient) return false;
       if (ancient === "exclude" && r.ancient) return false;
       if (grindState !== "all") {
-        const grindable = r.subs.filter((s) => GRIND_MAX[s.t] != null);
+        const grindable = r.subs.filter((s) => grindMax(s.t, r.ancient) > 0);
         const total = grindable.reduce((n, s) => n + (s.g ?? 0), 0);
-        const headroom = grindable.some((s) => (s.g ?? 0) < GRIND_MAX[s.t]);
+        const headroom = grindable.some((s) => (s.g ?? 0) < grindMax(s.t, r.ancient));
         if (grindState === "grinded" && total <= 0) return false;
         if (grindState === "none" && total > 0) return false;
         if (grindState === "headroom" && !headroom) return false;

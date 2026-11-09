@@ -34,6 +34,8 @@ const {
   baseStats, bonusFromBuildings, parseAccountJSON, MONSTERS, runeSpeed,
   emptyAccum, addRuneToAccum, runeValue, computeSkillDamage, skillsForMonster,
   runeScore, runeScoreRaw, scoreOfStat, runeEfficiency,
+  grindMax, grindStoneMax, grindGradeFor, grindCapsFromStock, matchingGrindstones,
+  analyzeRune, planScore, planMaterials, planWithStock, maxScoreWithStock,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
@@ -363,6 +365,84 @@ check("遊戲符文分數：暴擊率與速度同為 30% 上限", () => {
   assert.ok(Math.abs(scoreOfStat(1, 100) - 1.8666667) < 1e-4, "固定體力 100 應約 1.867 分");
   assert.equal(runeScore(rune), 253, "總分應與遊戲顯示的 253 分一致");
   assert.equal(Math.round(runeScoreRaw(rune)), 253);
+});
+
+check("精煉石素材：解析一般 / 無形 / 遠古磨石並合併數量", () => {
+  const raw = {
+    unit_list: [],
+    runes: [{
+      rune_id: 1, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15,
+      pri_eff: [3, 160], prefix_eff: [0, 0], sec_eff: [],
+    }],
+    rune_craft_item_list: [
+      { craft_type: 2, craft_type_id: 210805, amount: 4 }, // 一般：set 21 / 速度 / 傳說
+      { craft_type: 2, craft_type_id: 210805, amount: 2 }, // 同種合併
+      { craft_type: 4, craft_type_id: 990305, amount: 8 }, // 無形：固定攻擊 / 傳說
+      { craft_type: 6, craft_type_id: 10214, amount: 5 },  // 遠古：set 1 / 體力% / 英雄 (14 - 10)
+      { craft_type: 1, craft_type_id: 210905, amount: 9 }, // 寶石，不列入磨石
+    ],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "stones.json");
+  assert.equal(p.error, undefined, p.error);
+  const list = p.account.grindstones;
+  assert.equal(list.length, 3);
+  const normal = list.find((g) => !g.ancient && !g.immemorial);
+  assert.deepEqual(
+    { set: normal.set, stat: normal.stat, grade: normal.grade, amount: normal.amount },
+    { set: 21, stat: 8, grade: 5, amount: 6 },
+  );
+  const immemorial = list.find((g) => g.immemorial);
+  assert.deepEqual(
+    { set: immemorial.set, stat: immemorial.stat, grade: immemorial.grade, ancient: immemorial.ancient },
+    { set: 99, stat: 3, grade: 5, ancient: false },
+  );
+  const ancient = list.find((g) => g.ancient);
+  assert.deepEqual(
+    { set: ancient.set, stat: ancient.stat, grade: ancient.grade, amount: ancient.amount },
+    { set: 1, stat: 2, grade: 4, amount: 5 },
+  );
+});
+
+check("持有磨石：只列出真的能精煉到目標分數的符文", () => {
+  const rune = {
+    id: 777, set: 11, slot: 4, grade: 6, level: 15,
+    main: { t: 10, v: 80 },
+    prefix: { t: 9, v: 6 },
+    subs: [
+      { t: 6, v: 20, g: 9, gem: 0 },
+      { t: 8, v: 10, g: 5, gem: 0 },
+      { t: 2, v: 11, g: 9, gem: 0 },
+      { t: 4, v: 14, g: 8, gem: 0 },
+    ],
+    occupied: 0, ancient: false, locked: false, eff: 0, effMax: 100,
+  };
+  const target = analyzeRune(rune, "score");
+  assert.equal(target.gameScore, 248);
+  // 沒有限制素材時，用傳說上限可以補 1% 攻擊到 250。
+  assert.ok(planScore(target, 250).length > 0);
+
+  const heroAtk = { set: 11, stat: 4, grade: 4, ancient: false, immemorial: false, amount: 3 };
+  const legendAtk = { set: 11, stat: 4, grade: 5, ancient: false, immemorial: false, amount: 2 };
+  const immemorialAtk = { set: 99, stat: 4, grade: 5, ancient: false, immemorial: true, amount: 2 };
+  assert.equal(planWithStock(target, 250, [heroAtk]).reachable, false, "英雄磨石最大 7，補不到 8 以上");
+  assert.equal(planWithStock(target, 250, [legendAtk]).reachable, true, "傳說磨石可以補到 10");
+  assert.equal(planWithStock(target, 250, [immemorialAtk]).reachable, true, "無形磨石可用在任何一般套裝");
+  assert.equal(maxScoreWithStock(target, [heroAtk]), 248, "英雄磨石無法再提升");
+  assert.equal(maxScoreWithStock(target, [legendAtk]), 253, "傳說攻擊% 可把分數推到 253");
+  assert.equal(maxScoreWithStock(target, [immemorialAtk]), 253, "無形傳說石同樣可到 253");
+
+  const mats = planMaterials(target.rune, planWithStock(target, 250, [legendAtk]).plan, [legendAtk]);
+  assert.equal(mats.ok, true);
+  assert.equal(mats.rows[0].stone.grade, 5);
+
+  // 遠古符文只能用遠古磨石；一般磨石不能用。
+  const ancientRune = { ...rune, ancient: true };
+  assert.equal(matchingGrindstones(ancientRune, 2, 12, [{ ...legendAtk, stat: 2 }]).length, 0);
+  const ancientStone = { set: 11, stat: 2, grade: 5, ancient: true, immemorial: false, amount: 1 };
+  assert.equal(matchingGrindstones(ancientRune, 2, 12, [ancientStone]).length, 1);
+  assert.equal(grindMax(2, false), 10);
+  assert.equal(grindMax(2, true), 12);
+  assert.equal(grindStoneMax(2, 5, true), 12);
 });
 
 check("固定體力/攻擊/防禦主屬性會計入面板與符文價值", () => {

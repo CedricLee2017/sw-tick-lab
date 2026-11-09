@@ -1,7 +1,7 @@
 /** SWEX / SWOP JSON 解析（寬容格式） */
 import { runeEfficiency } from "./stats";
 import { RUNE_SETS, SET_BY_ID } from "./constants";
-import type { Account, Artifact, ArtifactSub, Deck, DeckEquip, Rune, RtaData, RtaLoadout, SummonRecord, Unit } from "./types";
+import type { Account, Artifact, ArtifactSub, Deck, DeckEquip, Grindstone, Rune, RtaData, RtaLoadout, SummonRecord, Unit } from "./types";
 
 const num = (v: unknown, d = 0): number => {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -30,6 +30,9 @@ const STAT_NAME: Record<string, number> = {
   cd: 10, cdmg: 10, critdmg: 10, "crit dmg": 10, "crit damage": 10,
   res: 11, resistance: 11, acc: 12, accuracy: 12,
 };
+
+/** 磨石可以精煉的屬性（固定體 / 攻 / 防、%、速度） */
+const GRINDABLE_STATS = new Set([1, 2, 3, 4, 5, 6, 8]);
 
 /** 屬性 type：數字 id、或 SWOP 常見的英文字串（對應 sw-exporter mapping.js） */
 function typeOf(v: unknown): number {
@@ -181,8 +184,8 @@ export interface ParseResult {
   warnings: string[];
 }
 
-/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值、取得時間軸 */
-export const PARSE_VERSION = 8;
+/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值、取得時間軸、精煉石素材 */
+export const PARSE_VERSION = 9;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -351,6 +354,44 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       arr.push(a.id);
       artifactOccupied.set(a.occupied, arr);
     }
+  }
+
+  // 精煉石（磨石）素材：rune_craft_item_list。craft_type_id 為 6 位數字
+  //   套裝(2) + 屬性(2) + 等級(2)；遠古磨石的等級會 +10。
+  //   craft_type：1 寶石、2 一般磨石、3 無形寶石、4 無形磨石、5 遠古寶石、6 遠古磨石。
+  const grindstoneMap = new Map<string, Grindstone>();
+  for (const item of list(body.rune_craft_item_list)) {
+    if (!item || typeof item !== "object") continue;
+    const craftType = num(item.craft_type);
+    if (craftType !== 2 && craftType !== 4 && craftType !== 6) continue;
+    const rawId = String(item.craft_type_id ?? "").trim();
+    if (!/^\d+$/.test(rawId)) continue;
+    const raw = rawId.padStart(6, "0");
+    const set = num(raw.slice(0, 2));
+    const stat = num(raw.slice(2, 4));
+    let grade = num(raw.slice(4, 6));
+    const amount = num(item.amount);
+    if (!set || !amount || !GRINDABLE_STATS.has(stat)) continue;
+    const immemorial = craftType === 4 || set === 99;
+    const ancient = craftType === 6 || grade > 10;
+    if (grade > 10) grade -= 10;
+    grade = Math.min(5, Math.max(1, grade));
+    const key = `${immemorial ? "i" : ancient ? "a" : "n"}|${set}|${stat}|${grade}`;
+    const existing = grindstoneMap.get(key);
+    if (existing) existing.amount += amount;
+    else grindstoneMap.set(key, { set, stat, grade, ancient, immemorial, amount });
+  }
+  const grindstones = [...grindstoneMap.values()].sort(
+    (a, b) =>
+      Number(a.immemorial) - Number(b.immemorial) ||
+      Number(a.ancient) - Number(b.ancient) ||
+      a.set - b.set ||
+      a.stat - b.stat ||
+      a.grade - b.grade,
+  );
+  if (grindstones.length > 0) {
+    const total = grindstones.reduce((s, g) => s + g.amount, 0);
+    warnings.push(`精煉石素材：${grindstones.length} 種（共 ${total} 個）。`);
   }
 
   const units: Unit[] = [];
@@ -583,6 +624,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       decks,
       defenseDecks,
       summons,
+      grindstones,
     },
     warnings,
   };
@@ -670,5 +712,15 @@ export function exportAccount(account: Account): string {
         artifact_id_list: e.artifacts,
       })),
     })),
+    rune_craft_item_list: (account.grindstones ?? []).map((g, i) => {
+      const craftType = g.immemorial ? 4 : g.ancient ? 6 : 2;
+      const grade = g.ancient ? g.grade + 10 : g.grade;
+      return {
+        craft_item_id: 900000000 + i,
+        craft_type: craftType,
+        craft_type_id: g.set * 10000 + g.stat * 100 + grade,
+        amount: g.amount,
+      };
+    }),
   });
 }

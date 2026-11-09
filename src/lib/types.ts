@@ -51,6 +51,22 @@ export interface Rune {
   effMax: number;
 }
 
+/** 持有的精煉石（磨石）素材 */
+export interface Grindstone {
+  /** 套裝 id；99 = 無形（可用在任何一般符文，不限套裝） */
+  set: number;
+  /** 可精煉的屬性 type id（1、2、3、4、5、6、8） */
+  stat: number;
+  /** 稀有度：1 普通 / 2 魔法 / 3 稀有 / 4 英雄 / 5 傳說 */
+  grade: number;
+  /** 遠古磨石：只能用在遠古符文 */
+  ancient: boolean;
+  /** 無形磨石：可用在任何一般符文 */
+  immemorial: boolean;
+  /** 持有數量 */
+  amount: number;
+}
+
 /** 神器副效果（200–226 / 300–309 / 400–411） */
 export interface ArtifactSub {
   /** 效果 id */
@@ -165,6 +181,8 @@ export interface Account {
   defenseDecks?: Deck[];
   /** 魔靈取得記錄（舊存檔可能沒有；需重新匯入） */
   summons?: SummonRecord[];
+  /** 持有的精煉石（磨石）素材（舊存檔可能沒有；需重新匯入） */
+  grindstones?: Grindstone[];
 }
 
 export interface BonusConfig {

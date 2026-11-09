@@ -5,17 +5,22 @@ import { SET_BY_ID } from "../lib/constants";
 import { EmptyState, NumberInput, RuneCard } from "../components/ui";
 import {
   GRIND_ACCEPT_LEVELS,
+  GRIND_GRADE_LABEL,
   GRIND_PROFILES,
   analyzeGrind,
   grindStatLabel,
   grindStatSuffix,
+  maxScoreWithStock,
+  planMaterials,
   planScore,
+  planWithStock,
   stoneGain,
   type GrindAccept,
   type GrindOwner,
   type GrindProfile,
   type GrindTarget,
 } from "../lib/grind";
+import type { Grindstone } from "../lib/types";
 
 const STAT_FILTERS = [
   { value: 0, label: "全部副屬性" },
@@ -42,6 +47,7 @@ function TargetCard({
   showAccept,
   showScore,
   targetScore,
+  stock,
   locked,
   excluded,
   onToggleLock,
@@ -52,13 +58,21 @@ function TargetCard({
   showAccept: boolean;
   showScore: boolean;
   targetScore: number;
+  /** 有提供時，精煉計畫會依持有素材的上限計算 */
+  stock?: Grindstone[];
   locked: boolean;
   excluded: boolean;
   onToggleLock: () => void;
   onToggleExclude: () => void;
 }) {
   const gain = t.effAfter - t.effNow;
-  const plan = showScore ? planScore(t, targetScore) : [];
+  const plan = showScore
+    ? stock
+      ? planWithStock(t, targetScore, stock).plan
+      : planScore(t, targetScore)
+    : [];
+  const materials = showScore && stock ? planMaterials(t.rune, plan, stock) : null;
+  const stockMax = stock ? maxScoreWithStock(t, stock) : null;
   const planGain = plan.reduce((s, x) => s + x.gain, 0);
   const extra = t.reasons.filter(
     (r) => !r.startsWith("裝備於") && r !== "未裝備" && !r.endsWith("符文") && !r.startsWith("效率"),
@@ -74,8 +88,11 @@ function TargetCard({
     >
       <div className="row wrap" style={{ gap: 6 }}>
         {showScore ? (
-          <span className="chip gold" title="全部可精煉屬性精煉到上限後的分數">
-            可達 {t.maxGameScore}
+          <span
+            className="chip gold"
+            title={stock ? "用目前持有的磨石最多能達到的分數" : "全部可精煉屬性精煉到上限後的分數"}
+          >
+            {stock ? `素材可達 ${stockMax}` : `可達 ${t.maxGameScore}`}
           </span>
         ) : (
           <span className={`chip ${t.tier === "high" ? "gold" : "muted"}`}>
@@ -111,7 +128,7 @@ function TargetCard({
         <>
           <div className="tiny" style={{ lineHeight: 1.7 }}>
             <span className="gold">遊戲分數 {t.gameScore}</span>
-            <span className="dim"> · 精煉後最高 {t.maxGameScore} 分</span>
+            <span className="dim"> · {stock ? `素材可達 ${stockMax} 分` : `精煉後最高 ${t.maxGameScore} 分`}</span>
             {t.gameScore >= targetScore ? (
               <span className="dim"> · 已達 {targetScore} 分</span>
             ) : (
@@ -133,6 +150,21 @@ function TargetCard({
                   )
                   .join(" · ")}`}
           </div>
+          {materials && materials.rows.length > 0 && (
+            <div className="tiny" style={{ color: "var(--gold)", lineHeight: 1.6 }}>
+              素材：
+              {materials.rows
+                .map((row) => {
+                  const stone = row.stone;
+                  if (!stone) return `${row.label} 缺少素材`;
+                  const setName = stone.immemorial
+                    ? "無形"
+                    : SET_BY_ID[stone.set]?.name ?? `套裝 ${stone.set}`;
+                  return `${setName} ${row.label} ${GRIND_GRADE_LABEL[stone.grade] ?? "?"}（精煉到 +${row.need}${grindStatSuffix(row.t)}，持 ${stone.amount}）`;
+                })
+                .join(" · ")}
+            </div>
+          )}
         </>
       )}
 
@@ -162,7 +194,7 @@ function TargetCard({
             {t.best.grind > 0 ? `（目前精煉 +${t.best.grind}）` : "（尚未精煉）"}
           </div>
           <div className="tiny dim">
-            磨石可再加：{stoneGain(t.best).filter((s) => s.gain > 0).map((s) => `${s.label} +${s.gain}`).join(" · ")}
+            磨石可再加：{stoneGain(t.best, t.rune.ancient).filter((s) => s.gain > 0).map((s) => `${s.label} +${s.gain}`).join(" · ")}
             {gain > 0.4 && ` ；精煉此條後效率 ${Math.round(t.effAfter)}%（+${gain.toFixed(1)}%）`}
           </div>
         </>
@@ -182,6 +214,7 @@ export default function GrindPage() {
   const [profile, setProfile] = useState<GrindProfile>("speed");
   const [accept, setAccept] = useState<GrindAccept>(10);
   const [targetScore, setTargetScore] = useState(250);
+  const [useStock, setUseStock] = useState(false);
   const [onlyEquipped, setOnlyEquipped] = useState(false);
   const [onlySix, setOnlySix] = useState(false);
   const [onlyHigh, setOnlyHigh] = useState(false);
@@ -190,9 +223,15 @@ export default function GrindPage() {
   const [q, setQ] = useState("");
   const [take, setTake] = useState(40);
 
+  const stock = useMemo(() => account?.grindstones ?? [], [account]);
+  const hasStockData = Array.isArray(account?.grindstones);
+  const stockTotal = useMemo(() => stock.reduce((sum, g) => sum + g.amount, 0), [stock]);
+  /** 只有在分數模式且存檔有精煉石資料時，才啟用素材篩選 */
+  const stockOn = profile === "score" && useStock && hasStockData;
+
   useEffect(() => {
     setTake(40);
-  }, [profile, accept, targetScore, onlyEquipped, onlySix, onlyHigh, setId, stat, q]);
+  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, stat, q]);
 
   const owners = useMemo(() => {
     const map = new Map<number, GrindOwner>();
@@ -210,6 +249,12 @@ export default function GrindPage() {
     return analyzeGrind(account.runes, { profile, owners, stat: onlyStat, accept, targetScore });
   }, [account, profile, owners, stat, accept, targetScore]);
 
+  /** 勾選「計算持有精煉石素材」時，只留下真的能用手上磨石推到目標分數的符文 */
+  const candidates = useMemo(() => {
+    if (!stockOn) return all;
+    return all.filter((t) => planWithStock(t, targetScore, stock).reachable);
+  }, [all, stockOn, targetScore, stock]);
+
   const sets = useMemo(() => {
     const ids = new Set(account?.runes.map((r) => r.set) ?? []);
     return [...ids]
@@ -219,7 +264,7 @@ export default function GrindPage() {
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return all.filter((t) => {
+    return candidates.filter((t) => {
       if (onlyEquipped && !t.owner) return false;
       if (onlySix && t.rune.grade !== 6) return false;
       if (onlyHigh && t.tier !== "high") return false;
@@ -231,15 +276,15 @@ export default function GrindPage() {
         grindStatLabel(t.best.t).includes(term)
       );
     });
-  }, [all, onlyEquipped, onlySix, onlyHigh, setId, q]);
+  }, [candidates, onlyEquipped, onlySix, onlyHigh, setId, q]);
 
   const summary = useMemo(() => {
-    const high = all.filter((t) => t.tier === "high").length;
-    const speed = all.filter((t) => t.best.t === 8).length;
-    const speed6 = all.filter((t) => t.best.t === 8 && t.rune.grade === 6).length;
-    const avgGain = all.length ? all.reduce((s, t) => s + Math.max(0, t.effAfter - t.effNow), 0) / all.length : 0;
+    const high = candidates.filter((t) => t.tier === "high").length;
+    const speed = candidates.filter((t) => t.best.t === 8).length;
+    const speed6 = candidates.filter((t) => t.best.t === 8 && t.rune.grade === 6).length;
+    const avgGain = candidates.length ? candidates.reduce((s, t) => s + Math.max(0, t.effAfter - t.effNow), 0) / candidates.length : 0;
     const bySet = new Map<number, { count: number; spd: number }>();
-    for (const t of all) {
+    for (const t of candidates) {
       const cur = bySet.get(t.rune.set) ?? { count: 0, spd: 0 };
       cur.count += 1;
       if (t.best.t === 8) cur.spd += 1;
@@ -249,11 +294,11 @@ export default function GrindPage() {
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 8)
       .map(([id, v]) => ({ id, name: SET_BY_ID[id]?.name ?? `套裝 ${id}`, ...v }));
-    const meet = all.filter((t) => t.gameScore >= targetScore).length;
-    const maxScore = all.reduce((m, t) => Math.max(m, t.gameScore), 0);
-    const avgScore = all.length ? all.reduce((s, t) => s + t.gameScore, 0) / all.length : 0;
+    const meet = candidates.filter((t) => t.gameScore >= targetScore).length;
+    const maxScore = candidates.reduce((m, t) => Math.max(m, t.gameScore), 0);
+    const avgScore = candidates.length ? candidates.reduce((s, t) => s + t.gameScore, 0) / candidates.length : 0;
     return { high, speed, speed6, avgGain, topSets, meet, maxScore, avgScore };
-  }, [all, targetScore]);
+  }, [candidates, targetScore]);
 
   if (!account) {
     return <EmptyState icon={<Hammer size={40} />} title="尚未匯入存檔" desc="匯入 JSON 後即可分析每顆符文的精煉順序。" />;
@@ -274,17 +319,21 @@ export default function GrindPage() {
         </div>
         <span className="chip gold">
           {profile === "speed"
-            ? `未達 ${accept} 分 ${all.length} 顆`
+            ? `未達 ${accept} 分 ${candidates.length} 顆`
             : profile === "score"
-              ? `可達 ${targetScore} 分 ${all.length} 顆`
-              : `可精煉 ${all.length} 顆`}
+              ? `${stockOn ? "素材足夠" : "可達"} ${targetScore} 分 ${candidates.length} 顆`
+              : `可精煉 ${candidates.length} 顆`}
         </span>
       </div>
 
       <div className="grid g4" style={{ marginBottom: 14 }}>
         {profile === "score" ? (
           <>
-            <Tile k={`可達 ${targetScore} 分`} v={String(all.length)} sub="精煉後可達標" />
+            <Tile
+              k={`${stockOn ? "素材足夠" : "可達"} ${targetScore} 分`}
+              v={String(candidates.length)}
+              sub={stockOn ? "已計入持有磨石" : "精煉後可達標"}
+            />
             <Tile k="已達標" v={String(summary.meet)} sub="目前分數已足夠" />
             <Tile k="最高目前分數" v={String(summary.maxScore)} sub="此清單最高" />
             <Tile k="平均目前分數" v={summary.avgScore.toFixed(0)} sub="此清單平均" />
@@ -293,7 +342,7 @@ export default function GrindPage() {
           <>
             <Tile
               k={profile === "speed" ? `未達 ${accept} 分` : "可精煉符文"}
-              v={String(all.length)}
+              v={String(candidates.length)}
               sub={profile === "speed" ? "依速度由高到低" : "還有提升空間"}
             />
             <Tile k="高優先" v={String(summary.high)} sub="建議先處理" />
@@ -326,21 +375,43 @@ export default function GrindPage() {
         </div>
 
         {profile === "score" && (
-          <div className="row wrap" style={{ gap: 8, marginTop: 10, alignItems: "center" }}>
-            <span className="tiny dim">目標分數</span>
-            <NumberInput
-              className="input mono"
-              style={{ width: 90 }}
-              min={0}
-              max={400}
-              step={5}
-              value={targetScore}
-              onChange={setTargetScore}
-            />
-            <span className="tiny dim">
-              只列出精煉後能達到 {targetScore} 分以上的符文；卡片會顯示要精煉哪幾條、各加到多少
-            </span>
-          </div>
+          <>
+            <div className="row wrap" style={{ gap: 8, marginTop: 10, alignItems: "center" }}>
+              <span className="tiny dim">目標分數</span>
+              <NumberInput
+                className="input mono"
+                style={{ width: 90 }}
+                min={0}
+                max={400}
+                step={5}
+                value={targetScore}
+                onChange={setTargetScore}
+              />
+              <span className="tiny dim">
+                只列出精煉後能達到 {targetScore} 分以上的符文；卡片會顯示要精煉哪幾條、各加到多少
+              </span>
+            </div>
+            <div className="row wrap" style={{ gap: 8, marginTop: 8, alignItems: "center" }}>
+              <label
+                className="row tiny"
+                style={{ gap: 6, cursor: hasStockData ? "pointer" : "not-allowed", opacity: hasStockData ? 1 : 0.55 }}
+                title="用存檔中的磨石最大值估算，只留下真的能把分數推到達標的符文"
+              >
+                <input
+                  type="checkbox"
+                  checked={useStock && hasStockData}
+                  disabled={!hasStockData}
+                  onChange={(e) => setUseStock(e.target.checked)}
+                />
+                只列出持有精煉石素材的符文
+              </label>
+              <span className="tiny dim">
+                {hasStockData
+                  ? `持有 ${stock.length} 種磨石（共 ${stockTotal} 個），以磨石最大值估算；素材數量不會跨符文扣除`
+                  : "此存檔沒有精煉石素材資料，請重新匯入一次 JSON"}
+              </span>
+            </div>
+          </>
         )}
 
         {profile === "speed" && (
@@ -396,8 +467,8 @@ export default function GrindPage() {
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
             <input type="checkbox" checked={onlyHigh} onChange={(e) => setOnlyHigh(e.target.checked)} /> 只看高優先
           </label>
-          <span className="tiny dim">顯示 {filtered.length} / {all.length} 顆</span>
-          {(onlyEquipped || onlySix || onlyHigh || setId || stat !== 0 || q) && (
+          <span className="tiny dim">顯示 {filtered.length} / {candidates.length} 顆</span>
+          {(onlyEquipped || onlySix || onlyHigh || setId || stat !== 0 || q || useStock) && (
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -408,6 +479,7 @@ export default function GrindPage() {
                 setSetId(0);
                 setStat(0);
                 setQ("");
+                setUseStock(false);
               }}
             >
               清除篩選
@@ -455,7 +527,7 @@ export default function GrindPage() {
           <li><b>分數怎麼看：</b>推薦分 = 屬性權重 × 可提升幅度，再依符文星級、效率、是否已裝備與套裝契合度調整。分數高不代表一定要精煉，還是要看該顆符文是不是你長期會用的。</li>
           <li><b>速度優先的接受程度：</b>體攻防% 以「寶石 13 + 精煉 10」為 10 分，速度以「寶石 10 + 精煉 5」為 10 分，爆率／爆傷以寶石 13 為 10 分；每降一分，寶石與精煉各減 1。選 9 分（體攻防% 12+9、速度 9+4）就只會列出未達該分數的符文，並依符文速度由高到低排序。</li>
           <li><b>分數模式：</b>使用遊戲內的符文分數（副屬性＋固有屬性，含精煉；不含主屬性與套裝）。輸入目標分數後，只會列出「把所有可精煉屬性精煉到傳說上限後」能達到該分數的符文，並依每點數值的分數效益（速度／爆率 3.33、暴傷 2.86、體攻防% 2.5、固定值較低）排出最少要精煉哪幾條、各加到多少。</li>
-          <li><b>這頁不會讀取磨石庫存。</b>建議先看「依套裝分配」整理手上同套裝的石頭，再從清單最上面開始處理；沒有對應套裝的石頭就先跳過，不要為了一顆符文浪費其他套裝的資源。</li>
+          <li><b>持有精煉石素材：</b>勾選後會讀取存檔中的磨石（含遠古、無形），只留下「用你實際持有的磨石最大值」真的能推到達標分數的符文；卡片會列出會用到的套裝、屬性、等級與持有數量。素材數量不會跨符文扣除，實際使用時仍要留意庫存。</li>
         </ol>
       </details>
 
@@ -467,7 +539,9 @@ export default function GrindPage() {
             {profile === "speed"
               ? `目前沒有未達 ${accept} 分的符文，或篩選條件太窄。可調低接受程度或放寬篩選。`
               : profile === "score"
-                ? `目前沒有符文能在精煉後達到 ${targetScore} 分，或篩選條件太窄。可降低目標分數或放寬篩選。`
+                ? stockOn
+                  ? `目前沒有符文能用持有的磨石達到 ${targetScore} 分。可取消「持有精煉石素材」、降低目標分數，或放寬篩選。`
+                  : `目前沒有符文能在精煉後達到 ${targetScore} 分，或篩選條件太窄。可降低目標分數或放寬篩選。`
                 : "試著放寬套裝 / 屬性篩選，或取消「只看已裝備 / 只看 6★ / 只看高優先」。"}
           </div>
         </div>
@@ -482,6 +556,7 @@ export default function GrindPage() {
                 showAccept={profile === "speed"}
                 showScore={profile === "score"}
                 targetScore={targetScore}
+                stock={stockOn ? stock : undefined}
                 locked={lockedSet.has(t.rune.id)}
                 excluded={excludedSet.has(t.rune.id)}
                 onToggleLock={() => toggleRuneFlag("locked", t.rune.id)}
