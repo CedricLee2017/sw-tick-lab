@@ -19,7 +19,7 @@ const MAX_DESC = 80;
 
 const TEAM_ROLES: TeamRole[] = ["speed", "booster", "dps", "tank", "support"];
 const CONTENTS: DeckContext[] = ["arena", "guild", "dungeon"];
-const OBJECTIVES = ["role", "skill", "spd", "dps", "tank", "support", "score"] as const;
+const OBJECTIVES = ["role", "skill", "spd", "atk", "def", "hp", "dps", "tank", "support", "score"] as const;
 const STAT_KEYS: StatKey[] = ["hp", "atk", "def", "spd", "cr", "cd", "res", "acc"];
 
 export interface CustomTeamTemplate extends TeamTemplate {

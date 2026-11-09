@@ -68,7 +68,7 @@ export function focusFitOf(stats: Stats, focus: FocusEntry[] | undefined): numbe
 }
 
 /** 隊伍配符使用的搜尋目標（必須可序列化，才能傳進 Worker） */
-export type OptObjective = "score" | "spd" | "dps" | "tank" | "support" | "skill";
+export type OptObjective = "score" | "spd" | "atk" | "def" | "hp" | "dps" | "tank" | "support" | "skill";
 
 /** 以指定技能傷害作為搜尋目標（技能與傷害選項都是純資料，可傳進 Worker） */
 export interface SkillObjective {
@@ -88,6 +88,12 @@ export function objectiveOf(
   switch (objective) {
     case "spd":
       return stats.spd;
+    case "atk":
+      return stats.atk;
+    case "def":
+      return stats.def;
+    case "hp":
+      return stats.hp;
     case "dps":
       // 期望傷害代理值：ATK × (1 + 暴率 × 暴傷)
       return stats.atk * (1 + (Math.min(100, stats.cr) * stats.cd) / 10000);

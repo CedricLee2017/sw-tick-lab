@@ -2585,4 +2585,11 @@ check("據點進攻：自訂防守隊（紀錄中沒有相同隊伍）", () => {
   assert.ok(advice.recommendations.length > 0);
 });
 
+check("一鍵配隊目標：攻擊 / 防禦 / 體力", () => {
+  const stats = { hp: 30000, atk: 2000, def: 1500, spd: 200, cr: 100, cd: 200, res: 100, acc: 50 };
+  assert.equal(objectiveOf(stats, "atk"), 2000);
+  assert.equal(objectiveOf(stats, "def"), 1500);
+  assert.equal(objectiveOf(stats, "hp"), 30000);
+});
+
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

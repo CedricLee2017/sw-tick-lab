@@ -28,12 +28,15 @@ import { useRolePresets, type RolePreset } from "../lib/rolePresets";
 import type { FocusEntry } from "../lib/types";
 
 /** 每隻魔靈的搜尋目標 */
-type ObjectiveMode = "role" | "skill" | "spd" | "dps" | "tank" | "support" | "score";
+type ObjectiveMode = "role" | "skill" | "spd" | "atk" | "def" | "hp" | "dps" | "tank" | "support" | "score";
 
 const OBJECTIVE_LABELS: Record<ObjectiveMode, string> = {
   role: "依定位",
   skill: "技能傷害",
   spd: "速度",
+  atk: "攻擊",
+  def: "防禦",
+  hp: "體力",
   dps: "傷害期望",
   tank: "坦度 EHP",
   support: "綜合",
@@ -1573,7 +1576,7 @@ export default function TeamOptimizerPage() {
                     className="select"
                     value={m.objectiveMode}
                     onChange={(e) => updateMember(i, { objectiveMode: e.target.value as ObjectiveMode })}
-                    title="技能傷害：以選定技能的傷害當作搜尋目標（例如 Kaito S3 吃攻擊與速度）"
+                    title="技能傷害：以選定技能的傷害當作搜尋目標；攻擊 / 防禦 / 體力：直接最大化該面板數值"
                   >
                     {(Object.keys(OBJECTIVE_LABELS) as ObjectiveMode[]).map((k) => (
                       <option key={k} value={k}>{OBJECTIVE_LABELS[k]}</option>
