@@ -2573,4 +2573,16 @@ check("據點進攻：合併新賽季資料（battleId 去重）", () => {
   assert.equal(merged.battles.find((b) => b.battleId === 999999999)?.season, "S23");
 });
 
+check("據點進攻：自訂防守隊（紀錄中沒有相同隊伍）", () => {
+  const data = normalizeSiegeDataset(SIEGE_BATTLES);
+  const analysis = analyzeSiegeBattles(data);
+  const custom = [14034, 28515, 20115];
+  const advice = recommendSiegeCounters(data, analysis, siegeTeamKey(custom), custom);
+  assert.equal(advice.defense?.battles, 0);
+  assert.deepEqual(advice.defense?.team, [14034, 20115, 28515]);
+  assert.equal(advice.exactPairs.length, 0);
+  assert.ok(advice.similarDefenses.length >= 2);
+  assert.ok(advice.recommendations.length > 0);
+});
+
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

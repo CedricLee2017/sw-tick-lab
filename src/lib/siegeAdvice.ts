@@ -681,13 +681,26 @@ function groupSimilarCounters(dataset: SiegeDataset, defenseKeys: Set<string>): 
   });
 }
 
-/** 針對指定防守隊，找出直接對戰與相似防守隊的推薦進攻隊 */
+/** 針對指定防守隊，找出直接對戰與相似防守隊的推薦進攻隊；customDefense 可傳入紀錄中沒有的自訂三隻 */
 export function recommendSiegeCounters(
   dataset: SiegeDataset,
   analysis: SiegeBattleAnalysis,
   defenseKey: string,
+  customDefense?: number[],
 ): SiegeCounterAdvice {
-  const defense = analysis.defenseTeams.find((d) => d.key === defenseKey);
+  const found = analysis.defenseTeams.find((d) => d.key === defenseKey);
+  const defense = found ?? (customDefense?.length
+    ? {
+        key: defenseKey,
+        team: [...customDefense].sort((a, b) => a - b),
+        battles: 0,
+        wins: 0,
+        losses: 0,
+        wr: 0,
+        lastDate: "",
+        guilds: [],
+      }
+    : undefined);
   if (!defense) {
     return { exactPairs: [], similarDefenses: [], similarCounters: [], recommendations: [], fallbackMonsters: analysis.counterMonsters.slice(0, 8) };
   }

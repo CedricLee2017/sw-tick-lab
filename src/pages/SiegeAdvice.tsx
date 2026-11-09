@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  AlertTriangle, ChevronLeft, ChevronRight, Crown, Database, Download, RefreshCw, Search, Shield,
+  AlertTriangle, ChevronLeft, ChevronRight, Crown, Database, Download, Plus, RefreshCw, Search, Shield,
   ScrollText, Swords, Target, Upload,
 } from "lucide-react";
 import { fmt } from "../components/ui";
+import { MonsterPickerModal, toMonsterEntries } from "../components/MonsterPicker";
+import { MONSTER_MAP, useStore } from "../store";
 import {
   analyzeSiegeBattles, loadSiegeBattles, mergeSiegeDatasets, normalizeSiegeDataset, parseSiegeJson, parseSiegeReportHtml,
   recommendSiegeCounters, recommendSiegeDefenses, siegeDateValue, siegeDefenseVariants,
-  siegeMonsterName, siegeShortDate, siegeTeamKey, siegeTeamLabel,
+  siegeMonsterName, siegeShortDate, siegeTeamKey,
   type SiegeDataset,
 } from "../lib/siegeAdvice";
 
@@ -41,6 +43,22 @@ function SgMonsterIcon({ data, id, size = 30 }: { data: SiegeDataset; id: number
   );
 }
 
+function isSpeedLeader(id: number): boolean {
+  return MONSTER_MAP.get(id)?.lead?.attr === "Attack Speed";
+}
+
+/** 把速度隊長移到最左邊；同時有多隻時，隊長技 % 較高的優先 */
+function speedLeaderFirst(ids: number[]): number[] {
+  const leader = ids
+    .filter(isSpeedLeader)
+    .sort((a, b) => (MONSTER_MAP.get(b)?.lead?.amount ?? 0) - (MONSTER_MAP.get(a)?.lead?.amount ?? 0))[0];
+  return leader ? [leader, ...ids.filter((id) => id !== leader)] : ids;
+}
+
+function orderedTeamLabel(data: SiegeDataset, ids: number[]): string {
+  return speedLeaderFirst(ids).map((id) => siegeMonsterName(data, id)).join(" / ");
+}
+
 function SgTeam({
   data,
   ids,
@@ -54,9 +72,10 @@ function SgTeam({
   names?: boolean;
   className?: string;
 }) {
+  const ordered = speedLeaderFirst(ids);
   return (
     <span className={`sg-team ${className}`.trim()}>
-      {ids.map((id) => (
+      {ordered.map((id) => (
         <span className="sg-mon" key={id} title={siegeMonsterName(data, id)}>
           <SgMonsterIcon data={data} id={id} size={size} />
           {names && <span className="sg-mon-name">{siegeMonsterName(data, id)}</span>}
@@ -87,6 +106,7 @@ function StatTile({ label, value, sub, accent = false }: { label: string; value:
 }
 
 export default function SiegeAdvicePage() {
+  const account = useStore((s) => s.account);
   const [dataset, setDataset] = useState<SiegeDataset | null>(null);
   const [source, setSource] = useState<"builtin" | "imported">("builtin");
   const [error, setError] = useState("");
@@ -94,6 +114,10 @@ export default function SiegeAdvicePage() {
   const [selectedKey, setSelectedKey] = useState("");
   const [defenseSearch, setDefenseSearch] = useState("");
   const [defenseLimit, setDefenseLimit] = useState(60);
+  const [customTeam, setCustomTeam] = useState<number[]>([0, 0, 0]);
+  const [customPickerIndex, setCustomPickerIndex] = useState<number | null>(null);
+  const [customOwnedOnly, setCustomOwnedOnly] = useState(false);
+  const [onlySpeedLeaders, setOnlySpeedLeaders] = useState(false);
   const [logResult, setLogResult] = useState("all");
   const [logGuild, setLogGuild] = useState("");
   const [logSeason, setLogSeason] = useState("");
@@ -135,17 +159,22 @@ export default function SiegeAdvicePage() {
 
   const analysis = useMemo(() => (dataset ? analyzeSiegeBattles(dataset) : null), [dataset]);
   const defenseAdvice = useMemo(() => (analysis ? recommendSiegeDefenses(analysis) : null), [analysis]);
+  const customKey = customTeam.every((id) => id > 0) ? siegeTeamKey(customTeam) : "";
+  const isCustom = !!customKey && selectedKey === customKey;
   const counterAdvice = useMemo(
-    () => (dataset && analysis && selectedKey ? recommendSiegeCounters(dataset, analysis, selectedKey) : null),
-    [dataset, analysis, selectedKey],
+    () => (dataset && analysis && selectedKey
+      ? recommendSiegeCounters(dataset, analysis, selectedKey, isCustom ? customTeam : undefined)
+      : null),
+    [dataset, analysis, selectedKey, isCustom, customTeam],
   );
-  const selectedDefense = analysis?.defenseTeams.find((d) => d.key === selectedKey);
+  const selectedDefense = counterAdvice?.defense;
 
   useEffect(() => {
+    if (isCustom) return;
     if (!analysis || !defenseAdvice) return;
     if (selectedKey && analysis.defenseTeams.some((d) => d.key === selectedKey)) return;
     setSelectedKey(defenseAdvice.suggestions[0]?.key ?? analysis.defenseTeams[0]?.key ?? "");
-  }, [analysis, defenseAdvice, selectedKey]);
+  }, [analysis, defenseAdvice, selectedKey, isCustom]);
 
   useEffect(() => {
     setLogSeason("");
@@ -175,6 +204,32 @@ export default function SiegeAdvicePage() {
     }
     return list;
   }, [defenseList, defenseLimit, selectedKey]);
+
+  const ownedMasters = useMemo(() => new Set(account?.units.map((u) => u.master) ?? []), [account]);
+  const customPickerEntries = useMemo(() => {
+    return toMonsterEntries()
+      .filter((e) => !customOwnedOnly || ownedMasters.has(e.monster.id))
+      .filter((e) => !onlySpeedLeaders || e.monster.lead?.attr === "Attack Speed")
+      .map((e) => ({
+        ...e,
+        meta: `${e.monster.nat}★ · 基礎速度 ${e.monster.spd}${e.monster.lead?.attr === "Attack Speed" ? ` · 速隊長 +${e.monster.lead.amount}%` : ""}`,
+      }));
+  }, [customOwnedOnly, onlySpeedLeaders, ownedMasters]);
+
+  const pickCustom = (index: number, id: number) => {
+    const next = [...customTeam];
+    for (let i = 0; i < 3; i++) if (next[i] === id) next[i] = 0;
+    next[index] = id;
+    const ordered = speedLeaderFirst(next.filter(Boolean));
+    const padded = [ordered[0] ?? 0, ordered[1] ?? 0, ordered[2] ?? 0];
+    setCustomTeam(padded);
+    setSelectedKey(padded.every((x) => x > 0) ? siegeTeamKey(padded) : "");
+  };
+
+  const clearCustom = () => {
+    setCustomTeam([0, 0, 0]);
+    if (isCustom) setSelectedKey("");
+  };
 
   const primaryPair = useMemo(() => {
     if (!defenseAdvice) return undefined;
@@ -223,6 +278,7 @@ export default function SiegeAdvicePage() {
   };
 
   const openDefense = (key: string) => {
+    setCustomTeam([0, 0, 0]);
     setSelectedKey(key);
     setTab("offense");
   };
@@ -242,6 +298,7 @@ export default function SiegeAdvicePage() {
       setDataset(merged);
       setSource("imported");
       setSelectedKey("");
+      setCustomTeam([0, 0, 0]);
       setTab("offense");
     } catch (err) {
       setError(err instanceof Error ? err.message : "匯入失敗，請確認檔案格式。");
@@ -252,6 +309,7 @@ export default function SiegeAdvicePage() {
     localStorage.removeItem(STORAGE_KEY);
     setSource("builtin");
     setSelectedKey("");
+    setCustomTeam([0, 0, 0]);
     setError("");
     loadSiegeBattles()
       .then(setDataset)
@@ -377,14 +435,73 @@ export default function SiegeAdvicePage() {
                   onChange={(e) => { setDefenseSearch(e.target.value); setDefenseLimit(60); }}
                 />
               </div>
+
+              <div className="sg-custom-team">
+                <div className="row between wrap" style={{ gap: 6 }}>
+                  <span className="tiny dim">自訂防守隊（速隊長自動排最左）</span>
+                  <div className="row" style={{ gap: 8 }}>
+                    <label className="row tiny" style={{ gap: 4, cursor: "pointer" }}>
+                      <input type="checkbox" checked={onlySpeedLeaders} onChange={(e) => setOnlySpeedLeaders(e.target.checked)} />
+                      只看速隊長
+                    </label>
+                    <label className="row tiny" style={{ gap: 4, cursor: "pointer" }}>
+                      <input type="checkbox" checked={customOwnedOnly} onChange={(e) => setCustomOwnedOnly(e.target.checked)} />
+                      只顯示我的魔靈
+                    </label>
+                  </div>
+                </div>
+                <div className="sg-custom-slots">
+                  {[0, 1, 2].map((index) => {
+                    const id = customTeam[index];
+                    return (
+                      <button
+                        key={index}
+                        type="button"
+                        className={`sg-slot ${id ? "filled" : ""}`}
+                        title={id ? siegeMonsterName(dataset, id) : `選擇第 ${index + 1} 隻魔靈`}
+                        onClick={() => setCustomPickerIndex(index)}
+                      >
+                        {id ? (
+                          <>
+                            <SgMonsterIcon data={dataset} id={id} size={30} />
+                            <span className="sg-slot-name">{siegeMonsterName(dataset, id)}</span>
+                            {isSpeedLeader(id) && <span className="sg-slot-lead">速</span>}
+                          </>
+                        ) : (
+                          <>
+                            <Plus size={15} className="dim" />
+                            <span>第 {index + 1} 隻</span>
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="row between wrap" style={{ gap: 6, marginTop: 6 }}>
+                  <span className="tiny dim">
+                    {customKey ? (isCustom ? "已套用自訂隊" : "選滿 3 隻後自動分析") : "選滿 3 隻後自動分析"}
+                  </span>
+                  <div className="row" style={{ gap: 5 }}>
+                    {customKey && !isCustom && (
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => setSelectedKey(customKey)}>
+                        分析這隊
+                      </button>
+                    )}
+                    {customTeam.some((id) => id > 0) && (
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={clearCustom}>清除</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="sg-defense-list">
                 {defenseVisible.map((defense) => (
                   <button
                     key={defense.key}
                     type="button"
                     className={`sg-defense-card ${selectedKey === defense.key ? "on" : ""}`}
-                    title={siegeTeamLabel(dataset, defense.team)}
-                    onClick={() => setSelectedKey(defense.key)}
+                    title={orderedTeamLabel(dataset, defense.team)}
+                    onClick={() => { setCustomTeam([0, 0, 0]); setSelectedKey(defense.key); }}
                   >
                     <div className="row between wrap" style={{ gap: 5 }}>
                       <SgTeam data={dataset} ids={defense.team} size={25} />
@@ -413,12 +530,14 @@ export default function SiegeAdvicePage() {
                 <div className="card card-pad">
                   <div className="row between wrap" style={{ gap: 8 }}>
                     <div style={{ minWidth: 0 }}>
-                      <div className="card-title" style={{ fontSize: 15 }}>{siegeTeamLabel(dataset, selectedDefense.team)}</div>
+                      <div className="card-title" style={{ fontSize: 15 }}>{orderedTeamLabel(dataset, selectedDefense.team)}</div>
                       <div className="tiny dim" style={{ marginTop: 3 }}>
-                        Nosna44 對這隊 {selectedDefense.battles} 場，{selectedDefense.wins} 勝 {selectedDefense.losses} 敗（{selectedDefense.wr}%）
+                        {selectedDefense.battles > 0
+                          ? `Nosna44 對這隊 ${selectedDefense.battles} 場，${selectedDefense.wins} 勝 ${selectedDefense.losses} 敗（${selectedDefense.wr}%）`
+                          : "自訂防守隊：紀錄中沒有完全相同的隊伍，以下用相似防守隊推薦"}
                       </div>
                     </div>
-                    <WrBadge wr={selectedDefense.wr} />
+                    {selectedDefense.battles > 0 && <WrBadge wr={selectedDefense.wr} />}
                   </div>
                   <div style={{ marginTop: 10 }}>
                     <SgTeam data={dataset} ids={selectedDefense.team} size={44} names />
@@ -526,7 +645,7 @@ export default function SiegeAdvicePage() {
                     <Crown size={16} style={{ color: "var(--gold)" }} />
                     <div className="card-title">新建議：防守核心</div>
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 15, fontWeight: 800 }}>{siegeTeamLabel(dataset, primaryPair.ids)}</div>
+                  <div style={{ marginTop: 6, fontSize: 15, fontWeight: 800 }}>{orderedTeamLabel(dataset, primaryPair.ids)}</div>
                   <div className="tiny dim" style={{ marginTop: 4 }}>
                     這個雙人組合共 {primaryPair.battles} 場，Nosna44 只贏 {primaryPair.wins} 場（{primaryPair.wr}%），失手 {primaryPair.losses} 次。
                   </div>
@@ -586,7 +705,7 @@ export default function SiegeAdvicePage() {
                     </div>
                     <div className="row wrap" style={{ gap: 5, marginTop: 4 }}>
                       {lostCounters.slice(0, 4).map((counter) => (
-                        <span className="chip red" key={counter.key} title={siegeTeamLabel(dataset, counter.counter)}>
+                        <span className="chip red" key={counter.key} title={orderedTeamLabel(dataset, counter.counter)}>
                           <SgTeam data={dataset} ids={counter.counter} size={18} />
                           {counter.losses} 敗 / {counter.battles} 場
                         </span>
@@ -617,7 +736,7 @@ export default function SiegeAdvicePage() {
                   <div className="tiny dim" style={{ marginTop: 4 }}>{suggestion.reason}；被這些隊打敗：</div>
                   <div className="row wrap" style={{ gap: 5, marginTop: 4 }}>
                     {suggestion.counters.filter((c) => c.wins > 0).slice(0, 4).map((counter) => (
-                      <span className="chip" key={counter.key} title={siegeTeamLabel(dataset, counter.counter)}>
+                      <span className="chip" key={counter.key} title={orderedTeamLabel(dataset, counter.counter)}>
                         <SgTeam data={dataset} ids={counter.counter} size={18} />
                         {counter.wins}/{counter.battles}（{counter.wr}%）
                       </span>
@@ -837,6 +956,20 @@ export default function SiegeAdvicePage() {
             </div>
           </div>
         </div>
+      )}
+      {customPickerIndex !== null && (
+        <MonsterPickerModal
+          title={`選擇第 ${customPickerIndex + 1} 隻魔靈`}
+          width={980}
+          entries={customPickerEntries}
+          onPick={(entry) => {
+            pickCustom(customPickerIndex, entry.monster.id);
+            setCustomPickerIndex(null);
+          }}
+          onClose={() => setCustomPickerIndex(null)}
+          footerLeft="速度隊長會自動排到最左邊"
+          emptyText="找不到符合條件的魔靈"
+        />
       )}
     </>
   );
