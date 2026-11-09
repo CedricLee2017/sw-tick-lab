@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  BookOpen, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, Plus, RotateCcw, Search, SlidersHorizontal, Wand2, X,
+  BookOpen, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Crown, Filter, Plus, RotateCcw, Search, SlidersHorizontal, Wand2, X,
 } from "lucide-react";
 import { MONSTERS, useStore } from "../store";
 import { loadSkillData, type Skill, type SkillData } from "../lib/damage";
 import { ELEMENTS } from "../lib/constants";
+import type { LeaderSkill } from "../lib/types";
 import { fmt, Modal, MonsterIcon, NumberInput } from "../components/ui";
 import { sortMonsterEntries } from "../components/MonsterPicker";
 import {
-  buildBestiary, effectGroups, effectOf, EMPTY_SKILL_FILTER, isSkillFilterActive, matchedSkills,
-  matchesSkill, scaleOptions, type BestiaryEntry, type SkillFilter,
+  buildBestiary, effectGroups, effectOf, EMPTY_LEADER_FILTER, EMPTY_SKILL_FILTER, isLeaderFilterActive,
+  isSkillFilterActive, matchedSkills, matchesLeader, matchesSkill, scaleOptions,
+  type BestiaryEntry, type LeaderFilter, type SkillFilter,
 } from "../lib/bestiary";
 import { sendOptimizerDraft } from "../lib/draft";
 
@@ -26,6 +28,35 @@ const ARCH_LABELS: Record<string, string> = {
 };
 
 const AWAKEN_LABELS: Record<number, string> = { 0: "未覺醒", 1: "已覺醒", 2: "二次覺醒" };
+
+const LEADER_ATTR_OPTIONS: [string, string][] = [
+  ["HP", "體力"],
+  ["Attack Power", "攻擊力"],
+  ["Defense", "防禦力"],
+  ["Attack Speed", "速度"],
+  ["Critical Rate", "暴擊率"],
+  ["Critical DMG", "暴擊傷害"],
+  ["Resistance", "效果抵抗"],
+  ["Accuracy", "效果命中"],
+];
+
+const LEADER_AREA_OPTIONS: [string, string][] = [
+  ["General", "一般"],
+  ["Element", "屬性"],
+  ["Guild", "公會"],
+  ["Arena", "競技場"],
+  ["Dungeon", "地下城"],
+];
+
+const LEADER_ATTR_LABELS = Object.fromEntries(LEADER_ATTR_OPTIONS);
+const LEADER_AREA_LABELS = Object.fromEntries(LEADER_AREA_OPTIONS);
+
+function leaderText(lead: LeaderSkill): string {
+  const attr = LEADER_ATTR_LABELS[lead.attr] ?? lead.attr;
+  const area = LEADER_AREA_LABELS[lead.area] ?? lead.area;
+  const scope = lead.element ? `（${ELEMENTS[lead.element as 1]?.name ?? `屬性 ${lead.element}`}）` : "";
+  return `${attr} +${lead.amount}% · ${area}${scope}`;
+}
 
 type SortKey = "default" | "spd" | "hp" | "atk" | "def" | "name";
 
@@ -51,6 +82,16 @@ function activeSkillCount(f: SkillFilter): number {
   return n;
 }
 
+function activeLeaderCount(f: LeaderFilter): number {
+  let n = 0;
+  if (f.only) n++;
+  if (f.attr) n++;
+  if (f.area) n++;
+  if (f.element !== 0) n++;
+  if (f.minAmount > 0) n++;
+  return n;
+}
+
 function skillSlotText(skill: Skill): string {
   if (skill.passive) return "P";
   return skill.slot > 0 ? `S${skill.slot}` : "—";
@@ -69,7 +110,9 @@ export default function BestiaryPage() {
   const [arch, setArch] = useState("");
   const [sort, setSort] = useState<SortKey>("default");
   const [skillFilter, setSkillFilter] = useState<SkillFilter>(EMPTY_SKILL_FILTER);
-  const [skillOpen, setSkillOpen] = useState(() => (typeof window === "undefined" ? true : window.innerWidth > 820));
+  const [skillOpen, setSkillOpen] = useState(false);
+  const [leaderFilter, setLeaderFilter] = useState<LeaderFilter>(EMPTY_LEADER_FILTER);
+  const [leaderOpen, setLeaderOpen] = useState(false);
   const [effectSearch, setEffectSearch] = useState("");
   const [page, setPage] = useState(1);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -92,6 +135,7 @@ export default function BestiaryPage() {
   const groups = useMemo(() => effectGroups(skillData, MONSTERS), [skillData]);
   const scales = useMemo(() => scaleOptions(skillData), [skillData]);
   const activeSkill = isSkillFilterActive(skillFilter);
+  const activeLeader = isLeaderFilterActive(leaderFilter);
 
   /** 帳號內每種魔靈的數量（給卡片上的「已擁有」標記） */
   const owned = useMemo(() => {
@@ -111,6 +155,7 @@ export default function BestiaryPage() {
       if (awaken === 2 && m.awk < 1) return false;
       if (awaken === 3 && !m.a2) return false;
       if (arch && (m.arch ?? "") !== arch) return false;
+      if (activeLeader && !matchesLeader(m.lead, leaderFilter)) return false;
       if (activeSkill && !entry.skills.some((skill) => matchesSkill(skill, skillFilter))) return false;
       return true;
     });
@@ -126,7 +171,7 @@ export default function BestiaryPage() {
       if (sort === "def") return y.def - x.def || x.name.localeCompare(y.name);
       return EL_RANK[x.el] - EL_RANK[y.el] || y.nat - x.nat || x.name.localeCompare(y.name);
     });
-  }, [entries, q, el, nat, awaken, arch, sort, activeSkill, skillFilter]);
+  }, [entries, q, el, nat, awaken, arch, sort, activeSkill, skillFilter, activeLeader, leaderFilter]);
 
   const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
@@ -145,6 +190,11 @@ export default function BestiaryPage() {
     setPage(1);
   };
 
+  const patchLeader = (patch: Partial<LeaderFilter>) => {
+    setLeaderFilter((prev) => ({ ...prev, ...patch }));
+    setPage(1);
+  };
+
   const resetAll = () => {
     setQ("");
     setEl(0);
@@ -153,6 +203,7 @@ export default function BestiaryPage() {
     setArch("");
     setSort("default");
     setSkillFilter(EMPTY_SKILL_FILTER);
+    setLeaderFilter(EMPTY_LEADER_FILTER);
     setEffectSearch("");
     setPage(1);
   };
@@ -168,6 +219,7 @@ export default function BestiaryPage() {
   const selectedEffects = skillFilter.effects.map((id) => effectOf(skillData, id));
   const effectTerm = effectSearch.trim().toLowerCase();
   const skillFilterCount = activeSkillCount(skillFilter);
+  const leaderFilterCount = activeLeaderCount(leaderFilter);
 
   return (
     <>
@@ -438,6 +490,86 @@ export default function BestiaryPage() {
         )}
       </div>
 
+      <div className="card bestiary-skill-filter" style={{ marginBottom: 12 }}>
+        <button type="button" className="bestiary-skill-head" onClick={() => setLeaderOpen((v) => !v)}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="row" style={{ gap: 7 }}>
+              <Crown size={15} style={{ color: "var(--gold)" }} />
+              <span style={{ fontWeight: 800, fontSize: 13.5 }}>隊長技篩選</span>
+              {leaderFilterCount > 0 && <span className="chip gold">{leaderFilterCount} 個條件</span>}
+              {activeLeader && <span className="chip">{list.length} 隻符合</span>}
+            </div>
+            <div className="tiny dim" style={{ marginTop: 3 }}>
+              依隊長技類型、適用範圍、屬性限制與數值下限篩選（例如：速度 +24% 競技場）
+            </div>
+          </div>
+          {leaderOpen ? <ChevronUp size={17} className="dim" /> : <ChevronDown size={17} className="dim" />}
+        </button>
+
+        {leaderOpen && (
+          <div className="bestiary-skill-body">
+            <div className="bestiary-skill-row">
+              <div className="field">
+                <label>隊長技類型</label>
+                <select className="select" style={{ width: 150 }} value={leaderFilter.attr} onChange={(e) => patchLeader({ attr: e.target.value })}>
+                  <option value="">不限</option>
+                  {LEADER_ATTR_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                </select>
+              </div>
+
+              <div className="field">
+                <label>適用範圍</label>
+                <select className="select" style={{ width: 130 }} value={leaderFilter.area} onChange={(e) => patchLeader({ area: e.target.value })}>
+                  <option value="">不限</option>
+                  {LEADER_AREA_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                </select>
+              </div>
+
+              <div className="field">
+                <label>屬性限制</label>
+                <select className="select" style={{ width: 150 }} value={leaderFilter.element} onChange={(e) => patchLeader({ element: Number(e.target.value) })}>
+                  <option value={0}>不限</option>
+                  <option value={-1}>不限屬性（通用）</option>
+                  {[1, 2, 3, 4, 5].map((id) => <option key={id} value={id}>{ELEMENTS[id as 1].name}屬性</option>)}
+                </select>
+              </div>
+
+              <div className="field">
+                <label>數值下限</label>
+                <div className="row" style={{ gap: 5 }}>
+                  <NumberInput
+                    className="input mono"
+                    style={{ width: 90 }}
+                    min={0}
+                    max={100}
+                    value={leaderFilter.minAmount}
+                    onChange={(v) => patchLeader({ minAmount: v })}
+                  />
+                  <span className="tiny dim">%</span>
+                </div>
+              </div>
+
+              <label className="row tiny" style={{ gap: 6, cursor: "pointer", paddingBottom: 8 }}>
+                <input type="checkbox" checked={leaderFilter.only} onChange={(e) => patchLeader({ only: e.target.checked })} />
+                只看有隊長技
+              </label>
+
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={() => { setLeaderFilter(EMPTY_LEADER_FILTER); setPage(1); }}
+              >
+                <RotateCcw size={12} /> 清除隊長技條件
+              </button>
+            </div>
+
+            <div className="tiny dim" style={{ marginTop: 8 }}>
+              例如：類型選「速度」、範圍選「競技場」，就能找到競技場速度隊長；勾選「只看有隊長技」則列出所有擁有隊長技的魔靈。
+            </div>
+          </div>
+        )}
+      </div>
+
       {skillError && <div className="card card-pad" style={{ marginBottom: 12, color: "var(--red)" }}>{skillError}</div>}
       {!skillData && !skillError && <div className="tiny dim" style={{ marginBottom: 8 }}>技能資料載入中…（魔靈列表可先瀏覽）</div>}
 
@@ -510,6 +642,13 @@ export default function BestiaryPage() {
                   <span>暴 <b>{m.cr}%</b></span>
                 </div>
 
+                {m.lead && (
+                  <div className="bestiary-leader" title={leaderText(m.lead)}>
+                    <Crown size={10} />
+                    <span>{leaderText(m.lead)}</span>
+                  </div>
+                )}
+
                 <div className="bestiary-skill-chips">
                   {skills.slice(0, 3).map((skill) => (
                     <span
@@ -572,6 +711,20 @@ export default function BestiaryPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+
+          <div className="bestiary-leader-box">
+            <div className="row between wrap" style={{ gap: 8 }}>
+              <div className="row" style={{ gap: 6 }}>
+                <Crown size={14} style={{ color: "var(--gold)" }} />
+                <b style={{ fontSize: 12.5 }}>隊長技</b>
+              </div>
+              {detail.monster.lead ? (
+                <span className="chip gold">{leaderText(detail.monster.lead)}</span>
+              ) : (
+                <span className="tiny dim">這隻魔靈沒有隊長技</span>
+              )}
             </div>
           </div>
 

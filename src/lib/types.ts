@@ -7,6 +7,17 @@ export interface FocusEntry {
   weight: number;
 }
 
+export interface LeaderSkill {
+  id?: number;
+  /** SWARFARM attribute：HP / Attack Power / Defense / Attack Speed / Critical Rate / Critical DMG / Resistance / Accuracy */
+  attr: string;
+  amount: number;
+  /** General / Element / Guild / Dungeon / Arena */
+  area: string;
+  /** 屬性限制：1–5；null = 不限屬性 */
+  element: number | null;
+}
+
 export interface Monster {
   id: number;
   name: string;
@@ -24,6 +35,7 @@ export interface Monster {
   acc: number;
   arch?: string;
   a2?: number;
+  lead?: LeaderSkill | null;
 }
 
 export interface RuneSub {

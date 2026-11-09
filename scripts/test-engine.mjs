@@ -53,6 +53,7 @@ const {
   formatSiegeDuration, importSiegeJSON, exportSiegeJSON, SIEGE_MAP_VERSION,
   setTowerSwords, otherSiegeGuild, siegeSwordOwner,
   EMPTY_SKILL_FILTER, matchesSkill, buildBestiary, effectGroups,
+  EMPTY_LEADER_FILTER, matchesLeader, isLeaderFilterActive,
 } = engine;
 
 /** 技能資料（判斷提條技能用） */
@@ -2439,6 +2440,40 @@ check("圖鑑：全魔靈索引與技能效果分組", () => {
   assert.ok(groups.some((g) => g.type === "Debuff"));
   const stunOption = groups.flatMap((g) => g.items).find((i) => i.name === "Stun");
   assert.ok(stunOption && stunOption.count > 300);
+});
+
+check("圖鑑：隊長技篩選（類型 / 範圍 / 屬性 / 數值）", () => {
+  const lead = { id: 167, attr: "Attack Speed", amount: 33, area: "Arena", element: null };
+  assert.equal(matchesLeader(lead, EMPTY_LEADER_FILTER), true);
+  assert.equal(matchesLeader(null, EMPTY_LEADER_FILTER), true);
+  assert.equal(matchesLeader(null, { ...EMPTY_LEADER_FILTER, only: true }), false);
+  assert.equal(matchesLeader(lead, { ...EMPTY_LEADER_FILTER, only: true }), true);
+  assert.equal(matchesLeader(lead, { ...EMPTY_LEADER_FILTER, attr: "Attack Speed" }), true);
+  assert.equal(matchesLeader(lead, { ...EMPTY_LEADER_FILTER, attr: "HP" }), false);
+  assert.equal(matchesLeader(lead, { ...EMPTY_LEADER_FILTER, area: "Arena" }), true);
+  assert.equal(matchesLeader(lead, { ...EMPTY_LEADER_FILTER, area: "Guild" }), false);
+  assert.equal(matchesLeader(lead, { ...EMPTY_LEADER_FILTER, element: -1 }), true);
+  assert.equal(matchesLeader(lead, { ...EMPTY_LEADER_FILTER, element: 1 }), false);
+  const fireLead = { ...lead, element: 2 };
+  assert.equal(matchesLeader(fireLead, { ...EMPTY_LEADER_FILTER, element: 2 }), true);
+  assert.equal(matchesLeader(fireLead, { ...EMPTY_LEADER_FILTER, element: -1 }), false);
+  assert.equal(matchesLeader(fireLead, { ...EMPTY_LEADER_FILTER, minAmount: 34 }), false);
+  assert.equal(matchesLeader(fireLead, { ...EMPTY_LEADER_FILTER, minAmount: 33 }), true);
+  assert.equal(isLeaderFilterActive(EMPTY_LEADER_FILTER), false);
+  assert.equal(isLeaderFilterActive({ ...EMPTY_LEADER_FILTER, only: true }), true);
+});
+
+check("圖鑑：隊長技資料（Lushen / 競技場速度隊長）", () => {
+  const lushen = MONSTERS.find((m) => m.name === "Lushen");
+  assert.ok(lushen?.lead, "Lushen 應有隊長技");
+  assert.equal(lushen.lead.attr, "Attack Power");
+  assert.equal(lushen.lead.amount, 33);
+  assert.equal(lushen.lead.area, "Dungeon");
+
+  const speedArena = MONSTERS.filter((m) =>
+    matchesLeader(m.lead, { ...EMPTY_LEADER_FILTER, attr: "Attack Speed", area: "Arena" }),
+  );
+  assert.ok(speedArena.length > 10, `競技場速度隊長應超過 10 隻，實際 ${speedArena.length}`);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

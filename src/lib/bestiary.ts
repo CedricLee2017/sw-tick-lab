@@ -1,5 +1,6 @@
 /** 魔靈圖鑑：全魔靈索引、技能篩選與效果分類 */
 import type { Monster } from "./types";
+import type { LeaderSkill } from "./types";
 import type { Skill, SkillData, SkillEffect } from "./damage";
 import { allSkillsForMonster } from "./damage";
 
@@ -34,6 +35,44 @@ export const EMPTY_SKILL_FILTER: SkillFilter = {
   minHits: 0,
   maxCool: null,
 };
+
+/** 隊長技篩選條件 */
+export interface LeaderFilter {
+  /** 只看擁有隊長技的魔靈 */
+  only: boolean;
+  /** 隊長技屬性：HP / Attack Power / …；空字串 = 不限 */
+  attr: string;
+  /** 適用範圍：General / Element / Guild / Dungeon / Arena；空字串 = 不限 */
+  area: string;
+  /** 0 = 不限；-1 = 不限屬性（元素限制為 null）；1–5 = 指定屬性 */
+  element: number;
+  /** 隊長技數值下限；0 = 不限 */
+  minAmount: number;
+}
+
+export const EMPTY_LEADER_FILTER: LeaderFilter = {
+  only: false,
+  attr: "",
+  area: "",
+  element: 0,
+  minAmount: 0,
+};
+
+export function isLeaderFilterActive(f: LeaderFilter): boolean {
+  return f.only || !!f.attr || !!f.area || f.element !== 0 || f.minAmount > 0;
+}
+
+/** 隊長技是否符合篩選；沒有隊長技時，只要有啟用任何隊長技條件就不符合 */
+export function matchesLeader(lead: LeaderSkill | null | undefined, f: LeaderFilter): boolean {
+  if (!isLeaderFilterActive(f)) return true;
+  if (!lead) return false;
+  if (f.attr && lead.attr !== f.attr) return false;
+  if (f.area && lead.area !== f.area) return false;
+  if (f.element === -1 && lead.element !== null) return false;
+  if (f.element > 0 && lead.element !== f.element) return false;
+  if (f.minAmount > 0 && lead.amount < f.minAmount) return false;
+  return true;
+}
 
 export interface BestiaryEntry {
   monster: Monster;
