@@ -178,6 +178,12 @@ export default function SiegeAdvicePage() {
     [dataset, analysis, selectedKey, isCustom, customTeam],
   );
   const selectedDefense = counterAdvice?.defense;
+  const unknownDefenseNames = selectedDefense && dataset
+    ? selectedDefense.team.filter((id) => !dataset.monsters[String(id)]).map((id) => displayMonsterName(dataset, id))
+    : [];
+  const knownDefenseNames = selectedDefense && dataset
+    ? selectedDefense.team.filter((id) => !!dataset.monsters[String(id)]).map((id) => displayMonsterName(dataset, id))
+    : [];
 
   useEffect(() => {
     if (isCustom) return;
@@ -544,7 +550,9 @@ export default function SiegeAdvicePage() {
                       <div className="tiny dim" style={{ marginTop: 3 }}>
                         {selectedDefense.battles > 0
                           ? `Nosna44 對這隊 ${selectedDefense.battles} 場，${selectedDefense.wins} 勝 ${selectedDefense.losses} 敗（${selectedDefense.wr}%）`
-                          : "自訂防守隊：紀錄中沒有完全相同的隊伍，以下用相似防守隊推薦"}
+                          : counterAdvice.similarDefenses.length > 0
+                            ? "自訂防守隊：沒有完全相同的隊伍，以下用相似防守隊推薦"
+                            : "自訂防守隊：沒有直接或相似紀錄，以下用 Nosna44 的參考進攻隊推薦"}
                       </div>
                     </div>
                     {selectedDefense.battles > 0 && <WrBadge wr={selectedDefense.wr} />}
@@ -552,6 +560,12 @@ export default function SiegeAdvicePage() {
                   <div style={{ marginTop: 10 }}>
                     <SgTeam data={dataset} ids={selectedDefense.team} size={44} names />
                   </div>
+                  {selectedDefense.battles === 0 && unknownDefenseNames.length > 0 && (
+                    <div className="tiny dim" style={{ marginTop: 7, lineHeight: 1.7 }}>
+                      紀錄中沒有的防守怪物：{unknownDefenseNames.join("、")}；以下推薦主要依
+                      {knownDefenseNames.length > 0 ? ` ${knownDefenseNames.join("、")} 的對位成績` : " Nosna44 的常用進攻隊"}。
+                    </div>
+                  )}
                 </div>
 
                 <div className="card card-pad" style={{ marginTop: 10 }}>

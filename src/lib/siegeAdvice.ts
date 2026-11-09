@@ -694,11 +694,18 @@ function buildFallbackCounterTeams(
   const defenseIds = new Set(defense.team);
   const matchups = new Map<number, Map<number, { n: number; w: number }>>();
   const teamGuilds = new Map<string, Set<string>>();
+  const teamMatch = new Map<string, { n: number; w: number }>();
   for (const battle of dataset.battles) {
     const counterKey = siegeTeamKey(battle.counter);
     const guilds = teamGuilds.get(counterKey) ?? new Set<string>();
     if (battle.defenseGuild) guilds.add(battle.defenseGuild);
     teamGuilds.set(counterKey, guilds);
+    if (battle.defense.some((id) => defenseIds.has(id))) {
+      const direct = teamMatch.get(counterKey) ?? { n: 0, w: 0 };
+      direct.n++;
+      if (battle.result === "Victory") direct.w++;
+      teamMatch.set(counterKey, direct);
+    }
     for (const defenseId of new Set(battle.defense)) {
       if (!defenseIds.has(defenseId)) continue;
       const byCounter = matchups.get(defenseId) ?? new Map<number, { n: number; w: number }>();
@@ -735,7 +742,14 @@ function buildFallbackCounterTeams(
       }
     }
     const matchupWr = matchupCount > 0 ? (matchupSum / matchupCount) * 100 : 0;
-    const score = matchupWr * 0.55 + team.wr * 0.25 + Math.min(team.battles, 20) * 0.6 + covered * 2.5;
+    const direct = teamMatch.get(team.key);
+    const directWr = direct ? direct.w / direct.n : 0;
+    const score =
+      matchupWr * 0.45 +
+      team.wr * 0.2 +
+      Math.min(team.battles, 20) * 0.5 +
+      covered * 2.5 +
+      (direct ? directWr * 10 + Math.min(direct.n, 20) * 1.2 : 0);
     candidates.push({
       key: team.key,
       team: team.team,
@@ -747,9 +761,11 @@ function buildFallbackCounterTeams(
       source: "fallback",
       defenseMatches: 0,
       guilds: [...(teamGuilds.get(team.key) ?? [])],
-      reason: matchupCount > 0
-        ? `沒有直接紀錄；對這隊怪物覆蓋 ${covered}/3，整體 ${team.wins}/${team.battles}（${team.wr}%）`
-        : `沒有直接紀錄；依 Nosna44 常用隊推薦（整體 ${team.wins}/${team.battles}，${team.wr}%）`,
+      reason: direct && direct.n > 0
+        ? `沒有直接三隻相同紀錄；對紀錄中的防守怪物 ${direct.w}/${direct.n} 勝；整體 ${team.wins}/${team.battles}（${team.wr}%）`
+        : matchupCount > 0
+          ? `沒有直接紀錄；對紀錄中的防守怪物覆蓋 ${covered}/3，整體 ${team.wins}/${team.battles}（${team.wr}%）`
+          : `沒有直接紀錄；依 Nosna44 常用隊推薦（整體 ${team.wins}/${team.battles}，${team.wr}%）`,
       score,
     });
   }
