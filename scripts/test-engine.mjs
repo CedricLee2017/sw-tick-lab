@@ -2592,4 +2592,16 @@ check("一鍵配隊目標：攻擊 / 防禦 / 體力", () => {
   assert.equal(objectiveOf(stats, "hp"), 30000);
 });
 
+check("據點進攻：全新防守隊也會推荐 Nosna44 的參考進攻隊", () => {
+  const data = normalizeSiegeDataset(SIEGE_BATTLES);
+  const analysis = analyzeSiegeBattles(data);
+  const custom = [900001, 900002, 900003];
+  const advice = recommendSiegeCounters(data, analysis, siegeTeamKey(custom), custom);
+  assert.equal(advice.defense?.battles, 0);
+  assert.equal(advice.recommendations.length, 0);
+  assert.ok(advice.fallbackTeams.length > 0);
+  assert.equal(advice.fallbackTeams[0].source, "fallback");
+  assert.equal(advice.fallbackTeams[0].team.length, 3);
+});
+
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

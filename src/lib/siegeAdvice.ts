@@ -132,10 +132,12 @@ export interface SiegeCounterCandidate {
   losses: number;
   wr: number;
   lastDate: string;
-  source: "exact" | "similar";
+  source: "exact" | "similar" | "fallback";
   defenseMatches: number;
   guilds: string[];
   reason: string;
+  /** 內部排序分數（fallback 用） */
+  score?: number;
 }
 
 export interface SiegeCounterAdvice {
@@ -144,6 +146,8 @@ export interface SiegeCounterAdvice {
   similarDefenses: SiegeTeamStat[];
   similarCounters: SiegeCounterCandidate[];
   recommendations: SiegeCounterCandidate[];
+  /** 沒有直接 / 相似紀錄時，依 Nosna44 常用隊與對位勝率產生的參考進攻隊 */
+  fallbackTeams: SiegeCounterCandidate[];
   fallbackMonsters: SiegeMonsterStat[];
 }
 
@@ -681,6 +685,77 @@ function groupSimilarCounters(dataset: SiegeDataset, defenseKeys: Set<string>): 
   });
 }
 
+function buildFallbackCounterTeams(
+  dataset: SiegeDataset,
+  analysis: SiegeBattleAnalysis,
+  defense: SiegeTeamStat,
+  excludeKeys: Set<string>,
+): SiegeCounterCandidate[] {
+  const defenseIds = new Set(defense.team);
+  const matchups = new Map<number, Map<number, { n: number; w: number }>>();
+  const teamGuilds = new Map<string, Set<string>>();
+  for (const battle of dataset.battles) {
+    const counterKey = siegeTeamKey(battle.counter);
+    const guilds = teamGuilds.get(counterKey) ?? new Set<string>();
+    if (battle.defenseGuild) guilds.add(battle.defenseGuild);
+    teamGuilds.set(counterKey, guilds);
+    for (const defenseId of new Set(battle.defense)) {
+      if (!defenseIds.has(defenseId)) continue;
+      const byCounter = matchups.get(defenseId) ?? new Map<number, { n: number; w: number }>();
+      for (const counterId of new Set(battle.counter)) {
+        const stat = byCounter.get(counterId) ?? { n: 0, w: 0 };
+        stat.n++;
+        if (battle.result === "Victory") stat.w++;
+        byCounter.set(counterId, stat);
+      }
+      matchups.set(defenseId, byCounter);
+    }
+  }
+
+  const candidates: SiegeCounterCandidate[] = [];
+  for (const team of analysis.counterTeams) {
+    if (team.battles < 3 || excludeKeys.has(team.key)) continue;
+    let matchupSum = 0;
+    let matchupCount = 0;
+    let covered = 0;
+    for (const defenseId of defense.team) {
+      const byCounter = matchups.get(defenseId);
+      if (!byCounter) continue;
+      let best: { wr: number; n: number } | null = null;
+      for (const counterId of team.team) {
+        const stat = byCounter.get(counterId);
+        if (!stat || stat.n < 2) continue;
+        const wr = stat.w / stat.n;
+        if (!best || wr > best.wr || (wr === best.wr && stat.n > best.n)) best = { wr, n: stat.n };
+      }
+      if (best) {
+        matchupSum += best.wr;
+        matchupCount++;
+        if (best.wr >= 0.8) covered++;
+      }
+    }
+    const matchupWr = matchupCount > 0 ? (matchupSum / matchupCount) * 100 : 0;
+    const score = matchupWr * 0.55 + team.wr * 0.25 + Math.min(team.battles, 20) * 0.6 + covered * 2.5;
+    candidates.push({
+      key: team.key,
+      team: team.team,
+      battles: team.battles,
+      wins: team.wins,
+      losses: team.losses,
+      wr: team.wr,
+      lastDate: team.lastDate,
+      source: "fallback",
+      defenseMatches: 0,
+      guilds: [...(teamGuilds.get(team.key) ?? [])],
+      reason: matchupCount > 0
+        ? `沒有直接紀錄；對這隊怪物覆蓋 ${covered}/3，整體 ${team.wins}/${team.battles}（${team.wr}%）`
+        : `沒有直接紀錄；依 Nosna44 常用隊推薦（整體 ${team.wins}/${team.battles}，${team.wr}%）`,
+      score,
+    });
+  }
+  return candidates.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || b.battles - a.battles || b.wr - a.wr).slice(0, 5);
+}
+
 /** 針對指定防守隊，找出直接對戰與相似防守隊的推薦進攻隊；customDefense 可傳入紀錄中沒有的自訂三隻 */
 export function recommendSiegeCounters(
   dataset: SiegeDataset,
@@ -702,7 +777,7 @@ export function recommendSiegeCounters(
       }
     : undefined);
   if (!defense) {
-    return { exactPairs: [], similarDefenses: [], similarCounters: [], recommendations: [], fallbackMonsters: analysis.counterMonsters.slice(0, 8) };
+    return { exactPairs: [], similarDefenses: [], similarCounters: [], recommendations: [], fallbackTeams: [], fallbackMonsters: analysis.counterMonsters.slice(0, 8) };
   }
 
   const exactPairs = analysis.pairs
@@ -738,8 +813,12 @@ export function recommendSiegeCounters(
     .sort((a, b) => score(b) - score(a) || b.wr - a.wr || b.battles - a.battles)
     .slice(0, 8);
 
+  const fallbackTeams = recommendations.length < 5
+    ? buildFallbackCounterTeams(dataset, analysis, defense, new Set(recommendations.map((c) => c.key)))
+    : [];
+
   let fallbackMonsters: SiegeMonsterStat[] = [];
-  if (recommendations.length === 0) {
+  if (recommendations.length === 0 && fallbackTeams.length === 0) {
     const ids = new Set(defense.team);
     const looseBattles = dataset.battles.filter((b) => b.defense.some((id) => ids.has(id)));
     const map = new Map<number, SiegeMonsterStat>();
@@ -761,7 +840,7 @@ export function recommendSiegeCounters(
     if (fallbackMonsters.length === 0) fallbackMonsters = analysis.counterMonsters.slice(0, 8);
   }
 
-  return { defense, exactPairs, similarDefenses, similarCounters, recommendations, fallbackMonsters };
+  return { defense, exactPairs, similarDefenses, similarCounters, recommendations, fallbackTeams, fallbackMonsters };
 }
 
 /** 防守建議：讓 Nosna44 失手的防守隊、防守核心怪物 / 雙人組合、對手公會 */

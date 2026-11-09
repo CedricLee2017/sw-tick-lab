@@ -867,6 +867,10 @@ p { margin: 0; }
   background: rgba(242, 198, 92, .14); border: 1px solid rgba(242, 198, 92, .35);
   color: var(--gold); font-size: 10px; font-weight: 800;
 }
+.sg-rank.ref {
+  background: rgba(88, 166, 255, .12); border-color: rgba(88, 166, 255, .3);
+  color: #9dcbff; font-size: 9px;
+}
 .sg-advice-side { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .sg-callout {
   border-color: rgba(242, 198, 92, .3);

@@ -575,10 +575,34 @@ export default function SiegeAdvicePage() {
                         </div>
                       </div>
                     ))}
-                    {counterAdvice.recommendations.length === 0 && (
+                    {counterAdvice.recommendations.length === 0 && counterAdvice.fallbackTeams.length === 0 && (
                       <div className="empty" style={{ padding: "18px 8px" }}>沒有直接或相似防守隊的對戰紀錄。</div>
                     )}
                   </div>
+
+                  {counterAdvice.recommendations.length < 3 && counterAdvice.fallbackTeams.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="row between wrap" style={{ gap: 6 }}>
+                        <span className="tiny dim">沒有直接 / 足夠相似紀錄時的參考進攻隊</span>
+                        <span className="chip muted">依對位勝率</span>
+                      </div>
+                      <div className="sg-advice-list" style={{ marginTop: 6 }}>
+                        {counterAdvice.fallbackTeams.slice(0, 4).map((candidate) => (
+                          <div className="sg-advice-row" key={candidate.key}>
+                            <span className="sg-rank ref">參</span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <SgTeam data={dataset} ids={candidate.team} size={30} names />
+                              <div className="tiny dim" style={{ marginTop: 3 }}>{candidate.reason}</div>
+                            </div>
+                            <div className="sg-advice-side">
+                              <WrBadge wr={candidate.wr} />
+                              <span className="chip muted" style={{ padding: "0 6px", fontSize: 9.5 }}>參考</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {counterAdvice.fallbackMonsters.length > 0 && (
                     <div style={{ marginTop: 12 }}>
