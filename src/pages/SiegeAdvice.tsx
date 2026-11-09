@@ -3,13 +3,13 @@ import {
   AlertTriangle, ChevronLeft, ChevronRight, Crown, Database, Download, Plus, RefreshCw, Search, Shield,
   ScrollText, Swords, Target, Upload,
 } from "lucide-react";
-import { fmt } from "../components/ui";
+import { fmt, MonsterIcon } from "../components/ui";
 import { MonsterPickerModal, toMonsterEntries } from "../components/MonsterPicker";
 import { MONSTER_MAP, useStore } from "../store";
 import {
   analyzeSiegeBattles, loadSiegeBattles, mergeSiegeDatasets, normalizeSiegeDataset, parseSiegeJson, parseSiegeReportHtml,
   recommendSiegeCounters, recommendSiegeDefenses, siegeDateValue, siegeDefenseVariants,
-  siegeMonsterName, siegeShortDate, siegeTeamKey,
+  siegeShortDate, siegeTeamKey,
   type SiegeDataset,
 } from "../lib/siegeAdvice";
 
@@ -20,12 +20,14 @@ type TabKey = "offense" | "defense" | "log" | "data";
 
 function SgMonsterIcon({ data, id, size = 30 }: { data: SiegeDataset; id: number; size?: number }) {
   const info = data.monsters[String(id)];
+  const name = displayMonsterName(data, id);
   const [failed, setFailed] = useState(false);
   const style = { width: size, height: size, borderRadius: Math.max(5, Math.round(size * 0.18)) };
   if (!info?.icon || failed) {
+    if (MONSTER_MAP.has(id)) return <MonsterIcon id={id} size={size} />;
     return (
-      <span className="sg-mon-icon fallback" style={{ ...style, fontSize: Math.max(8, size * 0.32) }} title={info?.name ?? `#${id}`}>
-        {(info?.name ?? "?").slice(0, 1)}
+      <span className="sg-mon-icon fallback" style={{ ...style, fontSize: Math.max(8, size * 0.32) }} title={name}>
+        {name.slice(0, 1)}
       </span>
     );
   }
@@ -34,8 +36,8 @@ function SgMonsterIcon({ data, id, size = 30 }: { data: SiegeDataset; id: number
       className="sg-mon-icon"
       style={style}
       src={info.icon}
-      alt={info.name}
-      title={info.name}
+      alt={name}
+      title={name}
       loading="lazy"
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
@@ -56,7 +58,15 @@ function speedLeaderFirst(ids: number[]): number[] {
 }
 
 function orderedTeamLabel(data: SiegeDataset, ids: number[]): string {
-  return speedLeaderFirst(ids).map((id) => siegeMonsterName(data, id)).join(" / ");
+  return speedLeaderFirst(ids).map((id) => displayMonsterName(data, id)).join(" / ");
+}
+
+/** 優先使用 SWGT 紀錄中的名稱；紀錄沒有的自訂角色則回退到內建魔靈資料 */
+function displayMonsterName(data: SiegeDataset, id: number): string {
+  const datasetName = data.monsters[String(id)]?.name;
+  const appName = MONSTER_MAP.get(id)?.name;
+  if (datasetName && !datasetName.startsWith("#")) return datasetName;
+  return appName || datasetName || `#${id}`;
 }
 
 function SgTeam({
@@ -76,9 +86,9 @@ function SgTeam({
   return (
     <span className={`sg-team ${className}`.trim()}>
       {ordered.map((id) => (
-        <span className="sg-mon" key={id} title={siegeMonsterName(data, id)}>
+        <span className="sg-mon" key={id} title={displayMonsterName(data, id)}>
           <SgMonsterIcon data={data} id={id} size={size} />
-          {names && <span className="sg-mon-name">{siegeMonsterName(data, id)}</span>}
+          {names && <span className="sg-mon-name">{displayMonsterName(data, id)}</span>}
         </span>
       ))}
     </span>
@@ -191,7 +201,7 @@ export default function SiegeAdvicePage() {
       .filter((d) => {
         if (!term) return true;
         if (d.guilds.some((guild) => guild.toLowerCase().includes(term))) return true;
-        return d.team.some((id) => siegeMonsterName(dataset, id).toLowerCase().includes(term));
+        return d.team.some((id) => displayMonsterName(dataset, id).toLowerCase().includes(term));
       })
       .sort((a, b) => b.losses - a.losses || b.battles - a.battles || a.wr - b.wr);
   }, [analysis, dataset, defenseSearch]);
@@ -257,8 +267,8 @@ export default function SiegeAdvicePage() {
         const haystack = [
           battle.defenseGuild,
           battle.attacker,
-          ...battle.counter.map((id) => siegeMonsterName(dataset, id)),
-          ...battle.defense.map((id) => siegeMonsterName(dataset, id)),
+          ...battle.counter.map((id) => displayMonsterName(dataset, id)),
+          ...battle.defense.map((id) => displayMonsterName(dataset, id)),
         ].join(" ").toLowerCase();
         return haystack.includes(term);
       })
@@ -458,13 +468,13 @@ export default function SiegeAdvicePage() {
                         key={index}
                         type="button"
                         className={`sg-slot ${id ? "filled" : ""}`}
-                        title={id ? siegeMonsterName(dataset, id) : `選擇第 ${index + 1} 隻魔靈`}
+                        title={id ? displayMonsterName(dataset, id) : `選擇第 ${index + 1} 隻魔靈`}
                         onClick={() => setCustomPickerIndex(index)}
                       >
                         {id ? (
                           <>
                             <SgMonsterIcon data={dataset} id={id} size={30} />
-                            <span className="sg-slot-name">{siegeMonsterName(dataset, id)}</span>
+                            <span className="sg-slot-name">{displayMonsterName(dataset, id)}</span>
                             {isSpeedLeader(id) && <span className="sg-slot-lead">速</span>}
                           </>
                         ) : (
@@ -576,7 +586,7 @@ export default function SiegeAdvicePage() {
                       <div className="row wrap" style={{ gap: 5, marginTop: 5 }}>
                         {counterAdvice.fallbackMonsters.map((monster) => (
                           <span key={monster.id} className="chip">
-                            {siegeMonsterName(dataset, monster.id)} {monster.battles} 場 · {monster.wr}%
+                            {displayMonsterName(dataset, monster.id)} {monster.battles} 場 · {monster.wr}%
                           </span>
                         ))}
                       </div>
@@ -668,7 +678,7 @@ export default function SiegeAdvicePage() {
                 ))}
               </div>
               <div className="tiny dim" style={{ marginTop: 7 }}>
-                第三隻可優先考慮樣本較多的 {variants.slice(0, 3).map((v) => siegeMonsterName(dataset, v.monsterId)).join("、")}；按一下可直接分析該變體的進攻方式。
+                第三隻可優先考慮樣本較多的 {variants.slice(0, 3).map((v) => displayMonsterName(dataset, v.monsterId)).join("、")}；按一下可直接分析該變體的進攻方式。
               </div>
             </div>
           )}
@@ -757,7 +767,7 @@ export default function SiegeAdvicePage() {
                   <tbody>
                     {defenseAdvice.coreMonsters.map((monster) => (
                       <tr key={monster.id}>
-                        <td><span className="row" style={{ gap: 5 }}><SgMonsterIcon data={dataset} id={monster.id} size={24} />{siegeMonsterName(dataset, monster.id)}</span></td>
+                        <td><span className="row" style={{ gap: 5 }}><SgMonsterIcon data={dataset} id={monster.id} size={24} />{displayMonsterName(dataset, monster.id)}</span></td>
                         <td className="num">{monster.battles}</td>
                         <td className="num"><WrBadge wr={monster.wr} /></td>
                         <td className="num">{monster.losses}</td>
@@ -776,7 +786,7 @@ export default function SiegeAdvicePage() {
                   <tbody>
                     {defenseAdvice.corePairs.map((pair) => (
                       <tr key={pair.key}>
-                        <td><span className="row" style={{ gap: 5 }}><SgMonsterIcon data={dataset} id={pair.ids[0]} size={22} /><SgMonsterIcon data={dataset} id={pair.ids[1]} size={22} />{siegeMonsterName(dataset, pair.ids[0])} + {siegeMonsterName(dataset, pair.ids[1])}</span></td>
+                        <td><span className="row" style={{ gap: 5 }}><SgMonsterIcon data={dataset} id={pair.ids[0]} size={22} /><SgMonsterIcon data={dataset} id={pair.ids[1]} size={22} />{displayMonsterName(dataset, pair.ids[0])} + {displayMonsterName(dataset, pair.ids[1])}</span></td>
                         <td className="num">{pair.battles}</td>
                         <td className="num"><WrBadge wr={pair.wr} /></td>
                         <td className="num">{pair.losses}</td>
