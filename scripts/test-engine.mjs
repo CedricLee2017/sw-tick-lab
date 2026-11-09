@@ -54,10 +54,14 @@ const {
   setTowerSwords, otherSiegeGuild, siegeSwordOwner,
   EMPTY_SKILL_FILTER, matchesSkill, buildBestiary, effectGroups,
   EMPTY_LEADER_FILTER, matchesLeader, isLeaderFilterActive,
+  analyzeSiegeBattles, recommendSiegeCounters, recommendSiegeDefenses, siegeDefenseVariants,
+  normalizeSiegeDataset, siegeTeamKey, siegeOverlap, siegeWinRate,
 } = engine;
 
 /** 技能資料（判斷提條技能用） */
 const SKILLS = JSON.parse(await fs.readFile(path.join(ROOT, "public/data/skills.json"), "utf8"));
+/** Nosna44 的 SWGT 據點戰紀錄 */
+const SIEGE_BATTLES = JSON.parse(await fs.readFile(path.join(ROOT, "public/data/siege-battles-nosna44.json"), "utf8"));
 
 let passed = 0;
 function check(name, fn) {
@@ -2474,6 +2478,65 @@ check("圖鑑：隊長技資料（Lushen / 競技場速度隊長）", () => {
     matchesLeader(m.lead, { ...EMPTY_LEADER_FILTER, attr: "Attack Speed", area: "Arena" }),
   );
   assert.ok(speedArena.length > 10, `競技場速度隊長應超過 10 隻，實際 ${speedArena.length}`);
+});
+
+check("據點進攻：Nosna44 227 場、224 勝、勝率 98.7%", () => {
+  const data = normalizeSiegeDataset(SIEGE_BATTLES);
+  const analysis = analyzeSiegeBattles(data);
+  assert.equal(data.battles.length, 227);
+  assert.equal(analysis.overall.wins, 224);
+  assert.equal(analysis.overall.losses, 3);
+  assert.equal(analysis.overall.wr, 98.7);
+  assert.equal(analysis.counterTeams.length, 60);
+  assert.equal(analysis.defenseTeams.length, 101);
+  assert.equal(analysis.losses.length, 3);
+});
+
+check("據點進攻：推薦進攻隊（Sylvia / Daphnis / Wind Qilin Slasher）", () => {
+  const data = normalizeSiegeDataset(SIEGE_BATTLES);
+  const analysis = analyzeSiegeBattles(data);
+  const key = siegeTeamKey([20115, 21112, 32913]);
+  const advice = recommendSiegeCounters(data, analysis, key);
+  assert.ok(advice.defense, "應找到防守隊");
+  assert.equal(advice.defense.battles, 16);
+  assert.equal(advice.defense.wins, 15);
+  assert.equal(advice.exactPairs.length, 4);
+  const top = advice.recommendations[0];
+  assert.ok(top, "應有推薦進攻隊");
+  const names = top.team.map((id) => data.monsters[String(id)]?.name).sort().join(" / ");
+  assert.equal(names, "Bellenus / Eladriel / Moogwang");
+  assert.equal(top.battles, 8);
+  assert.equal(top.wins, 8);
+  assert.equal(top.wr, 100);
+  assert.equal(top.source, "exact");
+});
+
+check("據點防守：Daphnis + Wind Qilin Slasher 為最強核心", () => {
+  const data = normalizeSiegeDataset(SIEGE_BATTLES);
+  const analysis = analyzeSiegeBattles(data);
+  const advice = recommendSiegeDefenses(analysis);
+  assert.equal(advice.losingBattles.length, 3);
+  const top = advice.corePairs[0];
+  assert.deepEqual([...top.ids].sort((a, b) => a - b), [21112, 32913]);
+  assert.equal(top.battles, 29);
+  assert.equal(top.losses, 2);
+  assert.equal(top.wr, 93.1);
+
+  const variants = siegeDefenseVariants(data, top.ids);
+  const sylvia = variants.find((v) => v.monsterId === 20115);
+  assert.ok(sylvia);
+  assert.equal(sylvia.battles, 16);
+  assert.equal(sylvia.wins, 15);
+  const velaska = variants.find((v) => v.monsterId === 31315);
+  assert.ok(velaska);
+  assert.equal(velaska.battles, 1);
+  assert.equal(velaska.wins, 0);
+});
+
+check("據點進攻：無效資料會回報錯誤", () => {
+  assert.throws(() => normalizeSiegeDataset({ battles: [] }), /找不到對戰紀錄/);
+  assert.equal(siegeOverlap([1, 2, 3], [2, 3, 4]), 2);
+  assert.equal(siegeWinRate(224, 227), 98.7);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

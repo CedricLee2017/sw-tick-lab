@@ -776,6 +776,104 @@ p { margin: 0; }
   border: 1px solid rgba(242, 198, 92, .35);
   color: var(--gold); font-size: 10px; font-weight: 800;
 }
+
+/* ── 據點進攻建議（SWGT battle logs） ─────────────── */
+.sg-summary {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px; margin-top: 12px;
+}
+.sg-summary .stat-tile { padding: 10px 12px; }
+.sg-summary .stat-tile .v { font-size: 20px; }
+.sg-summary .stat-tile .u { display: block; margin: 2px 0 0; }
+.sg-offense-grid {
+  display: grid; grid-template-columns: 340px minmax(0, 1fr);
+  gap: 12px; align-items: start;
+}
+.sg-defense-list {
+  display: grid; gap: 5px; max-height: 640px;
+  overflow-y: auto; margin-top: 8px; padding-right: 3px;
+}
+.sg-defense-card {
+  display: block; width: 100%; text-align: left;
+  border: 1px solid var(--line-soft); border-radius: 9px;
+  background: rgba(11, 17, 32, .45); padding: 7px 8px;
+  color: var(--text); cursor: pointer;
+}
+.sg-defense-card:hover { border-color: rgba(88, 166, 255, .4); background: rgba(88, 166, 255, .05); }
+.sg-defense-card.on { border-color: rgba(242, 198, 92, .55); background: rgba(242, 198, 92, .08); }
+.sg-defense-meta {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px;
+  font-size: 9.5px; color: var(--muted-2);
+}
+.sg-team { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.sg-mon { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
+.sg-mon-icon {
+  border-radius: 6px; object-fit: cover; background: #0b1221; flex: 0 0 auto;
+}
+.sg-mon-icon.fallback {
+  display: inline-grid; place-items: center; color: #8b9cc0;
+  font-weight: 800; border: 1px solid var(--line-soft);
+}
+.sg-mon-name {
+  max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; color: var(--muted);
+}
+.sg-wr {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 2px 7px; border-radius: 999px; border: 1px solid;
+  font-size: 10.5px; font-weight: 800; white-space: nowrap;
+}
+.sg-wr.good { color: var(--green); background: rgba(67, 217, 138, .1); border-color: rgba(67, 217, 138, .25); }
+.sg-wr.mid { color: var(--gold); background: rgba(242, 198, 92, .1); border-color: rgba(242, 198, 92, .3); }
+.sg-wr.bad { color: var(--red); background: rgba(255, 107, 107, .1); border-color: rgba(255, 107, 107, .25); }
+.sg-advice-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.sg-advice-row {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line-soft); border-radius: 9px;
+  padding: 7px 8px; background: rgba(11, 17, 32, .35);
+}
+.sg-advice-row:hover { border-color: rgba(242, 198, 92, .3); }
+.sg-rank {
+  flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(242, 198, 92, .14); border: 1px solid rgba(242, 198, 92, .35);
+  color: var(--gold); font-size: 10px; font-weight: 800;
+}
+.sg-advice-side { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.sg-callout {
+  border-color: rgba(242, 198, 92, .3);
+  background: linear-gradient(180deg, rgba(242, 198, 92, .08), rgba(11, 17, 32, .4));
+}
+.sg-variant-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.sg-variant {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--line-soft); border-radius: 8px;
+  background: rgba(11, 17, 32, .45); color: var(--text);
+  padding: 4px 6px; cursor: pointer;
+}
+.sg-variant:hover { border-color: rgba(242, 198, 92, .4); }
+.sg-loss-list { display: flex; flex-direction: column; gap: 8px; }
+.sg-loss-card {
+  border: 1px solid rgba(255, 107, 107, .2); border-radius: 10px;
+  padding: 9px 10px; background: rgba(255, 107, 107, .04);
+}
+.sg-result { font-size: 10.5px; font-weight: 800; }
+.sg-result.good { color: var(--green); }
+.sg-result.bad { color: var(--red); }
+.sg-log-table .sg-team { flex-wrap: nowrap; }
+.sg-log-table .sg-mon-name { max-width: 64px; }
+.sg-pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 14px; border-top: 1px solid var(--line-soft);
+}
+@media (max-width: 900px) {
+  .sg-offense-grid { grid-template-columns: 1fr; }
+  .sg-defense-list { max-height: 320px; }
+}
+@media (max-width: 560px) {
+  .sg-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sg-log-table .sg-mon-name { display: none; }
+}
 .deck-detail {
   border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px;
   background: rgba(11,17,32,.35);

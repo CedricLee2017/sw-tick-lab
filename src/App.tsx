@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target,
 } from "lucide-react";
 import { ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
@@ -20,6 +20,7 @@ import DamageComparePage from "./pages/DamageCompare";
 import DecksPage from "./pages/Decks";
 import SpeedTickPage from "./pages/SpeedTick";
 import SiegeSimulatorPage from "./pages/SiegeSimulator";
+import SiegeAdvicePage from "./pages/SiegeAdvice";
 import OptimizerPage from "./pages/Optimizer";
 import TeamOptimizerPage from "./pages/TeamOptimizer";
 import AdminPage from "./pages/Admin";
@@ -31,7 +32,7 @@ import { MonsterIcon } from "./components/ui";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "siege" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "siege" | "siege-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -40,6 +41,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "speed", label: "速度實驗室", icon: <Gauge size={17} />, title: "速度實驗室", sub: "Tick 反推、速度門檻與出手順序" },
   { key: "speedtick", label: "Speed Tick", icon: <Timer size={17} />, title: "Speed Tick 計算器", sub: "攻擊條、速度、出手順序與 Tick 門檻" },
   { key: "siege", label: "據點戰模擬", icon: <Castle size={17} />, title: "據點戰錦標賽模擬器", sub: "佔領塔、連線得分與 20,000 分勝利時間" },
+  { key: "siege-advice", label: "據點進攻建議", icon: <Target size={17} />, title: "據點進攻建議", sub: "以 SWGT 對戰記錄分析進攻隊與防守核心" },
   { key: "rta", label: "RTA", icon: <Swords size={17} />, title: "RTA 世界競技場", sub: "最愛魔靈的 RTA 獨立配裝與速度排行" },
   { key: "optimizer", label: "配符", icon: <Wand2 size={17} />, title: "一鍵配符", sub: "以 Tick 為條件的符文最佳化" },
   { key: "team-opt", label: "一鍵配隊", icon: <Zap size={17} />, title: "配置預設隊", sub: "最多 3 隊、15 隻魔靈一次配好，符文不重複" },
@@ -75,6 +77,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   speed: SpeedPage,
   speedtick: SpeedTickPage,
   siege: SiegeSimulatorPage,
+  "siege-advice": SiegeAdvicePage,
   rta: RtaPage,
   optimizer: OptimizerPage,
   "team-opt": TeamOptimizerPage,
@@ -208,7 +211,7 @@ export default function App() {
   }, [moreOpen]);
 
   useEffect(() => {
-    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "siege" && route !== "admin" && route !== "bestiary") {
+    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "siege" && route !== "siege-advice" && route !== "admin" && route !== "bestiary") {
       window.location.hash = "#/import";
     }
   }, [ready, account, route]);

@@ -44,6 +44,11 @@
     - **Tick View**：每個 Tick 的攻擊條排序與是否出手。
     - **Saves**：把目前設定（含拉條 / 速度增減 / 額外速度）命名儲存、備註、讀取與刪除；工作狀態也會自動存在瀏覽器。
   - **神器追傷計算器**：獨立頁面，依 HP / ATK / DEF / SPD、追傷 % 與技能段數計算 `floor(HP×h%) + floor(ATK×a%) + floor(DEF×d%) + floor(SPD×s%)`；可選魔靈帶入目前面板，或直接點選「儲存庫」的魔靈符文組合帶入該組數值；也能從神器排行把追傷效果「套用／加入」，並和技能傷害比較。
+- **據點進攻建議**：獨立頁面（需登入，但不需要匯入存檔），讀取 SWGT 3MDC Battle Logs，分析會友 Nosna44 的據點戰紀錄（內建 Season 22 快照：227 場、224 勝、3 敗）。
+  - **進攻建議**：選擇一個防守隊，依「直接對戰」與「共用 2 隻的相似防守隊」推薦進攻隊，顯示每隊的勝率、場次與最後對戰日期；例如對上 Sylvia / Daphnis / Wind Qilin Slasher 時，會推薦 8 勝 0 敗的 Moogwang / Bellenus / Eladriel。
+  - **防守建議**：列出讓 Nosna44 失手的防守隊、高難度防守隊與破解方式、防守核心怪物 / 雙人組合、對手公會勝率；會自動找出最強防守核心，例如 **Daphnis + Wind Qilin Slasher**（29 場只讓 Nosna44 贏 27 場），並列出第三隻變體（Sylvia / Rahul / Geldnir…）的實際成績。
+  - **對戰記錄**：可依結果、對手公會、怪物名稱搜尋與分頁，點「分析」可直接切換到該防守隊的進攻建議。
+  - **資料更新**：可匯入 SWGT 報告頁另存的 HTML，或本頁下載的 JSON；匯入後只存在這台裝置的瀏覽器。內建快照為 2026-11-09 收集的 Season 22 資料。
 - **據點戰模擬器**：獨立頁面（需登入，但不需要匯入存檔），重現 SWGT 的 Siege Tournament Simulator。26 座塔（藍／紅各 13 座）依固定拓撲連線，點塔即可改公會、目標樣式 T1–T5、禁止、備註與基地剩餘 HP；地圖會把連不到本營的塔變暗。
   - 自動計算每分鐘得分（連線塔 × 2，13 座以上再 +20）、連線塔數與距離 20,000 分的預估勝利時間；雙方比分可直接在卡片上編輯。
   - 支援匯入／匯出與 SWGT 相同格式的 JSON（也接受本工具存檔），可備份或分享地圖；設定會自動存在這台裝置的瀏覽器。
@@ -165,7 +170,7 @@ npm run dev        # http://localhost:5173
 npm run typecheck  # TypeScript 檢查
 npm run build      # 產出 dist/
 npm run preview    # 預覽 production build
-npm test           # Tick、配符、符文限制、技能傷害、神器、追傷、預設隊／防守隊、Speed Tick、接速、RTA、一鍵配隊、據點戰、精煉素材與圖鑑技能／隊長技篩選測試（137 項）
+npm test           # Tick、配符、符文限制、技能傷害、神器、追傷、預設隊／防守隊、Speed Tick、接速、RTA、一鍵配隊、據點戰、精煉素材、圖鑑技能／隊長技與據點進攻建議測試（141 項）
 ```
 
 其他指令：
@@ -286,6 +291,7 @@ src/
     teamPresets.ts      一鍵配隊的自訂隊型（IndexedDB）
     deckSetup.ts        從預設隊快照回推套裝／主屬性／數值下限
     siege.ts            據點戰錦標賽地圖、連線分析、計分、劍數與匯入／匯出
+    siegeAdvice.ts      SWGT 據點戰紀錄分析、進攻隊推薦與防守核心建議
     bestiary.ts         魔靈圖鑑的全魔靈索引、技能條件與效果分類
   components/ui.tsx     共用 UI（魔靈圖示、符文卡、神器卡、Tick 徽章、Modal）
   components/InstallApp.tsx 「安裝成 App」按鈕與 iOS / Android 安裝說明
@@ -295,10 +301,11 @@ src/
                               所有會「選擇／新增魔靈」的頁面（Speed Tick、配符、速度實驗室、一鍵配隊、配神器、神器追傷）共用同一套卡片式選單
   components/ArtifactStage.tsx 第二階段神器面板與結果
   components/RuneRestrictions.tsx 排除 / 固定使用符文面板
-  pages/                匯入、總覽、魔靈圖鑑、我的魔靈、速度實驗室、Speed Tick、據點戰模擬、RTA、配符、一鍵配隊、配神器、神器追傷、配裝、預設隊、符文、神器、設定
+  pages/                匯入、總覽、魔靈圖鑑、我的魔靈、速度實驗室、Speed Tick、據點戰模擬、據點進攻建議、RTA、配符、一鍵配隊、配神器、神器追傷、配裝、預設隊、符文、神器、設定
   store.ts              zustand + IndexedDB 本機儲存
 scripts/                資料產生、PWA 圖示與引擎測試
 public/
+  data/siege-battles-nosna44.json  SWGT 據點戰記錄快照（Nosna44 / Season 22，供據點進攻建議頁）
   manifest.webmanifest  PWA 名稱、圖示、獨立視窗設定
   sw.js                 Service Worker（導覽 network-first、靜態資源 stale-while-revalidate）
   icons/                192 / 512 / maskable / apple-touch 圖示
@@ -309,5 +316,6 @@ public/
 ## 資料來源與聲明
 
 - 魔靈基礎資料來自 [SWARFARM](https://swarfarm.com/) 公開 API，魔靈圖示為 SWARFARM 外部連結。
+- 據點進攻建議的對戰紀錄來自 [SWGT](https://swgt.io/) 3MDC Battle Logs（Nosna44 / Season 22 快照）；頁面可匯入新的 SWGT 報告 HTML 或 JSON 更新。
 - 本專案為玩家自製工具，與 Com2uS 無任何關聯；《魔靈召喚：天空之役》及相關素材版權屬於原權利人。
 - 建議僅上傳自己的存檔，並自行保管 JSON 檔。
