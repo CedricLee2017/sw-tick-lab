@@ -126,6 +126,9 @@ export default function ImportPage() {
 
   const handleFiles = async (files: FileList | null) => {
     const f = files?.[0];
+    // 清空 file input 的值，否則再次選擇「同一個檔名」時瀏覽器不會觸發 change，
+    // 使用者會以為已經重新匯入，實際上仍停留在舊存檔（精煉建議等頁面就不會更新）。
+    if (inputRef.current) inputRef.current.value = "";
     if (!f) return;
     if (f.size > 60 * 1024 * 1024) return notify("檔案超過 60MB，請確認是純 JSON 存檔", "err");
     try {

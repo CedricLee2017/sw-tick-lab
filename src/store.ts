@@ -257,8 +257,12 @@ export const useStore = create<Store>((setState, getState) => ({
       runeMap: new Map(account.runes.map((r) => [r.id, r])),
       settings,
     });
-    void set(ACCOUNT_KEY, account);
-    if (settings !== prev) void set(SETTINGS_KEY, settings);
+    // 寫入本機失敗（例如瀏覽器儲存空間不足）時要讓使用者知道，
+    // 否則重新整理後會回到舊存檔，看起來就像「匯入沒有更新」。
+    void set(ACCOUNT_KEY, account).catch(() => {
+      getState().notify("存檔已載入，但無法寫入瀏覽器儲存空間；重新整理後可能回到舊存檔", "err");
+    });
+    if (settings !== prev) void set(SETTINGS_KEY, settings).catch(() => undefined);
     const detectedSpeed = account.buildings.find((b) => b.id === 7);
     getState().notify(
       `已載入 ${account.units.length} 隻魔靈 / ${account.runes.length} 顆符文 / ${account.artifacts.length} 件神器 · 建築以全滿等計算` +

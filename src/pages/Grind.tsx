@@ -271,6 +271,9 @@ export default function GrindPage() {
           <div className="card-sub">
             依符文素質、套裝、裝備對象與目前精煉值排序；只考慮可用磨石精煉的屬性（速度、體力／攻擊／防禦與固定值）。
           </div>
+          <div className="tiny dim" style={{ marginTop: 2 }}>
+            目前存檔：{account.fileName} · {new Date(account.importedAt).toLocaleString("zh-TW")} · {account.runes.length} 顆符文
+          </div>
         </div>
         <span className="chip gold">
           {profile === "speed"
