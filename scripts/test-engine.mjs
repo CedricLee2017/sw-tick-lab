@@ -52,6 +52,7 @@ const {
   analyzeSiege, createSiegeState, createSiegeTowers, siegeScoreIncrement, siegeSecondsToWin,
   formatSiegeDuration, importSiegeJSON, exportSiegeJSON, SIEGE_MAP_VERSION,
   setTowerSwords, otherSiegeGuild, siegeSwordOwner,
+  EMPTY_SKILL_FILTER, matchesSkill, buildBestiary, effectGroups,
 } = engine;
 
 /** 技能資料（判斷提條技能用） */
@@ -2384,6 +2385,60 @@ check("匯出／匯入會保留劍數；5 劍存檔會直接爆塔", () => {
 
   const old = importSiegeJSON(JSON.stringify([{ siege_map_data: [{ id: 1, color: "Blue" }] }]));
   assert.equal(old.state.towers.find((t) => t.id === 1).swords, 0, "舊存檔沒有 swords 時預設 0");
+});
+
+check("圖鑑：技能條件（位置 / 效果 / 段數 / 冷卻）", () => {
+  const skill = {
+    id: 1,
+    n: "Test Skill",
+    slot: 2,
+    hits: 2,
+    aoe: true,
+    passive: false,
+    cool: 3,
+    max: 5,
+    f: "1.0*{ATK}",
+    raw: "[]",
+    sc: ["ATK"],
+    up: 0,
+    e: [28, 20],
+    d: "Attacks all enemies and decreases their Defense.",
+  };
+  assert.equal(matchesSkill(skill, EMPTY_SKILL_FILTER), true);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, q: "decreases" }), true);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, q: "heal" }), false);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, slot: 1 }), false);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, slot: 2 }), true);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, kind: "passive" }), false);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, aoe: "yes" }), true);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, aoe: "no" }), false);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, effects: [28], effectMode: "any" }), true);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, effects: [28, 35], effectMode: "all" }), false);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, effects: [28, 20], effectMode: "all" }), true);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, minHits: 3 }), false);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, maxCool: 2 }), false);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, maxCool: 3 }), true);
+  assert.equal(matchesSkill(skill, { ...EMPTY_SKILL_FILTER, scale: "DEF" }), false);
+});
+
+check("圖鑑：全魔靈索引與技能效果分組", () => {
+  const lushen = MONSTERS.find((m) => m.name === "Lushen");
+  assert.ok(lushen, "應找到 Lushen");
+  const all = buildBestiary(SKILLS, MONSTERS);
+  assert.equal(all.length, MONSTERS.length);
+  const lushenEntry = all.find((e) => e.monster.id === lushen.id);
+  assert.ok(lushenEntry && lushenEntry.skills.length >= 3);
+
+  const stun = all.filter((e) =>
+    e.skills.some((s) => matchesSkill(s, { ...EMPTY_SKILL_FILTER, effects: [28] })),
+  );
+  assert.ok(stun.length > 300, `Stun 魔靈數量應大於 300，實際 ${stun.length}`);
+
+  const groups = effectGroups(SKILLS, MONSTERS);
+  assert.ok(groups.some((g) => g.type === "Buff"));
+  assert.ok(groups.some((g) => g.type === "Debuff"));
+  const stunOption = groups.flatMap((g) => g.items).find((i) => i.name === "Stun");
+  assert.ok(stunOption && stunOption.count > 300);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

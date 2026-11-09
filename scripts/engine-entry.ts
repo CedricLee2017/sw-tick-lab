@@ -39,5 +39,6 @@ export {
 export * from "../src/lib/deckSetup";
 export * from "../src/lib/librarySync";
 export * from "../src/lib/siege";
+export * from "../src/lib/bestiary";
 export { parseAccountJSON, exportAccount } from "../src/lib/parse";
 export { default as MONSTERS } from "../src/data/monsters.json";

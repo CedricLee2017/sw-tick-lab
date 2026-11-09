@@ -81,7 +81,8 @@
 - **精煉建議**：依符文素質、套裝、裝備對象與目前精煉值排出磨石使用順序。
   - **分數模式可計入持有素材**：勾選「只列出持有精煉石素材的符文」後，會讀取存檔中的磨石（一般 / 遠古 / 無形），用實際持有的最高等級磨石最大值估算，只留下真的能把符文精煉到目標分數的候選；卡片會顯示需要的套裝、屬性、磨石等級與持有數量。遠古符文使用遠古磨石上限（例如體攻防% 12、速度 6），一般符文使用一般磨石上限。
 - **神器倉庫**：依類型（屬性 / 類型）、屬性、效果文字、裝備狀態搜尋與排序；每件顯示 +15、主效果、副效果（含強化次數）、品質、神器 ID 與裝備魔靈，魔靈詳情也會列出已裝備神器。
-- **魔靈圖鑑**：1987 隻魔靈基礎數值、覺醒狀態、現有配裝、神器與速度。
+- **魔靈圖鑑**：收錄 1987 隻魔靈（含未覺醒 / 覺醒 / 二覺形態）的基礎數值、覺醒狀態、類型與技能。可依名稱、屬性、原生星級、覺醒狀態、類型排序，並用技能名稱、S1–S4、主動 / 被動、全體 / 單體、段數、冷卻、成長屬性與技能效果（暈眩、破防、拉條、免疫…）篩選；技能效果可複選，並切換「符合任一」或「同一招同時具備全部」。魔靈詳情會列出完整技能說明、效果與倍率；帳號內已擁有的魔靈會標示數量並可直接帶入配符，未擁有的也能一鍵加入成自訂魔靈。
+- **我的魔靈**：你的魔靈盒與目前配裝、已裝備符文 / 神器與速度；可新增自訂魔靈、查看詳情或帶入配符。
 - **魔靈召喚記錄**：依 `create_time` 列出所有原4 / 原5 魔靈的取得時間（含背包 / 保管箱），可依原生星數、屬性、名稱搜尋與分頁。SWEX / SWOP 匯出檔沒有逐筆召喚 API，關卡掉落、活動贈送與合成也會一併列入。
 - **設定**：建築等級覆寫、隊長技 / Buff 預設、RTA 模式、磨石與候選數、配裝紀錄、匯出 / 清除本機存檔。
 
@@ -109,7 +110,7 @@ Tick = ceil(10000 / (速度 × 7))
 
 ## 技能傷害估算
 
-- 技能倍率來自 **SWARFARM API**，資料存於 `public/data/skills.json`（可用 `npm run skills` 重新產生）。
+- 技能倍率來自 **SWARFARM API**，資料存於 `public/data/skills.json`（可用 `npm run skills` 重新產生；`npm run skills:effects` 只補技能效果名稱、`npm run skills:descriptions` 補完整技能說明）。
 - 召喚師技能（Battle）一律計入傷害與 EHP，但不會加進面板數值；競技場圖騰、屬性塔也視為一般技能加成。數值沿用滿等：競技場攻擊 / 體力 / 防禦 20%、暴擊傷害 25%、屬性攻擊塔 21%；速度圖騰 15% 只計入戰鬥速度 / Tick，不計入面板速度。
 - 公會技能（Guild）預設**不計入**：配符頁的「計入公會召喚師技能（傷害 / EHP）」勾選可加入 20% / 25% 公會加成，EHP 與傷害排序會同步切換。
 - 每段傷害：`實戰數值 × 技能倍率 × (烙印 × 暴擊係數 + 滿技傷害%) × 防禦減傷`。滿技與暴擊是**相加**（SWOP 的算法），不是相乘。
@@ -164,7 +165,7 @@ npm run dev        # http://localhost:5173
 npm run typecheck  # TypeScript 檢查
 npm run build      # 產出 dist/
 npm run preview    # 預覽 production build
-npm test           # Tick、配符、符文限制、技能傷害、神器、追傷、預設隊／防守隊、Speed Tick、接速、RTA、一鍵配隊、據點戰與精煉素材測試（133 項）
+npm test           # Tick、配符、符文限制、技能傷害、神器、追傷、預設隊／防守隊、Speed Tick、接速、RTA、一鍵配隊、據點戰、精煉素材與圖鑑技能篩選測試（135 項）
 ```
 
 其他指令：
@@ -172,6 +173,8 @@ npm test           # Tick、配符、符文限制、技能傷害、神器、追�
 ```bash
 npm run data   # 由 SWARFARM API 重新產生 src/data/monsters.json
 npm run skills # 由 SWARFARM API 重新產生 public/data/skills.json（技能倍率）
+npm run skills:effects # 只補技能效果名稱對照（魔靈圖鑑篩選用）
+npm run skills:descriptions # 只補完整技能說明（魔靈圖鑑詳情用）
 npm run demo   # 重新產生 public/demo-account.json 示範存檔
 npm run icons  # 重新產生 PWA 圖示（public/icons/*.png）
 ```
@@ -282,6 +285,7 @@ src/
     teamPresets.ts      一鍵配隊的自訂隊型（IndexedDB）
     deckSetup.ts        從預設隊快照回推套裝／主屬性／數值下限
     siege.ts            據點戰錦標賽地圖、連線分析、計分、劍數與匯入／匯出
+    bestiary.ts         魔靈圖鑑的全魔靈索引、技能條件與效果分類
   components/ui.tsx     共用 UI（魔靈圖示、符文卡、神器卡、Tick 徽章、Modal）
   components/InstallApp.tsx 「安裝成 App」按鈕與 iOS / Android 安裝說明
   components/SiteQr.tsx  首頁「用手機或平板開啟」的 QR code（qrcode.react）與複製網址
@@ -290,7 +294,7 @@ src/
                               所有會「選擇／新增魔靈」的頁面（Speed Tick、配符、速度實驗室、一鍵配隊、配神器、神器追傷）共用同一套卡片式選單
   components/ArtifactStage.tsx 第二階段神器面板與結果
   components/RuneRestrictions.tsx 排除 / 固定使用符文面板
-  pages/                匯入、總覽、速度實驗室、Speed Tick、據點戰模擬、RTA、配符、一鍵配隊、配神器、神器追傷、配裝、預設隊、符文、神器、魔靈、設定
+  pages/                匯入、總覽、魔靈圖鑑、我的魔靈、速度實驗室、Speed Tick、據點戰模擬、RTA、配符、一鍵配隊、配神器、神器追傷、配裝、預設隊、符文、神器、設定
   store.ts              zustand + IndexedDB 本機儲存
 scripts/                資料產生、PWA 圖示與引擎測試
 public/

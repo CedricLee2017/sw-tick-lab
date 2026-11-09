@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen,
 } from "lucide-react";
 import { ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
@@ -9,6 +9,7 @@ import LoginPage, { LoginForm } from "./pages/Login";
 import ImportPage from "./pages/Import";
 import OverviewPage from "./pages/Overview";
 import MonstersPage from "./pages/Monsters";
+import BestiaryPage from "./pages/Bestiary";
 import SummonLogPage from "./pages/SummonLog";
 import SpeedPage from "./pages/SpeedLab";
 import RtaPage from "./pages/Rta";
@@ -30,11 +31,12 @@ import { MonsterIcon } from "./components/ui";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "monsters" | "summonlog" | "speed" | "speedtick" | "siege" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "siege" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
   { key: "overview", label: "總覽", icon: <LayoutDashboard size={17} />, title: "帳號總覽", sub: "魔靈、符文與速度分佈" },
+  { key: "bestiary", label: "魔靈圖鑑", icon: <BookOpen size={17} />, title: "魔靈圖鑑", sub: "全魔靈技能、屬性與效果篩選" },
   { key: "speed", label: "速度實驗室", icon: <Gauge size={17} />, title: "速度實驗室", sub: "Tick 反推、速度門檻與出手順序" },
   { key: "speedtick", label: "Speed Tick", icon: <Timer size={17} />, title: "Speed Tick 計算器", sub: "攻擊條、速度、出手順序與 Tick 門檻" },
   { key: "siege", label: "據點戰模擬", icon: <Castle size={17} />, title: "據點戰錦標賽模擬器", sub: "佔領塔、連線得分與 20,000 分勝利時間" },
@@ -46,7 +48,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "damage-compare", label: "傷害比較", icon: <ArrowLeftRight size={17} />, title: "傷害比較", sub: "比較兩套配裝在同一技能與神器追傷下的傷害" },
   { key: "builds", label: "儲存庫", icon: <Bookmark size={17} />, title: "儲存庫", sub: "預設隊與配裝收藏，隨時查看或帶回配符" },
   { key: "decks", label: "預設隊", icon: <Layers size={17} />, title: "預設隊", sub: "遊戲內 deck_list：所有已儲存的隊伍與配置" },
-  { key: "monsters", label: "魔靈", icon: <Users size={17} />, title: "魔靈圖鑑", sub: "你的魔靈盒與目前配裝" },
+  { key: "monsters", label: "我的魔靈", icon: <Users size={17} />, title: "我的魔靈", sub: "你的魔靈盒與目前配裝" },
   { key: "summonlog", label: "魔靈召喚記錄", icon: <ScrollText size={17} />, title: "魔靈召喚記錄", sub: "原4 / 原5 魔靈的取得時間軸" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
   { key: "grind", label: "精煉建議", icon: <Hammer size={17} />, title: "精煉建議", sub: "依符文素質、套裝與裝備對象排出精煉順序" },
@@ -69,6 +71,7 @@ function currentRoute(): RouteKey {
 const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   import: ImportPage,
   overview: OverviewPage,
+  bestiary: BestiaryPage,
   speed: SpeedPage,
   speedtick: SpeedTickPage,
   siege: SiegeSimulatorPage,
@@ -205,7 +208,7 @@ export default function App() {
   }, [moreOpen]);
 
   useEffect(() => {
-    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "siege" && route !== "admin") {
+    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "siege" && route !== "admin" && route !== "bestiary") {
       window.location.hash = "#/import";
     }
   }, [ready, account, route]);

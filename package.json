@@ -12,6 +12,8 @@
     "data": "node scripts/build-monsters.mjs",
     "icons": "node scripts/make-icons.mjs",
     "skills": "node scripts/fetch-skills.mjs",
+    "skills:effects": "node scripts/fetch-skills.mjs --effects",
+    "skills:descriptions": "node scripts/fetch-skills.mjs --descriptions",
     "demo": "node scripts/build-demo.mjs",
     "set-password": "node scripts/set-password.mjs",
     "test": "node scripts/test-engine.mjs",

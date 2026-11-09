@@ -22,11 +22,20 @@ export interface Skill {
   d: string;
 }
 
+/** 技能效果對照（增益 / 減益 / 其他），供魔靈圖鑑篩選 */
+export interface SkillEffect {
+  id: number;
+  name: string;
+  type: "Buff" | "Debuff" | "Neutral" | string;
+  buff: boolean;
+}
+
 export interface SkillData {
   source: string;
   fetchedAt: string;
   monsters: Record<string, number[]>;
   skills: Record<string, Skill>;
+  effects?: Record<string, SkillEffect>;
 }
 
 export type CritMode = "crit" | "normal" | "average";
@@ -107,6 +116,16 @@ export function skillsForMonster(data: SkillData | null, monsterId: number): Ski
   return ids
     .map((id) => data.skills[String(id)])
     .filter((s): s is Skill => !!s && !s.passive && !!s.f.trim())
+    .sort((a, b) => a.slot - b.slot || a.id - b.id);
+}
+
+/** 某隻魔靈的全部技能（含被動），供魔靈圖鑑顯示與篩選 */
+export function allSkillsForMonster(data: SkillData | null, monsterId: number): Skill[] {
+  if (!data || !monsterId) return [];
+  const ids = data.monsters[String(monsterId)] ?? [];
+  return ids
+    .map((id) => data.skills[String(id)])
+    .filter((s): s is Skill => !!s)
     .sort((a, b) => a.slot - b.slot || a.id - b.id);
 }
 
