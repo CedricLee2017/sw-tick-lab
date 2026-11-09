@@ -324,6 +324,11 @@ export default function App() {
           <div>
             <h1>{meta.title}</h1>
             <div className="sub">{meta.sub}</div>
+            {account && (
+              <div className="tiny dim" style={{ marginTop: 2 }}>
+                目前存檔：{account.fileName} · {new Date(account.importedAt).toLocaleString("zh-TW")} · {account.runes.length} 顆符文
+              </div>
+            )}
           </div>
           <div className="row" style={{ gap: 8 }}>
             <InstallAppButton compact />
