@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Plus, Search, Users } from "lucide-react";
-import { MONSTER_MAP, useStore } from "../store";
+import { MONSTER_MAP, nextUnitName, unitLabel, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { ELEMENTS } from "../lib/constants";
 import { Modal, MonsterIcon, NumberInput, TickBadge, fmt, setColor } from "../components/ui";
@@ -18,31 +18,37 @@ export default function MonstersPage() {
   const [open, setOpen] = useState<number | null>(null);
   const addCustomUnit = useStore((s) => s.addCustomUnit);
   const removeCustomUnit = useStore((s) => s.removeCustomUnit);
-  /** 新增自訂魔靈：先選魔靈，再設定星級 / 等級 */
+  const renameUnit = useStore((s) => s.renameUnit);
+  /** 新增自訂魔靈：先選魔靈，再設定名稱 / 星級 / 等級 */
   const [addOpen, setAddOpen] = useState(false);
-  const [draft, setDraft] = useState<{ id: number; stars: number; level: number } | null>(null);
+  const [draft, setDraft] = useState<{ id: number; stars: number; level: number; name: string } | null>(null);
 
   const views = useMemo(() => {
     if (!summary) return [];
     let arr = summary.views;
-    if (q.trim()) arr = arr.filter((v) => v.monster.name.toLowerCase().includes(q.trim().toLowerCase()));
+    if (q.trim()) {
+      const key = q.trim().toLowerCase();
+      arr = arr.filter((v) => unitLabel(v.unit).toLowerCase().includes(key) || v.monster.name.toLowerCase().includes(key));
+    }
     if (el) arr = arr.filter((v) => v.monster.el === el);
     if (onlyBuilt) arr = arr.filter((v) => v.runes.length > 0);
     arr = [...arr].sort((a, b) => {
       if (sort === "spd" || sort === "tick") return (b.stats.panelSpd ?? b.stats.spd) - (a.stats.panelSpd ?? a.stats.spd);
       if (sort === "hp") return b.stats.hp - a.stats.hp;
-      return a.monster.name.localeCompare(b.monster.name);
+      return unitLabel(a.unit).localeCompare(unitLabel(b.unit));
     });
     return arr;
   }, [summary, q, el, onlyBuilt, sort]);
 
-  /** 新增魔靈清單：標示目前帳號已擁有幾隻，方便避開重複 */
+  /** 新增魔靈清單：標示目前帳號已擁有幾隻，並預覽重複時會使用的名稱 */
   const addEntries = useMemo(() => {
+    const units = summary?.views.map((v) => v.unit) ?? [];
     const owned = new Map<number, number>();
     for (const v of summary?.views ?? []) owned.set(v.monster.id, (owned.get(v.monster.id) ?? 0) + 1);
     return toMonsterEntries().map((e) => {
       const n = owned.get(e.monster.id) ?? 0;
-      return { ...e, meta: n > 0 ? `已擁有 ${n} 隻` : "尚未擁有" };
+      const suggested = nextUnitName(e.monster.id, units);
+      return { ...e, meta: n > 0 ? `已擁有 ${n} 隻 · 新增為「${suggested}」` : "尚未擁有" };
     });
   }, [summary]);
 
@@ -53,7 +59,7 @@ export default function MonstersPage() {
 
   const confirmAdd = () => {
     if (!draft) return;
-    const id = addCustomUnit(draft.id, draft.stars, draft.level);
+    const id = addCustomUnit(draft.id, draft.stars, draft.level, draft.name);
     if (id !== null) {
       setDraft(null);
       setOpen(id);
@@ -102,9 +108,10 @@ export default function MonstersPage() {
             <div className="row" style={{ gap: 10 }}>
               <MonsterIcon id={v.monster.id} size={46} />
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.monster.name}</div>
+                <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{unitLabel(v.unit)}</div>
                 <div className="tiny dim">
                   {v.unit.custom && <span className="chip gold" style={{ padding: "0 5px", fontSize: 9, marginRight: 4 }}>自訂</span>}
+                  {v.unit.name && v.unit.name !== v.monster.name ? `${v.monster.name} · ` : ""}
                   {ELEMENTS[v.monster.el as 1].name} · {v.monster.nat}★ · {v.unit.stars}★{v.unit.level}
                 </div>
               </div>
@@ -135,9 +142,11 @@ export default function MonstersPage() {
           runes={current.runes}
           artifacts={current.artifacts}
           badge={<TickBadge spd={current.stats.spd} rta={rta} />}
+          unitName={unitLabel(current.unit)}
           custom={current.unit.custom}
+          onRename={(name) => renameUnit(current.unit.id, name)}
           onRemoveCustom={() => {
-            if (window.confirm(`確定要移除自訂魔靈「${current.monster.name}」嗎？已裝備的符文會回到未裝備狀態。`)) {
+            if (window.confirm(`確定要移除自訂魔靈「${unitLabel(current.unit)}」嗎？已裝備的符文會回到未裝備狀態。`)) {
               removeCustomUnit(current.unit.id);
               setOpen(null);
             }
@@ -157,10 +166,15 @@ export default function MonstersPage() {
           entries={addEntries}
           onPick={(e) => {
             setAddOpen(false);
-            setDraft({ id: e.monster.id, stars: 6, level: 40 });
+            setDraft({
+              id: e.monster.id,
+              stars: 6,
+              level: 40,
+              name: nextUnitName(e.monster.id, summary.views.map((v) => v.unit)),
+            });
           }}
           onClose={() => setAddOpen(false)}
-          footerLeft="先選一隻魔靈，再設定星級與等級"
+          footerLeft="先選一隻魔靈，再設定名稱、星級與等級"
           emptyText="找不到符合條件的魔靈"
         />
       )}
@@ -173,14 +187,27 @@ export default function MonstersPage() {
             <div className="row" style={{ gap: 12 }}>
               <MonsterIcon id={m.id} size={64} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>{m.name}</div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>{draft.name || m.name}</div>
                 <div className="tiny dim" style={{ marginTop: 3 }}>
+                  {draft.name && draft.name !== m.name ? `${m.name} · ` : ""}
                   {ELEMENTS[m.el as 1]?.name} · {m.nat}★ 原生 · 基礎速度 {m.spd}
                 </div>
               </div>
             </div>
 
-            <div className="grid split-2" style={{ gap: 10, marginTop: 16 }}>
+            <div className="field" style={{ marginTop: 16 }}>
+              <label>名稱</label>
+              <input
+                className="input"
+                value={draft.name}
+                maxLength={40}
+                placeholder={m.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              />
+              <span className="hint">同一隻魔靈可以練好幾隻；重複時會自動在名稱後面加數字（例如 {m.name}2）。</span>
+            </div>
+
+            <div className="grid split-2" style={{ gap: 10, marginTop: 10 }}>
               <div className="field">
                 <label>星級</label>
                 <select className="select" value={draft.stars} onChange={(e) => setDraft({ ...draft, stars: Number(e.target.value) })}>
@@ -200,7 +227,7 @@ export default function MonstersPage() {
             </div>
 
             <div className="tiny dim" style={{ marginTop: 12, lineHeight: 1.7 }}>
-              新增後會出現在魔靈圖鑑，可以當成配符、一鍵配隊的目標。這是本機虛擬資料，不會影響原始存檔。
+              新增後會出現在魔靈圖鑑，可以當成配符、一鍵配隊的目標。名稱之後也能在魔靈詳情裡修改。這是本機虛擬資料，不會影響原始存檔。
             </div>
 
             <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>

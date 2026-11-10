@@ -1,5 +1,5 @@
 import { Activity, ArrowUpRight, Gauge, Gem, Sparkles, Star, Users } from "lucide-react";
-import { useStore } from "../store";
+import { unitLabel, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
 import { MonsterIcon, TickBadge, fmt, setColor } from "../components/ui";
@@ -41,7 +41,7 @@ export default function OverviewPage() {
           icon={<Gauge size={16} />}
           k="最快魔靈"
           v={fastest ? `${fastest.stats.panelSpd ?? fastest.stats.spd}` : "—"}
-          sub={fastest ? `${fastest.monster.name} · Tick ${fastest.stats.tick}` : ""}
+          sub={fastest ? `${unitLabel(fastest.unit)} · Tick ${fastest.stats.tick}` : ""}
         />
       </div>
 
@@ -162,7 +162,7 @@ export default function OverviewPage() {
                       <div className="row" style={{ gap: 8 }}>
                         <MonsterIcon id={v.monster.id} size={30} />
                         <div>
-                          <div style={{ fontWeight: 600 }}>{v.monster.name}</div>
+                          <div style={{ fontWeight: 600 }}>{unitLabel(v.unit)}</div>
                           <div className="tiny dim">{ELEMENTS[v.monster.el as 1].name} · {v.monster.nat}★</div>
                         </div>
                       </div>

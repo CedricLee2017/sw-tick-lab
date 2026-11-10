@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Ban, Bookmark, Layers, Loader2, RefreshCw, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
-import { MONSTER_MAP, useStore, monsterLabel } from "../store";
+import { MONSTER_MAP, unitLabel, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary, baseStats } from "../lib/stats";
 import { deckTypeLabel } from "../lib/deckTypes";
@@ -51,7 +51,7 @@ export default function BuildsPage() {
   const owner = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const rid of u.runes) m.set(rid, monsterLabel(u.master));
+    for (const u of account.units) for (const rid of u.runes) m.set(rid, unitLabel(u));
     return m;
   }, [account]);
   const artifactMap = useMemo(() => new Map((account?.artifacts ?? []).map((a) => [a.id, a])), [account]);

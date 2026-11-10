@@ -159,6 +159,7 @@ export function MonsterPanel({
   artifacts = [],
   compact = false,
   badge,
+  name,
 }: {
   monster: Monster;
   /** 星級 / 等級換算後的基礎值；省略時只顯示總值 */
@@ -171,6 +172,8 @@ export function MonsterPanel({
   compact?: boolean;
   /** 標題右側的額外資訊（例如 Tick 徽章） */
   badge?: ReactNode;
+  /** 自訂顯示名稱（重複魔靈會加上數字），省略時使用圖鑑名稱 */
+  name?: string;
 }) {
   const Icon = EL_ICON[monster.el as 1 | 2 | 3 | 4 | 5] ?? Droplet;
   const starCount = Math.max(0, Math.min(6, Math.round(stars)));
@@ -188,7 +191,7 @@ export function MonsterPanel({
           <div className="mon-title">
             <Icon size={compact ? 12 : 14} className={`el-${monster.el}`} strokeWidth={2.6} />
             <span className="mon-lv">Lv.{level}</span>
-            <span className="mon-name">{monster.name}</span>
+            <span className="mon-name">{name ?? monster.name}</span>
             {badge && <span className="mon-badge">{badge}</span>}
           </div>
           <div className="mon-stars" title={`${starCount} 星`}>{"★".repeat(starCount)}</div>

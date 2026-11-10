@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ArrowRight, Gauge, ListOrdered, Plus, Trash2, Wand2, Users, Info } from "lucide-react";
-import { useStore } from "../store";
+import { unitLabel, useStore } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { MonsterIcon, NumberField, NumberInput, TickBadge, fmt } from "../components/ui";
 import { MonsterPickerField } from "../components/MonsterPicker";
@@ -88,7 +88,7 @@ export default function SpeedPage() {
 
                 <div className="grid g2">
                   <NumberField
-                    label={view ? `基礎速度（${view.monster.name}）` : "基礎速度"}
+                    label={view ? `基礎速度（${unitLabel(view.unit)}）` : "基礎速度"}
                     value={effectiveBase}
                     min={1}
                     max={300}
@@ -155,7 +155,7 @@ export default function SpeedPage() {
 
                 {view && (
                   <div className="alert ok tiny">
-                    {view.monster.name} 目前 {view.stats.spd} 速 = Tick {view.stats.tick}
+                    {unitLabel(view.unit)} 目前 {view.stats.spd} 速 = Tick {view.stats.tick}
                     {view.stats.tick > tick ? `，距離 Tick ${tick} 還差 ${targetSpeed - view.stats.spd} 速` : `，已達到 Tick ${tick}`}
                   </div>
                 )}
@@ -220,7 +220,7 @@ function OrderTab() {
   const addFromBox = (id: number) => {
     const v = summary?.views.find((x) => x.monster.id === id);
     if (!v) return;
-    setUnits((u) => [...u.slice(0, 5), { id: `u${Date.now()}`, name: `${v.monster.name}（我方）`, spd: v.stats.spd }]);
+    setUnits((u) => [...u.slice(0, 5), { id: `u${Date.now()}`, name: `${unitLabel(v.unit)}（我方）`, spd: v.stats.spd }]);
   };
 
   return (
@@ -295,7 +295,7 @@ function ListTab() {
   const rows = useMemo(() => {
     let arr = summary?.views ?? [];
     if (maxTick > 0) arr = arr.filter((v) => v.stats.tick <= maxTick);
-    if (q.trim()) arr = arr.filter((v) => v.monster.name.toLowerCase().includes(q.trim().toLowerCase()));
+    if (q.trim()) arr = arr.filter((v) => unitLabel(v.unit).toLowerCase().includes(q.trim().toLowerCase()) || v.monster.name.toLowerCase().includes(q.trim().toLowerCase()));
     return [...arr].sort((a, b) => b.stats.spd - a.stats.spd).slice(0, 300);
   }, [summary, maxTick, q]);
 
@@ -329,7 +329,7 @@ function ListTab() {
                     <div className="row" style={{ gap: 8 }}>
                       <MonsterIcon id={v.monster.id} size={28} />
                       <div>
-                        <div style={{ fontWeight: 600 }}>{v.monster.name}</div>
+                        <div style={{ fontWeight: 600 }}>{unitLabel(v.unit)}</div>
                         <div className="tiny dim">{ELEMENTS[v.monster.el as 1].name} · {v.monster.nat}★ · {v.unit.stars}★{v.unit.level}</div>
                       </div>
                     </div>

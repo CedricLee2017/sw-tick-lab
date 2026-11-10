@@ -775,7 +775,7 @@ export default function BestiaryPage() {
             <span className="tiny dim">
               {account
                 ? detailOwned > 0
-                  ? "這隻魔靈已在你的帳號中，可以直接帶入配符。"
+                  ? "這隻魔靈已在你的帳號中，可以直接帶入配符；也能再加入一隻，名稱會自動加上數字。"
                   : "可以加入成自訂魔靈，再進行配符或一鍵配隊。"
                 : "匯入存檔後，就能把這隻魔靈加入自己的魔靈盒。"}
             </span>
@@ -793,13 +793,13 @@ export default function BestiaryPage() {
                   <Wand2 size={14} /> 帶入配符
                 </button>
               )}
-              {account && detailOwned === 0 && (
+              {account && (
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
                   onClick={() => addCustomUnit(detail.monster.id, 6, 40)}
                 >
-                  <Plus size={14} /> 加入我的魔靈
+                  <Plus size={14} /> {detailOwned > 0 ? "再加入一隻" : "加入我的魔靈"}
                 </button>
               )}
               <button type="button" className="btn btn-sm btn-ghost" onClick={() => setDetailId(null)}>關閉</button>

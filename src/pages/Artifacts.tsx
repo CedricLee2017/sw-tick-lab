@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Search, Sparkles } from "lucide-react";
-import { useStore, monsterLabel } from "../store";
+import { unitLabel, useStore } from "../store";
 import { ArtifactCard, Modal, fmt } from "../components/ui";
 import { artifactMainText, artifactSubText, artifactKindText, artifactTypeText } from "../lib/artifacts";
 import type { Artifact } from "../lib/types";
@@ -20,7 +20,7 @@ export default function ArtifactsPage() {
   const owner = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const aid of u.artifacts) m.set(aid, monsterLabel(u.master));
+    for (const u of account.units) for (const aid of u.artifacts) m.set(aid, unitLabel(u));
     return m;
   }, [account]);
 

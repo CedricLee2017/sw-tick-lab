@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Ban, Pin, Plus, X } from "lucide-react";
-import { MONSTER_MAP, monsterLabel, useStore } from "../store";
+import { MONSTER_MAP, unitLabel, useStore } from "../store";
 import { SET_BY_ID, STAT_TYPES } from "../lib/constants";
 import { fmt } from "./ui";
 import type { Rune } from "../lib/types";
@@ -23,7 +23,7 @@ export function RuneRestrictions({ targetUnit }: { targetUnit: number }) {
   const owner = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const rid of u.runes) m.set(rid, monsterLabel(u.master));
+    for (const u of account.units) for (const rid of u.runes) m.set(rid, unitLabel(u));
     return m;
   }, [account]);
 

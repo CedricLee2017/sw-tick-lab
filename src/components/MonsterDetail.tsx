@@ -1,5 +1,5 @@
-import { useMemo, type ReactNode } from "react";
-import { Trash2, Wand2 } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Pencil, Trash2, Wand2 } from "lucide-react";
 import { useStore } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary, type BaseStats } from "../lib/stats";
@@ -21,8 +21,10 @@ export function MonsterDetailModal({
   badge,
   title,
   ownerName,
+  unitName,
   note,
   custom,
+  onRename,
   onRemoveCustom,
   onOptimize,
   onClose,
@@ -40,10 +42,14 @@ export function MonsterDetailModal({
   title?: string;
   /** 符文卡片上顯示的擁有者名稱，預設為魔靈名稱 */
   ownerName?: string;
+  /** 這隻魔靈的自訂名稱（重複魔靈會加上數字） */
+  unitName?: string;
   /** 面板下方的補充說明（例如「依預設隊快照計算」） */
   note?: string;
   /** 自訂魔靈：顯示移除按鈕 */
   custom?: boolean;
+  /** 有提供時顯示改名欄位 */
+  onRename?: (name: string) => void;
   onRemoveCustom?: () => void;
   /** 有提供時顯示「幫這隻配符」 */
   onOptimize?: () => void;
@@ -55,16 +61,24 @@ export function MonsterDetailModal({
   const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
   const lockedSet = useMemo(() => new Set(lockedRunes), [lockedRunes]);
   const excludedSet = useMemo(() => new Set(excludedRunes), [excludedRunes]);
+  const [nameDraft, setNameDraft] = useState(unitName ?? monster.name);
 
-  const owner = ownerName ?? monster.name;
+  const displayName = unitName ?? monster.name;
+  const owner = ownerName ?? displayName;
   const setText = runes.length
     ? setSummary(
         Object.fromEntries(runes.reduce((m, r) => m.set(r.set, (m.get(r.set) ?? 0) + 1), new Map<number, number>())),
       )
     : "未裝備";
 
+  const commitName = (value: string) => {
+    if (!onRename) return;
+    onRename(value.trim());
+    setNameDraft(value.trim() || monster.name);
+  };
+
   return (
-    <Modal title={title ?? monster.name} onClose={onClose} width={width}>
+    <Modal title={title ?? displayName} onClose={onClose} width={width}>
       <MonsterPanel
         monster={monster}
         base={base}
@@ -73,6 +87,7 @@ export function MonsterDetailModal({
         level={level}
         artifacts={artifacts}
         badge={badge}
+        name={displayName}
       />
 
       <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
@@ -81,6 +96,32 @@ export function MonsterDetailModal({
         <span className="chip muted">神器 {artifacts.length}/2</span>
         {custom && <span className="chip gold">自訂魔靈</span>}
       </div>
+
+      {onRename && (
+        <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+          <span className="tiny dim" style={{ alignSelf: "center" }}>名稱</span>
+          <div style={{ position: "relative", flex: 1, minWidth: 160, maxWidth: 260 }}>
+            <Pencil size={12} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
+            <input
+              className="input"
+              style={{ paddingLeft: 28 }}
+              value={nameDraft}
+              placeholder={monster.name}
+              maxLength={40}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitName(nameDraft);
+              }}
+            />
+          </div>
+          <button type="button" className="btn btn-sm" onClick={() => commitName(nameDraft)}>儲存名稱</button>
+          {displayName !== monster.name && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => commitName(monster.name)}>
+              還原成 {monster.name}
+            </button>
+          )}
+        </div>
+      )}
 
       {note && (
         <div className="tiny dim" style={{ marginTop: 8, lineHeight: 1.65 }}>

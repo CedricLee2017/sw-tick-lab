@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Search, Swords, Trophy } from "lucide-react";
-import { MONSTER_MAP, useStore } from "../store";
+import { MONSTER_MAP, unitLabel, useStore } from "../store";
 import { ELEMENTS } from "../lib/constants";
 import { rtaView, type RtaView } from "../lib/rta";
 import { setSummary } from "../lib/stats";
@@ -45,7 +45,7 @@ export default function RtaPage() {
     if (onlyRta) arr = arr.filter((v) => v.runes.length > 0 || v.artifacts.length > 0);
     if (q.trim()) {
       const s = q.trim().toLowerCase();
-      arr = arr.filter((v) => v.monster.name.toLowerCase().includes(s));
+      arr = arr.filter((v) => unitLabel(v.unit).toLowerCase().includes(s) || v.monster.name.toLowerCase().includes(s));
     }
     return arr;
   }, [views, el, onlyRta, q]);
@@ -84,7 +84,7 @@ export default function RtaPage() {
         </div>
         <div className="stat-tile">
           <div className="k">目前最快</div>
-          <div className="v" style={{ fontSize: 18 }}>{fastest ? fastest.monster.name : "—"}</div>
+          <div className="v" style={{ fontSize: 18 }}>{fastest ? unitLabel(fastest.unit) : "—"}</div>
           <div className="tiny dim">{fastest ? `${fastest.stats.spd} 速 · RTA Tick ${fastest.stats.tick}` : "尚無資料"}</div>
         </div>
         <div className="stat-tile">
@@ -160,7 +160,7 @@ export default function RtaPage() {
                 <MonsterIcon id={v.monster.id} size={44} />
                 <span className="rta-main">
                   <span className="row" style={{ gap: 6 }}>
-                    <b style={{ fontSize: 13.5 }}>{v.monster.name}</b>
+                    <b style={{ fontSize: 13.5 }}>{unitLabel(v.unit)}</b>
                     <span className={`el-${v.monster.el}`} style={{ fontSize: 11 }}>{ELEMENTS[v.monster.el as 1]?.name}</span>
                     <span className="tiny dim">{v.monster.nat}★ · {v.unit.stars}★Lv.{v.unit.level}</span>
                   </span>
@@ -189,7 +189,7 @@ export default function RtaPage() {
       </div>
 
       {current && (
-        <Modal title={`${current.monster.name} · RTA 配裝`} onClose={() => setOpen(null)} width={860}>
+        <Modal title={`${unitLabel(current.unit)} · RTA 配裝`} onClose={() => setOpen(null)} width={860}>
           <MonsterPanel
             monster={current.monster}
             base={current.base}
@@ -198,6 +198,7 @@ export default function RtaPage() {
             level={current.unit.level}
             artifacts={current.artifacts}
             badge={<TickBadge spd={current.stats.spd} rta />}
+            name={unitLabel(current.unit)}
           />
           <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
             <span className="chip gold">{current.monster.nat}★ 原生</span>
@@ -218,7 +219,7 @@ export default function RtaPage() {
               renderRune={(r) => (
                 <RuneCard
                   rune={r}
-                  owner={current.monster.name}
+                  owner={unitLabel(current.unit)}
                   locked={lockedSet.has(r.id)}
                   excluded={excludedSet.has(r.id)}
                   onToggleLock={() => toggleRuneFlag("locked", r.id)}
@@ -236,7 +237,7 @@ export default function RtaPage() {
             <div className="empty tiny">這隻魔靈目前沒有 RTA 神器配置</div>
           ) : (
             <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8 }}>
-              {current.artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} owner={current.monster.name} />)}
+              {current.artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} owner={unitLabel(current.unit)} />)}
             </div>
           )}
 

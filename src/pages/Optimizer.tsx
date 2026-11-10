@@ -3,7 +3,7 @@ import {
   AlertTriangle, ArrowRight, Copy, Loader2, Save, Sparkles, Wand2, Gauge, ChevronDown, Plus, Target, X, Zap,
   Lock, Unlock, Ban, Pin, RotateCcw, Shirt,
 } from "lucide-react";
-import { useStore, monsterLabel, type Loadout, type RuneFlag } from "../store";
+import { useStore, unitLabel, unitLabelById, type Loadout, type RuneFlag } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { MonsterIcon, NumberField, NumberInput, RuneBoard, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
 import { MonsterPickerField } from "../components/MonsterPicker";
@@ -1049,7 +1049,7 @@ export default function OptimizerPage() {
               <div className="row wrap" style={{ gap: 5, marginTop: 7 }}>
                 {loadouts.slice(0, 12).map((l) => (
                   <button key={l.id} type="button" className="build-fav-chip" onClick={() => applyLoadout(l)} title={`${l.name} · 面板 ${l.stats.panelSpd ?? l.stats.spd} 速（戰鬥 ${l.stats.spd}）`}>
-                    {monsterLabel(l.monsterId)} <span className="dim">T{l.stats.tick}</span>
+                    {unitLabelById(account?.units ?? [], l.unitId, l.monsterId)} <span className="dim">T{l.stats.tick}</span>
                   </button>
                 ))}
                 {loadouts.length > 12 && <span className="tiny dim" style={{ alignSelf: "center" }}>+{loadouts.length - 12}</span>}
@@ -1174,7 +1174,7 @@ export default function OptimizerPage() {
                 onEquip={() => equipBuild(b)}
                 ownerOf={(rid) => {
                   const u = account?.units.find((x) => x.runes.includes(rid));
-                  return u ? monsterLabel(u.master) : "";
+                  return u ? unitLabel(u) : "";
                 }}
                 open={openIdx === gi}
                 onToggle={() => setOpenIdx(openIdx === gi ? -1 : gi)}
@@ -1247,7 +1247,7 @@ export default function OptimizerPage() {
           monsterName={anyMonster?.name ?? "魔靈"}
           ownerOf={(rid) => {
             const u = account?.units.find((x) => x.runes.includes(rid));
-            return u ? monsterLabel(u.master) : "";
+            return u ? unitLabel(u) : "";
           }}
           onClose={() => setPlanIdx(-1)}
         />

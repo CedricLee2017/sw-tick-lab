@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import {
   Building2, Download, Gauge, Info, RefreshCw, RotateCcw, Trash2, Zap, ShieldCheck,
 } from "lucide-react";
-import { useStore, monsterLabel } from "../store";
+import { unitLabelById, useStore } from "../store";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
 import { deriveVerifier } from "../lib/password";
@@ -374,7 +374,7 @@ export default function SettingsPage() {
                 {loadouts.map((l) => (
                   <tr key={l.id}>
                     <td style={{ fontWeight: 600 }}>{l.name}</td>
-                    <td className="dim">{monsterLabel(l.monsterId)}</td>
+                    <td className="dim">{unitLabelById(account?.units ?? [], l.unitId, l.monsterId)}</td>
                     <td className="num mono gold">{l.stats.spd}</td>
                     <td className="num mono">T{Number.isFinite(l.stats.tick) ? l.stats.tick : "—"}</td>
                     <td className="num mono">{fmt(l.stats.hp)}</td>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Gem, Search, X } from "lucide-react";
-import { useStore, monsterLabel } from "../store";
+import { unitLabel, useStore } from "../store";
 import { RUNE_SETS, SET_BY_ID, STAT_TYPES } from "../lib/constants";
 import { runeScore } from "../lib/stats";
 import { grindMax, grindStatSuffix } from "../lib/grind";
@@ -47,7 +47,7 @@ export default function RunesPage() {
   const owner = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const rid of u.runes) m.set(rid, monsterLabel(u.master));
+    for (const u of account.units) for (const rid of u.runes) m.set(rid, unitLabel(u));
     return m;
   }, [account]);
 

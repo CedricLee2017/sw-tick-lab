@@ -19,6 +19,37 @@ export function monsterLabel(id: number): string {
   return m ? m.name : `#${id}`;
 }
 
+/** 魔靈的顯示名稱：有自訂名稱時優先使用，否則用圖鑑名稱 */
+export function unitLabel(unit: Pick<Unit, "master" | "name">): string {
+  const custom = unit.name?.trim();
+  return custom || monsterLabel(unit.master);
+}
+
+/** 依 unit id 取得顯示名稱；找不到（例如舊收藏沒有 unitId）時退回魔靈圖鑑名稱 */
+export function unitLabelById(
+  units: Pick<Unit, "id" | "master" | "name">[],
+  unitId: number | undefined,
+  master: number,
+): string {
+  const unit = unitId != null ? units.find((u) => u.id === unitId) : undefined;
+  return unit ? unitLabel(unit) : monsterLabel(master);
+}
+
+/**
+ * 產生不重複的魔靈名稱：第一次使用圖鑑原名，之後依序加上 2、3、4…
+ * 例如「水仙人」→「水仙人2」→「水仙人3」。
+ */
+export function nextUnitName(master: number, units: Pick<Unit, "master" | "name">[], base?: string): string {
+  const name = base?.trim() || monsterLabel(master);
+  const used = new Set(units.map((u) => unitLabel(u)));
+  if (!used.has(name)) return name;
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${name}${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${name}${used.size + 1}`;
+}
+
 export interface Loadout {
   id: string;
   name: string;
@@ -142,7 +173,9 @@ interface Store {
   /** 一次將整隊符文上符；同一顆符文只會分配給一隻魔靈 */
   equipTeam: (assignments: { unitId: number; runeIds: number[] }[]) => number;
   /** 新增自訂魔靈（沒有實際擁有，用來試配符／配隊）；回傳新 unit id，失敗回傳 null */
-  addCustomUnit: (master: number, stars: number, level: number) => number | null;
+  addCustomUnit: (master: number, stars: number, level: number, name?: string) => number | null;
+  /** 修改魔靈的顯示名稱（空白 = 還原成圖鑑名稱） */
+  renameUnit: (unitId: number, name: string) => boolean;
   /** 移除自訂魔靈，並釋放它身上的符文 */
   removeCustomUnit: (unitId: number) => boolean;
   saveLoadout: (l: Omit<Loadout, "id" | "createdAt">) => void;
@@ -433,7 +466,7 @@ export const useStore = create<Store>((setState, getState) => ({
     return chosen.size;
   },
 
-  addCustomUnit: (master, stars, level) => {
+  addCustomUnit: (master, stars, level, name) => {
     const account = getState().account;
     if (!account) return null;
     const monster = MONSTER_MAP.get(master);
@@ -442,6 +475,8 @@ export const useStore = create<Store>((setState, getState) => ({
     const used = new Set(account.units.map((u) => u.id));
     let id = -1;
     while (used.has(id)) id--;
+    // 重複魔靈自動在名稱後面加數字（水仙人 → 水仙人2 → 水仙人3…）
+    const displayName = name?.trim() || nextUnitName(master, account.units);
     const unit: Unit = {
       id,
       master,
@@ -451,12 +486,30 @@ export const useStore = create<Store>((setState, getState) => ({
       artifacts: [],
       locked: false,
       custom: true,
+      name: displayName,
     };
     const next: Account = { ...account, units: [...account.units, unit] };
     setState({ account: next });
     void set(ACCOUNT_KEY, next);
-    getState().notify(`已新增 ${monster.name}（自訂魔靈）`);
+    getState().notify(`已新增 ${displayName}（自訂魔靈）`);
     return id;
+  },
+
+  renameUnit: (unitId, name) => {
+    const account = getState().account;
+    if (!account) return false;
+    const unit = account.units.find((u) => u.id === unitId);
+    if (!unit) return false;
+    const trimmed = name.trim();
+    // 空白或與圖鑑名稱相同時不儲存自訂名稱，維持抓到新資料時的自動名稱
+    const nextName = !trimmed || trimmed === monsterLabel(unit.master) ? undefined : trimmed;
+    if ((unit.name ?? undefined) === nextName) return true;
+    const units = account.units.map((u) => (u.id === unitId ? { ...u, name: nextName } : u));
+    const next: Account = { ...account, units };
+    setState({ account: next });
+    void set(ACCOUNT_KEY, next);
+    getState().notify(nextName ? `已將魔靈改名為 ${nextName}` : `已還原名稱為 ${monsterLabel(unit.master)}`);
+    return true;
   },
 
   removeCustomUnit: (unitId) => {
@@ -476,7 +529,7 @@ export const useStore = create<Store>((setState, getState) => ({
     };
     setState({ account: next, runeMap: new Map(next.runes.map((r) => [r.id, r])) });
     void set(ACCOUNT_KEY, next);
-    getState().notify(`已移除自訂魔靈 ${monsterLabel(unit.master)}`);
+    getState().notify(`已移除自訂魔靈 ${unitLabel(unit)}`);
     return true;
   },
 

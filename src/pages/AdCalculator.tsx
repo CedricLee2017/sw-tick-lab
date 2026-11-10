@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Calculator, Flame, Search } from "lucide-react";
-import { MONSTER_MAP, monsterLabel, useStore, type Loadout } from "../store";
+import { MONSTER_MAP, unitLabel, unitLabelById, useStore, type Loadout } from "../store";
 import {
   addAdEffects,
   artifactAdEffects,
@@ -58,7 +58,7 @@ export default function AdCalculatorPage() {
   const owner = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const aid of u.artifacts) m.set(aid, monsterLabel(u.master));
+    for (const u of account.units) for (const aid of u.artifacts) m.set(aid, unitLabel(u));
     return m;
   }, [account]);
 
@@ -207,7 +207,7 @@ export default function AdCalculatorPage() {
               >
                 <MonsterIcon id={l.monsterId} size={30} />
                 <span style={{ minWidth: 0 }}>
-                  <span style={{ display: "block", fontSize: 11.5, fontWeight: 700 }}>{monsterLabel(l.monsterId)}</span>
+                  <span style={{ display: "block", fontSize: 11.5, fontWeight: 700 }}>{unitLabelById(account?.units ?? [], l.unitId, l.monsterId)}</span>
                   <span className="tiny dim">T{l.stats.tick} · {l.stats.spd} 速 · {l.runeIds.length}/6</span>
                 </span>
               </button>

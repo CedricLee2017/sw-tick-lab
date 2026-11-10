@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, X } from "lucide-react";
-import { MONSTER_MAP, monsterLabel, useStore, type Loadout } from "../store";
+import { MONSTER_MAP, unitLabelById, useStore, type Loadout } from "../store";
 import { ArtifactStage } from "../components/ArtifactStage";
 import { DamagePanel } from "../components/DamagePanel";
 import { ArtifactCard, MonsterIcon, MonsterPanel, TickBadge } from "../components/ui";
@@ -248,7 +248,7 @@ export default function ArtifactOptimizerPage() {
               >
                 <MonsterIcon id={l.monsterId} size={30} />
                 <span style={{ minWidth: 0 }}>
-                  <span style={{ display: "block", fontSize: 11.5, fontWeight: 700 }}>{monsterLabel(l.monsterId)}</span>
+                  <span style={{ display: "block", fontSize: 11.5, fontWeight: 700 }}>{unitLabelById(account?.units ?? [], l.unitId, l.monsterId)}</span>
                   <span className="tiny dim">T{l.stats.tick} · {l.stats.panelSpd ?? l.stats.spd} 面板速 · {l.runeIds.length}/6</span>
                 </span>
               </button>

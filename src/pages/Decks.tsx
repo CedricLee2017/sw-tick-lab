@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Layers, Save, Search } from "lucide-react";
-import { MONSTER_MAP, monsterLabel, useStore } from "../store";
+import { MONSTER_MAP, monsterLabel, unitLabel, useStore } from "../store";
 import { ELEMENTS } from "../lib/constants";
 import { baseStats, statsForRunes } from "../lib/stats";
 import { DECK_TYPE_NUMBERS, deckTypeLabel } from "../lib/deckTypes";
@@ -32,7 +32,7 @@ export default function DecksPage() {
 
   const unitName = (id: number) => {
     const u = account?.units.find((x) => x.id === id);
-    return u ? monsterLabel(u.master) : `#${id}`;
+    return u ? unitLabel(u) : `#${id}`;
   };
   const unitMaster = (id: number) => account?.units.find((x) => x.id === id)?.master ?? 0;
 
@@ -93,13 +93,13 @@ export default function DecksPage() {
   const ownerOfRune = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const rid of u.runes) m.set(rid, monsterLabel(u.master));
+    for (const u of account.units) for (const rid of u.runes) m.set(rid, unitLabel(u));
     return m;
   }, [account]);
   const ownerOfArtifact = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const aid of u.artifacts) m.set(aid, monsterLabel(u.master));
+    for (const u of account.units) for (const aid of u.artifacts) m.set(aid, unitLabel(u));
     return m;
   }, [account]);
 

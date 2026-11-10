@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
-import { useStore, monsterLabel } from "../store";
+import { unitLabel, useStore } from "../store";
 import { ArtifactCard, NumberInput, RuneCard, TickBadge, fmt, setColor } from "./ui";
 import { ELEMENTS } from "../lib/constants";
 import { ARTIFACT_EFFECT_MAX, artifactAutoLabels, artifactEffectLabel } from "../lib/artifacts";
@@ -65,14 +65,14 @@ export function ArtifactStage({
   const runeOwner = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const rid of u.runes) m.set(rid, monsterLabel(u.master));
+    for (const u of account.units) for (const rid of u.runes) m.set(rid, unitLabel(u));
     return m;
   }, [account]);
 
   const artifactOwner = useMemo(() => {
     const m = new Map<number, string>();
     if (!account) return m;
-    for (const u of account.units) for (const aid of u.artifacts) m.set(aid, monsterLabel(u.master));
+    for (const u of account.units) for (const aid of u.artifacts) m.set(aid, unitLabel(u));
     return m;
   }, [account]);
 

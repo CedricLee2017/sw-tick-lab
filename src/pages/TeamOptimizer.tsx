@@ -3,7 +3,7 @@ import {
   AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Gauge, Layers, Loader2, Lock, Pin, Plus, Save, Search,
   Shirt, Trash2, Users, Wand2, Zap,
 } from "lucide-react";
-import { monsterLabel, useStore, type DeckFav, type DeckFavUnit } from "../store";
+import { monsterLabel, unitLabel, useStore, type DeckFav, type DeckFavUnit } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
 import { MonsterIcon, Modal, NumberInput, RuneCard, RuneBoard, StatRows, TickBadge, fmt, ArtifactCard } from "../components/ui";
 import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPicker";
@@ -439,6 +439,12 @@ export default function TeamOptimizerPage() {
   const viewOf = (unitId: number): UnitView | undefined =>
     summary?.views.find((v) => v.unit.id === unitId);
 
+  /** 顯示名稱：優先使用魔靈的自訂名稱（重複魔靈會加上數字） */
+  const nameOf = (unitId: number, master: number): string => {
+    const u = viewOf(unitId)?.unit;
+    return u ? unitLabel(u) : monsterLabel(master);
+  };
+
   /** 技能資料只有第一次需要下載／解析 */
   const ensureSkills = async (): Promise<SkillData | null> => {
     if (skillRef.current) return skillRef.current;
@@ -499,7 +505,7 @@ export default function TeamOptimizerPage() {
       .sort((a, b) => a.order - b.order)
       .map((m) => {
         const v = viewOf(m.unitId);
-        return `${TEAM_ROLE_LABELS[m.role]} ${v ? monsterLabel(v.monster.id) : "？"}`;
+        return `${TEAM_ROLE_LABELS[m.role]} ${v ? unitLabel(v.unit) : "？"}`;
       })
       .join("、");
 
@@ -711,7 +717,7 @@ export default function TeamOptimizerPage() {
       panelExtra: panelExtraFor(v.base.spd, r.minSpeed, r.leadPct),
       speedMode: "panel",
     });
-    notify(`已將 ${monsterLabel(v.monster.id)} 的面板速度設為接速下限 ${r.minSpeed}`);
+    notify(`已將 ${unitLabel(v.unit)} 的面板速度設為接速下限 ${r.minSpeed}`);
   };
 
   /** 一次把每一隊的面板速度設成接速下限 */
@@ -1066,7 +1072,7 @@ export default function TeamOptimizerPage() {
       specs.push({
         unitId: m.unitId,
         master: v.monster.id,
-        label: monsterLabel(v.monster.id),
+        label: unitLabel(v.unit),
         base: v.base,
         role: m.role,
         weight: m.weight,
@@ -1217,7 +1223,7 @@ export default function TeamOptimizerPage() {
     setMembers((prev) => prev.map((m) => (m.unitId === unitId ? { ...m, includeRunes: b.runeIds } : m)));
     setPlan(null);
     setAltIndex(0);
-    notify(`已固定 ${monsterLabel(b.master)} 的 6 顆符文，按「一鍵配隊」會重新配其他魔靈`);
+    notify(`已固定 ${nameOf(b.unitId, b.master)} 的 6 顆符文，按「一鍵配隊」會重新配其他魔靈`);
   };
 
   const unpinMember = (unitId: number) => {
@@ -1250,7 +1256,7 @@ export default function TeamOptimizerPage() {
       if (builds.length === 0) continue;
       saveDeckFav(
         {
-          name: `一鍵配隊 · 第 ${t + 1} 隊 · ${builds.map((m) => monsterLabel(m.master)).join(" / ")}`,
+          name: `一鍵配隊 · 第 ${t + 1} 隊 · ${builds.map((m) => nameOf(m.unitId, m.master)).join(" / ")}`,
           type: 0,
           seq: 1,
           units: builds.map((m) => {
@@ -1269,7 +1275,7 @@ export default function TeamOptimizerPage() {
     const lines = activePlan.members.map((m, i) => {
       const sets = setSummary(m.sets);
       const head = teams > 1 && i % size === 0 ? `\n[第 ${Math.floor(i / size) + 1} 隊]\n` : "";
-      return `${head}${monsterLabel(m.master)}  戰鬥 SPD ${m.stats.spd}（面板 ${m.stats.panelSpd ?? m.stats.spd}）(T${m.stats.tick})  HP ${fmt(m.stats.hp)}  DEF ${fmt(m.stats.def)}  EHP ${fmt(m.ehp)}  ${sets}  符文 ${m.runeIds.join(", ")}`;
+      return `${head}${nameOf(m.unitId, m.master)}  戰鬥 SPD ${m.stats.spd}（面板 ${m.stats.panelSpd ?? m.stats.spd}）(T${m.stats.tick})  HP ${fmt(m.stats.hp)}  DEF ${fmt(m.stats.def)}  EHP ${fmt(m.ehp)}  ${sets}  符文 ${m.runeIds.join(", ")}`;
     });
     void navigator.clipboard?.writeText(lines.join("\n").trim());
     notify(teams > 1 ? `已複製 ${teams} 隊配裝清單` : "已複製整隊配裝清單");
@@ -1450,7 +1456,7 @@ export default function TeamOptimizerPage() {
                   <MonsterIcon id={v?.monster.id ?? 0} size={38} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {v ? monsterLabel(v.monster.id) : "尚未選擇"}
+                      {v ? unitLabel(v.unit) : "尚未選擇"}
                     </div>
                     <div className="tiny dim">{m.title}</div>
                   </div>
@@ -1917,7 +1923,7 @@ export default function TeamOptimizerPage() {
                 <span className="tiny dim">鏡像預測：</span>
                 {info.steps.map((s, i) => {
                   const v = viewOf(members[s.index]?.unitId ?? 0);
-                  const name = v ? monsterLabel(v.monster.id) : `#${s.index + 1}`;
+                  const name = v ? unitLabel(v.unit) : `#${s.index + 1}`;
                   return (
                     <span
                       key={`${s.tick}-${s.team}-${s.index}-${i}`}
@@ -1936,7 +1942,7 @@ export default function TeamOptimizerPage() {
                       {info.failing
                         .map((f) => {
                           const v = viewOf(members[f.index]?.unitId ?? 0);
-                          return `${v ? monsterLabel(v.monster.id) : `#${f.index + 1}`}（T${f.targetTick}）`;
+                          return `${v ? unitLabel(v.unit) : `#${f.index + 1}`}（T${f.targetTick}）`;
                         })
                         .join("、")}{" "}
                       會被插隊
@@ -1978,7 +1984,7 @@ export default function TeamOptimizerPage() {
                       <span className={`chip ${statusClass}`}>{statusText}</span>
                     </div>
                     <div style={{ fontWeight: 700, fontSize: 12.5, marginTop: 6 }}>
-                      {v ? monsterLabel(v.monster.id) : "尚未選擇"}
+                      {v ? unitLabel(v.unit) : "尚未選擇"}
                     </div>
                     <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 4 }}>
                       <span>{isOpener ? `起手 T${r.effectiveTick ?? "—"}` : `對齊 T${r.targetTick}`}</span>
@@ -2118,7 +2124,7 @@ export default function TeamOptimizerPage() {
                   {[...activePlan.members]
                     .filter((m) => m.priority > 0)
                     .sort((a, b) => a.priority - b.priority)
-                    .map((m) => `${m.priority}. ${monsterLabel(m.master)}`)
+                    .map((m) => `${m.priority}. ${nameOf(m.unitId, m.master)}`)
                     .join(" → ")}
                   <span className="dim">（先最大化第 1 優先，再依序最大化其他魔靈）</span>
                 </div>
@@ -2187,7 +2193,7 @@ export default function TeamOptimizerPage() {
                     {(planSpeedOrders[t] ?? []).map((m, i) => (
                       <span key={m.unitId} className="chip muted" title={`戰鬥 SPD ${m.stats.spd} · 面板 ${m.stats.panelSpd ?? m.stats.spd} · Tick ${m.stats.tick}`}>
                         <b className="gold">{i + 1}</b>
-                        <span style={{ margin: "0 4px" }}>{monsterLabel(m.master)}</span>
+                        <span style={{ margin: "0 4px" }}>{nameOf(m.unitId, m.master)}</span>
                         <span className="mono">{m.stats.spd}</span>
                         <span style={{ marginLeft: 4 }}>T{m.stats.tick}</span>
                       </span>
@@ -2206,7 +2212,7 @@ export default function TeamOptimizerPage() {
                     <div className="row" style={{ gap: 8, minWidth: 0 }}>
                       <MonsterIcon id={m.master} size={44} />
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13 }}>{monsterLabel(m.master)}</div>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{nameOf(m.unitId, m.master)}</div>
                         <div className="tiny dim">
                           {m.priority > 0 && <span className="chip gold" style={{ marginRight: 4 }}>優先 {m.priority}</span>}
                           {TEAM_ROLE_LABELS[m.role]} · 個人最佳 {Math.round(m.norm * 100)}%
@@ -2260,7 +2266,7 @@ export default function TeamOptimizerPage() {
                       </div>
                       <RuneBoard
                         runes={runes}
-                        renderRune={(r) => <RuneCard rune={r} owner={monsterLabel(m.master)} />}
+                        renderRune={(r) => <RuneCard rune={r} owner={nameOf(m.unitId, m.master)} />}
                       />
                     </div>
                   </div>
@@ -2272,7 +2278,7 @@ export default function TeamOptimizerPage() {
                         <span className="dim"> · 一鍵配隊只配置符文，神器不計入面板數值</span>
                       </summary>
                       <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8, marginTop: 8 }}>
-                        {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} owner={monsterLabel(m.master)} />)}
+                        {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} owner={nameOf(m.unitId, m.master)} />)}
                       </div>
                     </details>
                   )}
