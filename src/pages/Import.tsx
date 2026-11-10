@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  UploadCloud, FileJson, Gauge, Wand2, ShieldCheck, Sparkles, BookOpen, ClipboardPaste, Trash2, Zap, CloudDownload,
+  UploadCloud, FileJson, Gauge, Wand2, ShieldCheck, Sparkles, BookOpen, ClipboardPaste, Trash2, Zap, CloudDownload, Database,
 } from "lucide-react";
 import { monsterOf, unitLabel, useStore } from "../store";
+import { PARSE_VERSION } from "../lib/parse";
 import { useSummary } from "../lib/accountStats";
 import { useAuth } from "../lib/auth";
 import { uploadSave } from "../lib/upload";
@@ -18,7 +19,7 @@ function fileSize(bytes: number): string {
 }
 
 export default function ImportPage() {
-  const { account, importText, notify, clearAccount } = useStore();
+  const { account, importText, notify, clearAccount, saves, currentSaveId, switchSave, removeSave } = useStore();
   const uploadsEnabled = useAuth((s) => s.config?.uploads ?? false);
   const user = useAuth((s) => s.user);
   const summary = useSummary();
@@ -59,7 +60,7 @@ export default function ImportPage() {
         notify("雲端還沒有存檔，請先匯入一次 JSON", "err");
         return;
       }
-      const res = importText(save.text, save.fileName);
+      const res = await importText(save.text, save.fileName);
       setWarnings(res.warnings ?? []);
       setError(res.ok ? null : (res.error ?? "匯入失敗"));
       if (res.ok) {
@@ -76,7 +77,7 @@ export default function ImportPage() {
 
   const load = async (text: string, name: string) => {
     setBusy(true);
-    const res = importText(text, name);
+    const res = await importText(text, name);
     setBusy(false);
     setWarnings(res.warnings ?? []);
     setError(res.ok ? null : (res.error ?? "匯入失敗"));
@@ -211,6 +212,72 @@ export default function ImportPage() {
         </div>
       </section>
 
+      {saves.length > 0 && (
+        <section className="card" style={{ marginTop: 16 }}>
+          <div className="card-head">
+            <div>
+              <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <Database size={15} /> 已儲存的存檔
+              </div>
+              <div className="card-sub">
+                上傳過的 JSON 都留在這台裝置，之後直接選一份讀取，不用重新上傳。同名檔案會更新原本的存檔。
+              </div>
+            </div>
+            <span className="chip muted">{saves.length} 份</span>
+          </div>
+          <div className="card-pad col" style={{ gap: 8 }}>
+            {saves.map((s) => {
+              const active = s.id === currentSaveId;
+              const stale = s.parseVersion !== PARSE_VERSION;
+              return (
+                <div
+                  key={s.id}
+                  className="row between wrap"
+                  style={{
+                    gap: 8,
+                    padding: "10px 12px",
+                    border: "1px solid var(--line-soft)",
+                    borderRadius: 10,
+                    background: active ? "rgba(240,190,90,.08)" : "transparent",
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="row wrap" style={{ gap: 6 }}>
+                      <b style={{ fontSize: 13 }}>{s.fileName}</b>
+                      {active && <span className="chip gold">使用中</span>}
+                      {stale && <span className="chip muted">需重新匯入</span>}
+                    </div>
+                    <div className="tiny dim" style={{ marginTop: 3 }}>
+                      {s.wizard || "未知召喚師"} · {fmt(s.units)} 魔靈 · {fmt(s.runes)} 符文 · {fmt(s.artifacts)} 神器 ·{" "}
+                      {new Date(s.importedAt).toLocaleString("zh-TW")}
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: 6 }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      disabled={active || stale}
+                      onClick={() => void switchSave(s.id)}
+                    >
+                      {active ? "已載入" : "讀取"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => {
+                        if (confirm(`要刪除「${s.fileName}」這份存檔嗎？`)) void removeSave(s.id);
+                      }}
+                    >
+                      <Trash2 size={13} /> 刪除
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <SiteQrCard />
 
       {uploadsEnabled && (
@@ -305,8 +372,8 @@ export default function ImportPage() {
                 <button className="btn btn-sm btn-ghost" onClick={() => void copyDiagnostics()} title="只複製數量與格式資訊，不含符文內容">
                   <ClipboardPaste size={13} /> 複製診斷
                 </button>
-                <button className="btn btn-sm btn-ghost" onClick={() => { if (confirm("確定要清除已載入的存檔？")) { void clearAccount(); notify("已清除存檔"); } }}>
-                  <Trash2 size={13} /> 清除
+                <button className="btn btn-sm btn-ghost" onClick={() => { if (confirm("確定要取消目前載入的存檔？（已儲存的 JSON 會保留，可在「已儲存的存檔」重新讀取）")) { void clearAccount(); notify("已取消載入存檔"); } }}>
+                  <Trash2 size={13} /> 取消載入
                 </button>
               </div>
             </div>

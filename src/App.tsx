@@ -133,7 +133,7 @@ export default function App() {
         if (!save) return;
         // 期間可能已登出或手動匯入，這時不要再覆蓋
         if (!useAuth.getState().user || useStore.getState().account) return;
-        const res = importText(save.text, save.fileName);
+        const res = await importText(save.text, save.fileName);
         if (res.ok) {
           notify(`已自動載入雲端存檔：${save.fileName}（${formatCloudTime(save.createdAt)}）`);
         }

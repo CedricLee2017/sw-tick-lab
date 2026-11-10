@@ -126,10 +126,53 @@ const ACCOUNT_KEY = "swtick:account";
 const SETTINGS_KEY = "swtick:settings";
 const LOADOUT_KEY = "swtick:loadouts";
 const DECK_FAV_KEY = "swtick:deckfavorites";
+/** 已儲存的存檔清單（只存檔名 / 數量等資訊，內容另外放） */
+const SAVES_KEY = "swtick:saves";
+/** 目前載入的存檔 id */
+const CURRENT_SAVE_KEY = "swtick:current-save";
+const saveKey = (id: string) => `swtick:save:${id}`;
 /** 這台裝置的本機資料屬於哪個會員，用來避免換帳號時把別人的資料帶過去 */
 const OWNER_KEY = "swtick:owner";
 /** 每個會員上次成功同步儲存庫的時間（用來判斷雲端缺少的項目是「新資料」還是「已刪除」） */
 const lastSyncKey = (userId: number) => `swtick:library-sync:${userId}`;
+
+/** 存檔清單的顯示資料，從解析後的帳號產生 */
+function savedMeta(id: string, account: Account): SavedAccount {
+  return {
+    id,
+    fileName: account.fileName,
+    wizard: account.wizard,
+    importedAt: account.importedAt,
+    units: account.units.length,
+    runes: account.runes.length,
+    artifacts: account.artifacts.length,
+    parseVersion: account.parseVersion,
+  };
+}
+
+function newSaveId(): string {
+  return `sv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 存檔清單一律新到舊 */
+function sortSaves(list: SavedAccount[]): SavedAccount[] {
+  return [...list].sort((a, b) => b.importedAt - a.importedAt);
+}
+
+/**
+ * 切換 / 匯入存檔時重置只對前一份存檔有意義的設定。
+ * 符文鎖定、排除、固定都是符文 id，換存檔後會指到不存在的符文。
+ */
+function settingsForNewAccount(prev: Settings): Settings {
+  return {
+    ...prev,
+    bonus: defaultBonus({ leadSpd: prev.bonus.leadSpd, buffSpd: prev.bonus.buffSpd }),
+    lockedRunes: [],
+    excludedRunes: [],
+    includedRunes: [],
+    excludedArtifacts: [],
+  };
+}
 
 interface Toast {
   id: number;
@@ -146,9 +189,26 @@ export interface LibrarySyncResult {
   pushed?: boolean;
 }
 
+/** 本機已儲存的存檔（每一份上傳過的 JSON 各一筆） */
+export interface SavedAccount {
+  id: string;
+  fileName: string;
+  wizard: string;
+  importedAt: number;
+  units: number;
+  runes: number;
+  artifacts: number;
+  /** 解析規則版本；舊版存檔要重新匯入才能讀取 */
+  parseVersion?: number;
+}
+
 interface Store {
   ready: boolean;
   account: Account | null;
+  /** 這台裝置已儲存的存檔清單（新到舊） */
+  saves: SavedAccount[];
+  /** 目前載入的存檔 id；沒有載入任何存檔時為 null */
+  currentSaveId: string | null;
   runeMap: Map<number, Rune>;
   settings: Settings;
   loadouts: Loadout[];
@@ -156,8 +216,13 @@ interface Store {
   deckFavs: DeckFav[];
   toasts: Toast[];
   hydrate: () => Promise<void>;
-  importText: (text: string, fileName: string) => { ok: boolean; error?: string; warnings: string[] };
-  clearAccount: () => Promise<void>;
+  importText: (text: string, fileName: string) => Promise<{ ok: boolean; error?: string; warnings: string[] }>;
+  /** 切換到另一份已儲存的存檔 */
+  switchSave: (id: string) => Promise<boolean>;
+  /** 刪除一份已儲存的存檔；刪除目前這份時會自動載入下一份 */
+  removeSave: (id: string) => Promise<boolean>;
+  /** 取消目前載入的存檔；opts.all 會同時刪除所有已儲存的存檔 */
+  clearAccount: (opts?: { all?: boolean }) => Promise<void>;
   patchBonus: (patch: Partial<BonusConfig>) => void;
   setRta: (v: boolean) => void;
   setPool: (v: number) => void;
@@ -199,6 +264,8 @@ let libraryPushChain: Promise<void> = Promise.resolve();
 export const useStore = create<Store>((setState, getState) => ({
   ready: false,
   account: null,
+  saves: [],
+  currentSaveId: null,
   runeMap: new Map(),
   settings: DEFAULT_SETTINGS(),
   loadouts: [],
@@ -207,16 +274,52 @@ export const useStore = create<Store>((setState, getState) => ({
 
   hydrate: async () => {
     try {
-      const [stored, settings, loadouts, deckFavs] = await Promise.all([
-        get<Account>(ACCOUNT_KEY),
+      const [storedSaves, storedCurrent, settings, loadouts, deckFavs] = await Promise.all([
+        get<SavedAccount[]>(SAVES_KEY),
+        get<string>(CURRENT_SAVE_KEY),
         get<Settings>(SETTINGS_KEY),
         get<Loadout[]>(LOADOUT_KEY),
         get<DeckFav[]>(DECK_FAV_KEY),
       ]);
+      let saves = sortSaves(Array.isArray(storedSaves) ? storedSaves : []);
+      let currentId = typeof storedCurrent === "string" ? storedCurrent : null;
+      let acc: Account | null = null;
       // 舊版解析（stat/set ID 錯位、漏掉裝備符文）不可沿用，要求重新匯入
-      const stale = !!stored && stored.parseVersion !== PARSE_VERSION;
-      if (stale) await del(ACCOUNT_KEY);
-      const acc = stale ? null : stored;
+      let stale = false;
+
+      if (currentId) {
+        const stored = await get<Account>(saveKey(currentId));
+        if (stored?.parseVersion === PARSE_VERSION) acc = stored;
+        else stale = !!stored;
+        if (!acc) currentId = null;
+      }
+
+      // 舊版只有一份存檔：搬進新的多存檔清單，原本的資料不會不見
+      if (!acc && !currentId) {
+        const legacy = await get<Account>(ACCOUNT_KEY);
+        if (legacy) {
+          if (legacy.parseVersion === PARSE_VERSION) {
+            const id = newSaveId();
+            acc = legacy;
+            currentId = id;
+            saves = sortSaves([
+              savedMeta(id, legacy),
+              ...saves.filter((s) => s.fileName.toLowerCase() !== legacy.fileName.toLowerCase()),
+            ]);
+            await Promise.all([set(saveKey(id), legacy), set(SAVES_KEY, saves), set(CURRENT_SAVE_KEY, id)]);
+          } else {
+            stale = true;
+          }
+          await del(ACCOUNT_KEY);
+        }
+      }
+
+      // 目前存檔沒有對應的清單資料時補回來（例如清單被清掉但內容還在）
+      if (acc && currentId && !saves.some((s) => s.id === currentId)) {
+        saves = sortSaves([savedMeta(currentId, acc), ...saves]);
+        void set(SAVES_KEY, saves);
+      }
+
       // 舊版 settings 沒有 focus 欄位，補上預設值
       const saved = settings
         ? {
@@ -244,6 +347,8 @@ export const useStore = create<Store>((setState, getState) => ({
       setState({
         ready: true,
         account: acc ?? null,
+        saves,
+        currentSaveId: currentId,
         runeMap: new Map((acc?.runes ?? []).map((r) => [r.id, r])),
         settings: saved,
         loadouts: loadouts ?? [],
@@ -255,13 +360,21 @@ export const useStore = create<Store>((setState, getState) => ({
     }
   },
 
-  importText: (text, fileName) => {
+  importText: async (text, fileName) => {
     const parsed = parseAccountJSON(text, fileName);
     const { error, warnings } = parsed;
     if (!parsed.account) return { ok: false, error, warnings };
     let account = parsed.account;
-    // 重新匯入存檔時保留先前新增的自訂魔靈（清空配裝，避免參照到舊存檔的符文）
-    const keptCustom = (getState().account?.units ?? []).filter((u) => u.custom);
+    const state = getState();
+    // 同名檔案視為同一份存檔（重新上傳會更新它，不會多一筆）
+    const existing = state.saves.find((s) => s.fileName.toLowerCase() === fileName.toLowerCase());
+
+    // 重新匯入同一份存檔時保留先前新增的自訂魔靈（清空配裝，避免參照到舊存檔的符文）
+    let keptCustom: Unit[] = [];
+    if (existing) {
+      const previous = state.currentSaveId === existing.id ? state.account : await get<Account>(saveKey(existing.id));
+      keptCustom = (previous?.units ?? []).filter((u) => u.custom);
+    }
     if (keptCustom.length) {
       const used = new Set(account.units.map((u) => u.id));
       let nextId = -1;
@@ -274,27 +387,27 @@ export const useStore = create<Store>((setState, getState) => ({
       });
       account = { ...account, units: [...account.units, ...carried] };
     }
+
+    const id = existing?.id ?? newSaveId();
     // 建築一律以全滿等計算（速度圖騰 15%、競技場 20%、屬性塔 21%、公會 20/25%）。
     // 若存檔有建築等級，可在「設定」頁按「套用存檔建築等級」覆寫。
-    const prev = getState().settings;
-    const settings: Settings = {
-      ...prev,
-      bonus: defaultBonus({ leadSpd: prev.bonus.leadSpd, buffSpd: prev.bonus.buffSpd }),
-      lockedRunes: [],
-      excludedRunes: [],
-      includedRunes: [],
-      excludedArtifacts: [],
-    };
+    const prev = state.settings;
+    const settings = settingsForNewAccount(prev);
+    const saves = sortSaves([savedMeta(id, account), ...state.saves.filter((s) => s.id !== id)]);
     setState({
       account,
+      saves,
+      currentSaveId: id,
       runeMap: new Map(account.runes.map((r) => [r.id, r])),
       settings,
     });
     // 寫入本機失敗（例如瀏覽器儲存空間不足）時要讓使用者知道，
     // 否則重新整理後會回到舊存檔，看起來就像「匯入沒有更新」。
-    void set(ACCOUNT_KEY, account).catch(() => {
+    try {
+      await Promise.all([set(saveKey(id), account), set(SAVES_KEY, saves), set(CURRENT_SAVE_KEY, id)]);
+    } catch {
       getState().notify("存檔已載入，但無法寫入瀏覽器儲存空間；重新整理後可能回到舊存檔", "err");
-    });
+    }
     if (settings !== prev) void set(SETTINGS_KEY, settings).catch(() => undefined);
     const detectedSpeed = account.buildings.find((b) => b.id === 7);
     getState().notify(
@@ -305,11 +418,79 @@ export const useStore = create<Store>((setState, getState) => ({
     return { ok: true, warnings };
   },
 
-  clearAccount: async () => {
-    const settings = { ...getState().settings, lockedRunes: [], excludedRunes: [], includedRunes: [], excludedArtifacts: [] };
-    setState({ account: null, runeMap: new Map(), settings });
+  switchSave: async (id) => {
+    const state = getState();
+    const meta = state.saves.find((s) => s.id === id);
+    if (!meta) return false;
+    if (state.currentSaveId === id && state.account) return true;
+    const account = await get<Account>(saveKey(id));
+    if (!account) {
+      getState().notify("找不到這份存檔，請重新上傳 JSON", "err");
+      return false;
+    }
+    if (account.parseVersion !== PARSE_VERSION) {
+      getState().notify("這份存檔是舊版解析規則，請重新上傳同名 JSON 更新", "err");
+      return false;
+    }
+    // 離開前先把目前這份存檔的數量更新到清單（新增自訂魔靈後會變動）
+    const current = state.account && state.currentSaveId
+      ? state.saves.map((s) => (s.id === state.currentSaveId ? savedMeta(s.id, state.account!) : s))
+      : state.saves;
+    const settings = settingsForNewAccount(state.settings);
+    setState({
+      account,
+      saves: current,
+      currentSaveId: id,
+      runeMap: new Map(account.runes.map((r) => [r.id, r])),
+      settings,
+    });
+    void set(SAVES_KEY, current);
+    void set(CURRENT_SAVE_KEY, id);
     void set(SETTINGS_KEY, settings);
+    getState().notify(`已切換存檔：${account.fileName}`);
+    return true;
+  },
+
+  removeSave: async (id) => {
+    const state = getState();
+    if (!state.saves.some((s) => s.id === id)) return false;
+    const saves = state.saves.filter((s) => s.id !== id);
+    const isCurrent = state.currentSaveId === id;
+    const settings = settingsForNewAccount(state.settings);
+    setState({
+      saves,
+      ...(isCurrent
+        ? { account: null, currentSaveId: null, runeMap: new Map(), settings }
+        : {}),
+    });
+    await Promise.all([del(saveKey(id)), set(SAVES_KEY, saves)]);
+    if (isCurrent) {
+      void set(SETTINGS_KEY, settings);
+      await del(CURRENT_SAVE_KEY);
+      // 刪掉目前這份時，自動接續載入最新的一份，不用再手動選
+      if (saves.length > 0) await getState().switchSave(saves[0].id);
+    }
+    getState().notify("已刪除存檔");
+    return true;
+  },
+
+  clearAccount: async (opts) => {
+    const state = getState();
+    const settings = settingsForNewAccount(state.settings);
+    setState({
+      account: null,
+      runeMap: new Map(),
+      settings,
+      currentSaveId: null,
+      saves: opts?.all ? [] : state.saves,
+    });
+    void set(SETTINGS_KEY, settings);
+    await del(CURRENT_SAVE_KEY);
     await del(ACCOUNT_KEY);
+    if (opts?.all) {
+      await set(SAVES_KEY, []);
+      await Promise.all(state.saves.map((s) => del(saveKey(s.id))));
+    }
   },
 
   patchBonus: (patch) => {
@@ -640,10 +821,26 @@ export const useStore = create<Store>((setState, getState) => ({
   },
 
   resetForNewAccount: async () => {
-    const settings = { ...getState().settings, lockedRunes: [], excludedRunes: [], includedRunes: [], excludedArtifacts: [] };
-    setState({ account: null, runeMap: new Map(), settings, loadouts: [], deckFavs: [] });
+    const state = getState();
+    const settings = settingsForNewAccount(state.settings);
+    setState({
+      account: null,
+      runeMap: new Map(),
+      settings,
+      loadouts: [],
+      deckFavs: [],
+      saves: [],
+      currentSaveId: null,
+    });
     void set(SETTINGS_KEY, settings);
-    await Promise.all([del(ACCOUNT_KEY), del(LOADOUT_KEY), del(DECK_FAV_KEY)]);
+    await Promise.all([
+      del(ACCOUNT_KEY),
+      del(LOADOUT_KEY),
+      del(DECK_FAV_KEY),
+      del(SAVES_KEY),
+      del(CURRENT_SAVE_KEY),
+      ...state.saves.map((s) => del(saveKey(s.id))),
+    ]);
   },
 
   notify: (msg, kind = "ok") => {

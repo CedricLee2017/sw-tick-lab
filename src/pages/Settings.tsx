@@ -111,8 +111,8 @@ export default function SettingsPage() {
   };
 
   const resetAll = () => {
-    if (!confirm("要清除已匯入的存檔與所有配裝紀錄嗎？（設定會保留）")) return;
-    void clearAccount();
+    if (!confirm("要清除所有已儲存的存檔與配裝紀錄嗎？（設定會保留）")) return;
+    void clearAccount({ all: true });
     for (const l of loadouts) removeLoadout(l.id);
     notify("已清除本機資料");
   };
