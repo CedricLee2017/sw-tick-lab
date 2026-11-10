@@ -606,6 +606,22 @@ check("速度上界不低於實際最佳解", () => {
   assert.ok(bound.speed >= resultBuilds[0].stats.spd, `上界 ${bound.speed} < 實際 ${resultBuilds[0].stats.spd}`);
   assert.ok(bound.speed < speedForTick(3), `上界 ${bound.speed} 不合理（超過 Tick 3）`);
 });
+
+check("數值上限：配出來的速度 / 體力不超過上限", () => {
+  const capped = optimize({
+    ...req,
+    required: [],
+    min: {},
+    max: { spd: 280, hp: 32000 },
+    pool: 18,
+    maxNodes: 500_000,
+  });
+  assert.ok(capped.count > 0, "加上限後沒有任何結果");
+  for (const b of buildsOf(capped, account.runes, false, 20)) {
+    assert.ok(b.stats.spd <= 280, `速度 ${b.stats.spd} 超過上限 280`);
+    assert.ok(b.stats.hp <= 32000, `體力 ${b.stats.hp} 超過上限 32000`);
+  }
+});
 check("允許破套：只強制主套 4 件", () => {
   const relaxed = optimize({
     ...req,
@@ -1692,6 +1708,25 @@ check("攻擊順序：5 人也能依 order 嚴格遞減", () => {
     );
   }
   assert.equal(new Set(plan.members.flatMap((m) => m.runeIds)).size, 30, "5 人符文不可重複");
+});
+
+check("一鍵配隊：數值上限（速度 / 體力 / 攻擊）", () => {
+  const plan = planOf(
+    optimizeTeam(
+      teamReq(3, {
+        members: [
+          mkTeamMember(900, { max: { spd: 260 } }),
+          mkTeamMember(901, { max: { hp: 30000 } }),
+          mkTeamMember(902, { max: { atk: 1600 } }),
+        ],
+      }),
+    ),
+  );
+  const byUnit = new Map(plan.members.map((m) => [m.unitId, m]));
+  assert.ok(byUnit.get(900).stats.spd <= 260, `速度 ${byUnit.get(900).stats.spd} 超過上限 260`);
+  assert.ok(byUnit.get(901).stats.hp <= 30000, `體力 ${byUnit.get(901).stats.hp} 超過上限 30000`);
+  assert.ok(byUnit.get(902).stats.atk <= 1600, `攻擊 ${byUnit.get(902).stats.atk} 超過上限 1600`);
+  assert.equal(new Set(plan.members.flatMap((m) => m.runeIds)).size, 18, "符文不可重複");
 });
 
 check("固定符文（includeRunes）一定會入選", () => {

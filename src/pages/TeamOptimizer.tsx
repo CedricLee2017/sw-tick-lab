@@ -112,12 +112,16 @@ interface MemberDraft {
   set2c: number;
   mains: Partial<Record<number, number>>;
   min: Partial<Record<StatKey, number>>;
+  /** 數值上限（實戰數值；0 / 未設定 = 不限） */
+  max: Partial<Record<StatKey, number>>;
   /** 目標 Tick；0 = 不限（只在「目標 Tick」模式生效） */
   tick: number;
   /** 速度條件：面板速度或目標 Tick（二選一，預設面板速度） */
   speedMode: "panel" | "tick";
   /** 面板額外速度（基礎速度以外）；0 = 不指定，面板速度會覆寫目標 Tick */
   panelExtra: number;
+  /** 面板額外速度上限；0 = 不限 */
+  panelExtraMax: number;
   /** 攻擊順序；1 = 最先 */
   order: number;
   /** 這隻魔靈會收到的提條 % */
@@ -145,6 +149,18 @@ const BUDGETS: Record<BudgetKey, { label: string; pool: number; topK: number; be
 
 const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
 const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25 && s.id !== 99);
+
+/** 數值上限 / 下限的錯誤訊息用 */
+const STAT_LABEL_ZH: Record<StatKey, string> = {
+  hp: "體力",
+  atk: "攻擊",
+  def: "防禦",
+  spd: "速度",
+  cr: "暴率",
+  cd: "暴傷",
+  res: "抵抗",
+  acc: "命中",
+};
 
 /** 2/4/6 號主屬性（與配符頁相同的 SWEX type id） */
 const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
@@ -187,10 +203,12 @@ function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
     set2c: set4 ? 0 : twos[2]?.set ?? 0,
     mains: { ...t.mains },
     min: { ...t.min },
+    max: {},
     tick: t.tick,
     // 面板速度與目標 Tick 二選一；隊型可指定要哪一種
     speedMode: t.speedMode === "tick" ? "tick" : "panel",
     panelExtra: t.panelExtra ?? 0,
+    panelExtraMax: 0,
     order: t.order ?? 1,
     boostPct: t.boostPct ?? 0,
     speedBuff: t.speedBuff ?? false,
@@ -490,6 +508,7 @@ export default function TeamOptimizerPage() {
         set2c: 0,
         mains: { ...setup.mains },
         min: { ...setup.min },
+        max: {},
         tick: setup.tick,
         order: a.order,
         leadPct: a.leadPct,
@@ -530,9 +549,11 @@ export default function TeamOptimizerPage() {
       set2c: d.set2c,
       mains: { ...d.mains },
       min: { ...d.min },
+      max: { ...d.max },
       tick: d.tick,
       speedMode: d.speedMode,
       panelExtra: d.panelExtra,
+      panelExtraMax: d.panelExtraMax,
       objectiveMode: d.objectiveMode,
       skillId: d.skillId,
       skillSlot: d.skillSlot,
@@ -686,6 +707,8 @@ export default function TeamOptimizerPage() {
         set2c: setup.set2c,
         mains: setup.mains,
         min: setup.min,
+        max: {},
+        panelExtraMax: 0,
       };
     });
 
@@ -742,7 +765,7 @@ export default function TeamOptimizerPage() {
 
   /** 手動改到定位相關的欄位時，視為偏離原本的預設定位 */
   const PRESET_FIELDS: (keyof MemberDraft)[] = [
-    "role", "weight", "set4", "set2", "set2b", "set2c", "mains", "min", "tick", "focus", "objectiveMode", "speedMode",
+    "role", "weight", "set4", "set2", "set2b", "set2c", "mains", "min", "max", "tick", "focus", "objectiveMode", "speedMode", "panelExtraMax",
   ];
 
   const updateMember = (i: number, patch: Partial<MemberDraft>) => {
@@ -774,6 +797,8 @@ export default function TeamOptimizerPage() {
       set2c: preset.set2c ?? 0,
       mains: { ...preset.mains },
       min: { ...preset.min },
+      max: {},
+      panelExtraMax: 0,
       tick: preset.tick,
       focus: preset.focus.map((f) => ({ ...f })),
       objectiveMode: preset.objective,
@@ -894,6 +919,21 @@ export default function TeamOptimizerPage() {
         return m.presetId
           ? { ...m, min, presetId: undefined, title: TEAM_ROLE_LABELS[m.role] }
           : { ...m, min };
+      }),
+    );
+    setPlan(null);
+  };
+
+  const patchMax = (i: number, key: StatKey, value: number) => {
+    setMembers((prev) =>
+      prev.map((m, j) => {
+        if (j !== i) return m;
+        const max = { ...m.max };
+        if (value > 0) max[key] = value;
+        else delete max[key];
+        return m.presetId
+          ? { ...m, max, presetId: undefined, title: TEAM_ROLE_LABELS[m.role] }
+          : { ...m, max };
       }),
     );
     setPlan(null);
@@ -1054,6 +1094,18 @@ export default function TeamOptimizerPage() {
       else if (m.speedMode === "tick" && m.tick > 0) min.spd = speedForTick(m.tick, rta);
       else delete min.spd;
 
+      // 數值上限：和下限一樣用實戰數值；速度上限另外用「面板額外速度」換算
+      const max: Partial<Record<StatKey, number>> = { ...m.max };
+      for (const k of Object.keys(max) as StatKey[]) if (!max[k] || max[k]! <= 0) delete max[k];
+      if (m.panelExtraMax > 0) {
+        const battleSpdMax = battleSpeedForPanelExtra(
+          v.base.spd,
+          m.panelExtraMax,
+          bonus.towerSpd + leadPctOf(i) + bonus.buffSpd,
+        );
+        max.spd = max.spd == null ? battleSpdMax : Math.min(max.spd, battleSpdMax);
+      }
+
       const bySlot = new Map<number, number>();
       for (const id of [...m.includeRunes, ...(globalIncludes.get(m.unitId) ?? [])]) {
         const r = runeMap.get(id);
@@ -1081,6 +1133,7 @@ export default function TeamOptimizerPage() {
         sets,
         mains: m.mains,
         min,
+        max,
         focus: m.focus,
         includeRunes: [...bySlot.values()],
         leadSpd: leadPctOf(i),
@@ -1128,6 +1181,15 @@ export default function TeamOptimizerPage() {
     }
     const req = buildRequest();
     if (!req) return notify("無法建立配隊需求，請重新整理頁面", "err");
+    for (const spec of req.members) {
+      for (const k of Object.keys(spec.min) as StatKey[]) {
+        const lo = spec.min[k] ?? 0;
+        const hi = spec.max?.[k];
+        if (hi != null && lo > hi) {
+          return notify(`${spec.label ?? "魔靈"} 的${STAT_LABEL_ZH[k]}下限高於上限，請調整數值上限。`, "err");
+        }
+      }
+    }
 
     workerRef.current?.terminate();
     let worker: Worker;
@@ -1661,6 +1723,17 @@ export default function TeamOptimizerPage() {
                   </label>
                 )}
                 <label>
+                  <span>面板速度上限（額外）</span>
+                  <NumberInput
+                    className="input mono"
+                    min={0}
+                    max={500}
+                    value={m.panelExtraMax}
+                    onChange={(v) => updateMember(i, { panelExtraMax: Math.max(0, v) })}
+                    title="0 = 不限；和上面的面板速度用同一種單位（基礎速度與隊長技以外的額外速度）"
+                  />
+                </label>
+                <label>
                   <span>攻擊順序</span>
                   <div className="order-stepper">
                     <NumberInput
@@ -1846,6 +1919,31 @@ export default function TeamOptimizerPage() {
                         max={key === "cr" || key === "res" || key === "acc" ? 100 : 100000}
                         value={m.min[key] ?? 0}
                         onChange={(v) => patchMin(i, key, Math.max(0, v))}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="tiny dim" style={{ marginTop: 8 }}>
+                  數值上限（0 = 不限；實戰數值，速度用上面的「面板速度上限」）
+                </div>
+                <div className="team-fields">
+                  {([
+                    ["hp", "體力"],
+                    ["atk", "攻擊"],
+                    ["def", "防禦"],
+                    ["cr", "暴率"],
+                    ["cd", "暴傷"],
+                    ["res", "抵抗"],
+                    ["acc", "命中"],
+                  ] as [StatKey, string][]).map(([key, label]) => (
+                    <label key={key}>
+                      <span>{label}上限</span>
+                      <NumberInput
+                        className="input mono"
+                        min={0}
+                        max={key === "cr" || key === "res" || key === "acc" ? 100 : 100000}
+                        value={m.max[key] ?? 0}
+                        onChange={(v) => patchMax(i, key, Math.max(0, v))}
                       />
                     </label>
                   ))}

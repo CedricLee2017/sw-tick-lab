@@ -68,6 +68,8 @@ export interface TeamMemberSpec {
   mains: Partial<Record<number, number>>;
   /** 數值下限（實戰數值；速度下限請直接給 min.spd） */
   min: Partial<Record<StatKey, number>>;
+  /** 數值上限（實戰數值；速度上限請直接給 max.spd） */
+  max?: Partial<Record<StatKey, number>>;
   /** 焦點屬性（影響候選符文挑選） */
   focus: FocusEntry[];
   /** 這隻固定使用的符文 id（每個位置最多一顆） */
@@ -262,8 +264,10 @@ function searchOnce(
   // 攻擊順序的速度限制：下限沿用使用者設定，上限只在需要壓速度時加上
   const min = { ...spec.min };
   if (over.minSpd != null) min.spd = Math.max(min.spd ?? 0, over.minSpd);
-  const max: Partial<Record<StatKey, number>> = {};
-  if (over.maxSpd != null) max.spd = over.maxSpd;
+  const max: Partial<Record<StatKey, number>> = { ...spec.max };
+  if (over.maxSpd != null) {
+    max.spd = max.spd == null ? over.maxSpd : Math.min(max.spd, over.maxSpd);
+  }
   const optReq: OptRequest = {
     base: spec.base,
     runes: req.runes,

@@ -156,6 +156,18 @@ const QUICK_PRESETS: QuickPreset[] = [
 /** 未指定魔靈的預設（套用在目前選取的魔靈） */
 const GENERIC_PRESET_NAMES = QUICK_PRESETS.filter((p) => p.monsterId === undefined).map((p) => p.name).join("、");
 
+/** 數值下限 / 上限的錯誤訊息用 */
+const STAT_ZH: Record<StatKey, string> = {
+  hp: "體力",
+  atk: "攻擊",
+  def: "防禦",
+  spd: "速度",
+  cr: "暴率",
+  cd: "暴傷",
+  res: "抵抗",
+  acc: "命中",
+};
+
 /** 2/4/6 號位可選主屬性（type id 對應 SWEX；固定值與 % 分開選） */
 const MAIN_OPTIONS: Record<number, { v: number; label: string }[]> = {
   2: [
@@ -207,7 +219,9 @@ export default function OptimizerPage() {
   const [mode, setMode] = useState<"tick" | "speed">("speed");
   const [tick, setTick] = useState(5);
   const [speedTarget, setSpeedTarget] = useState(0);
+  const [maxSpeedTarget, setMaxSpeedTarget] = useState(0);
   const [limits, setLimits] = useState<Partial<Record<StatKey, number>>>({});
+  const [maxLimits, setMaxLimits] = useState<Partial<Record<StatKey, number>>>({});
   const [allowEquipped, setAllowEquipped] = useState(true);
   const [pool, setPool] = useState(settings.pool);
   const [budget, setBudget] = useState(12_000_000);
@@ -280,6 +294,8 @@ export default function OptimizerPage() {
     setSetGroups(p.groups.map((g) => ({ ...g })));
     setMains({ ...p.mains });
     setLimits({ ...p.limits });
+    setMaxLimits({});
+    setMaxSpeedTarget(0);
     setFocus(p.focus.map((f) => ({ ...f })));
     setMode(p.mode);
     if (p.tick) setTick(p.tick);
@@ -502,12 +518,26 @@ export default function OptimizerPage() {
     if (targetSpeed > 0) min.spd = targetSpeed;
     for (const k of Object.keys(min) as StatKey[]) if (!min[k] || min[k]! <= 0) delete min[k];
 
+    // 數值上限：和下限一樣用實戰數值；最高面板速度另外換算成戰鬥速度
+    const max: Partial<Record<StatKey, number>> = { ...maxLimits };
+    if (maxSpeedTarget > 0) {
+      const battleMax = maxSpeedTarget + speedBonus;
+      max.spd = max.spd == null ? battleMax : Math.min(max.spd, battleMax);
+    }
+    for (const k of Object.keys(max) as StatKey[]) if (!max[k] || max[k]! <= 0) delete max[k];
+    for (const k of Object.keys(min) as StatKey[]) {
+      const hi = max[k];
+      if (hi != null && (min[k] ?? 0) > hi) {
+        return notify(`${STAT_ZH[k]}下限 ${min[k]} 高於上限 ${hi}，請調整數值上限。`, "err");
+      }
+    }
+
     const req: OptRequest = {
       base,
       runes: account.runes,
       required,
       min,
-      max: {},
+      max,
       // 結果池同時保留「含一般技能」與「含公會技能」兩種 EHP，這裡固定不含公會技能
       bonus: { ...bonus, useGuild: false, grind: true },
       pool,
@@ -967,6 +997,19 @@ export default function OptimizerPage() {
               />
             )}
 
+            <NumberField
+              label="最高面板速度（0 = 不限）"
+              value={maxSpeedTarget}
+              min={0}
+              max={500}
+              onChange={setMaxSpeedTarget}
+              hint={
+                maxSpeedTarget > 0
+                  ? `配出來的面板速度不會超過 ${maxSpeedTarget}（戰鬥速度 ${maxSpeedTarget + speedBonus}）`
+                  : "0 = 不限；用來避免配出超過指定面板速度的組合"
+              }
+            />
+
             <div className="grid g2">
               <NumberField label="速度圖騰 %" value={bonus.towerSpd} onChange={(v) => patchBonus({ towerSpd: v })} min={0} max={20} step={0.5} />
               <NumberField label="隊長技 %" value={bonus.leadSpd} onChange={(v) => patchBonus({ leadSpd: v })} min={0} max={50} />
@@ -982,6 +1025,16 @@ export default function OptimizerPage() {
               <NumberField label="效果命中 ACC %" value={limits.acc ?? 0} onChange={(v) => setLimits((l) => ({ ...l, acc: v }))} max={100} />
               <NumberField label="效果抵抗 RES %" value={limits.res ?? 0} onChange={(v) => setLimits((l) => ({ ...l, res: v }))} max={100} />
               <NumberField label="暴擊率 CR %" value={limits.cr ?? 0} onChange={(v) => setLimits((l) => ({ ...l, cr: v }))} max={100} />
+            </div>
+
+            <div className="tiny dim" style={{ marginTop: 10 }}>其他實戰上限（含一般召喚師技能，0 = 不限）</div>
+            <div className="grid g2">
+              <NumberField label="體力上限 HP" value={maxLimits.hp ?? 0} onChange={(v) => setMaxLimits((l) => ({ ...l, hp: v }))} step={500} />
+              <NumberField label="防禦上限 DEF" value={maxLimits.def ?? 0} onChange={(v) => setMaxLimits((l) => ({ ...l, def: v }))} step={50} />
+              <NumberField label="攻擊上限 ATK" value={maxLimits.atk ?? 0} onChange={(v) => setMaxLimits((l) => ({ ...l, atk: v }))} step={50} />
+              <NumberField label="效果命中上限 ACC %" value={maxLimits.acc ?? 0} onChange={(v) => setMaxLimits((l) => ({ ...l, acc: v }))} max={100} />
+              <NumberField label="效果抵抗上限 RES %" value={maxLimits.res ?? 0} onChange={(v) => setMaxLimits((l) => ({ ...l, res: v }))} max={100} />
+              <NumberField label="暴擊率上限 CR %" value={maxLimits.cr ?? 0} onChange={(v) => setMaxLimits((l) => ({ ...l, cr: v }))} max={100} />
             </div>
 
             <label className="row tiny" style={{ gap: 8, cursor: "pointer" }}>
