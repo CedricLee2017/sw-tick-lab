@@ -226,6 +226,10 @@ function initialMembers(): MemberDraft[] {
 const STORAGE_KEY = "swtick:team-opt:v1";
 const CONTEXTS: DeckContext[] = ["arena", "guild", "dungeon"];
 const BUDGET_KEYS: BudgetKey[] = ["fast", "standard", "full"];
+/** 結果頁一次顯示幾組替代隊伍 */
+const RESULT_PAGE_SIZE = 10;
+/** 可選的回傳隊伍數（1 組主結果 + 其他替代） */
+const RESULT_COUNTS = [5, 10, 20, 50, 100] as const;
 
 /** 一次配幾隊（每隊 3～5 人，合計最多 15 隻） */
 type TeamCount = 1 | 2 | 3;
@@ -240,6 +244,8 @@ interface SavedState {
   /** 每隊的速度隊長技 %（長度 3，用不到的隊伍保留 0） */
   leadPcts: number[];
   budgetKey: BudgetKey;
+  /** 要顯示幾組隊伍（含主結果） */
+  resultCount: number;
   oppSpd: number;
   plan: TeamPlan | null;
   altIndex: number;
@@ -259,6 +265,9 @@ function loadSaved(): SavedState | null {
     const teams: TeamCount = v.teams === 2 || v.teams === 3 ? v.teams : 1;
     const content: DeckContext = CONTEXTS.includes(v.content as DeckContext) ? (v.content as DeckContext) : "guild";
     const budgetKey: BudgetKey = BUDGET_KEYS.includes(v.budgetKey as BudgetKey) ? (v.budgetKey as BudgetKey) : "standard";
+    const resultCount = RESULT_COUNTS.includes(v.resultCount as (typeof RESULT_COUNTS)[number])
+      ? (v.resultCount as number)
+      : 20;
     const total = teams * size;
     const slots = templateMembers(teamTemplateOf(templateId), size);
     const fallback = Array.from({ length: total }, (_, i) => draftFromTemplate(slots[i % size]));
@@ -282,6 +291,7 @@ function loadSaved(): SavedState | null {
       members,
       leadPcts,
       budgetKey,
+      resultCount,
       oppSpd: typeof v.oppSpd === "number" ? v.oppSpd : 0,
       plan,
       altIndex,
@@ -316,6 +326,7 @@ export default function TeamOptimizerPage() {
   /** 每隊的速度隊長技 %；個別成員可在卡片上覆寫 */
   const [leadPcts, setLeadPcts] = useState<number[]>(saved?.leadPcts ?? [0, 0, 0]);
   const [budgetKey, setBudgetKey] = useState<BudgetKey>(saved?.budgetKey ?? "standard");
+  const [resultCount, setResultCount] = useState<number>(saved?.resultCount ?? 20);
 
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<TeamProgress | null>(null);
@@ -428,7 +439,7 @@ export default function TeamOptimizerPage() {
   // 設定與結果存到瀏覽器：跳去其他頁面再回來、或重新整理都不會不見
   useEffect(() => {
     const data: SavedState = {
-      templateId, size, teams, content, members, leadPcts, budgetKey, oppSpd, plan, altIndex,
+      templateId, size, teams, content, members, leadPcts, budgetKey, resultCount, oppSpd, plan, altIndex,
       importedAt: account?.importedAt ?? null,
     };
     try {
@@ -436,7 +447,7 @@ export default function TeamOptimizerPage() {
     } catch {
       /* 忽略儲存失敗（例如容量不足） */
     }
-  }, [templateId, size, teams, content, members, leadPcts, budgetKey, oppSpd, plan, altIndex, account?.importedAt]);
+  }, [templateId, size, teams, content, members, leadPcts, budgetKey, resultCount, oppSpd, plan, altIndex, account?.importedAt]);
 
   // 隊長技全部由數值欄位決定，不再依魔靈自動判斷
 
@@ -1152,7 +1163,6 @@ export default function TeamOptimizerPage() {
       rta,
       pool: budget.pool,
       topK: budget.topK,
-      beamWidth: budget.beam,
       allowEquipped: true,
       relaxSub: false,
       intangible: false,
@@ -1160,7 +1170,9 @@ export default function TeamOptimizerPage() {
       lockedRunes: settings.lockedRunes,
       maxNodesPerSearch: budget.nodes,
       diversify: true,
-      alternatives: 4,
+      // 結果數量＝回傳的隊伍總數（主結果 + 替代）
+      alternatives: resultCount,
+      beamWidth: Math.max(budget.beam, resultCount),
       teamSize: size,
     };
   };
@@ -1280,6 +1292,13 @@ export default function TeamOptimizerPage() {
   };
 
   const activePlan = plan ? (altIndex === 0 ? plan : plan.alternatives[altIndex - 1] ?? plan) : null;
+
+  /** 所有回傳的隊伍（主結果 + 替代），結果頁分頁瀏覽 */
+  const allPlans = plan ? [plan, ...plan.alternatives] : [];
+  const resultPageCount = Math.max(1, Math.ceil(allPlans.length / RESULT_PAGE_SIZE));
+  const resultPage = Math.min(resultPageCount - 1, Math.floor(altIndex / RESULT_PAGE_SIZE));
+  const resultPageStart = resultPage * RESULT_PAGE_SIZE;
+  const pagePlans = allPlans.slice(resultPageStart, resultPageStart + RESULT_PAGE_SIZE);
 
   const pinMember = (unitId: number) => {
     const b = activePlan?.members.find((m) => m.unitId === unitId);
@@ -1458,9 +1477,23 @@ export default function TeamOptimizerPage() {
           <select className="select" style={{ width: 170 }} value={budgetKey} onChange={(e) => setBudgetKey(e.target.value as BudgetKey)}>
             {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => <option key={k} value={k}>預算：{BUDGETS[k].label}（{BUDGETS[k].hint}）</option>)}
           </select>
+          <select
+            className="select"
+            style={{ width: 150 }}
+            value={resultCount}
+            onChange={(e) => {
+              setResultCount(Number(e.target.value));
+              setPlan(null);
+              setAltIndex(0);
+            }}
+            title="一次回傳並可切換瀏覽的隊伍數量；數量越多，運算時間越長"
+          >
+            {RESULT_COUNTS.map((n) => <option key={n} value={n}>結果：{n} 組隊伍</option>)}
+          </select>
         </div>
         <div className="tiny dim team-help" style={{ marginTop: 6 }}>
           自訂隊型會保存這台裝置的第一隊設定（定位稱呼、出手順序、套裝 3×2／主屬性、面板速度或 Tick、面板下限、目標技能）；不綁定魔靈，套用時再選隊員。
+          「結果」可一次產生 5～100 組隊伍，翻頁瀏覽後再挑一組上符；數量越多，運算時間越長。
         </div>
 
         <div className="row wrap team-help" style={{ gap: 8, marginTop: 8 }}>
@@ -2263,11 +2296,48 @@ export default function TeamOptimizerPage() {
               )}
             </div>
             <div className="row wrap" style={{ gap: 5 }}>
-              {[plan, ...(plan?.alternatives ?? [])].map((p, idx) => (
-                <button key={idx} type="button" className={`chip ${altIndex === idx ? "gold" : "muted"}`} style={{ cursor: "pointer" }} onClick={() => setAltIndex(idx)}>
-                  隊伍 {idx + 1}
+              <span className="tiny dim" style={{ marginRight: 2 }}>
+                隊伍 {altIndex + 1} / {allPlans.length}
+              </span>
+              {resultPageCount > 1 && (
+                <button
+                  type="button"
+                  className="chip muted"
+                  style={{ cursor: "pointer" }}
+                  disabled={resultPage === 0}
+                  onClick={() => setAltIndex(Math.max(0, (resultPage - 1) * RESULT_PAGE_SIZE))}
+                  title="上一頁隊伍"
+                >
+                  ‹
                 </button>
-              ))}
+              )}
+              {pagePlans.map((p, i) => {
+                const idx = resultPageStart + i;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={`chip ${altIndex === idx ? "gold" : "muted"}`}
+                    style={{ cursor: "pointer" }}
+                    title={`隊伍分數 ${Math.round(p.teamScore * 10) / 10} / ${totalWeight}（${Math.round((p.teamScore / Math.max(1, totalWeight)) * 100)}%）`}
+                    onClick={() => setAltIndex(idx)}
+                  >
+                    {idx + 1}
+                  </button>
+                );
+              })}
+              {resultPageCount > 1 && (
+                <button
+                  type="button"
+                  className="chip muted"
+                  style={{ cursor: "pointer" }}
+                  disabled={resultPage >= resultPageCount - 1}
+                  onClick={() => setAltIndex(Math.min(allPlans.length - 1, (resultPage + 1) * RESULT_PAGE_SIZE))}
+                  title="下一頁隊伍"
+                >
+                  ›
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-sm btn-ghost team-collapse-toggle"

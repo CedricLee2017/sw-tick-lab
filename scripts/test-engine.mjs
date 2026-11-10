@@ -1664,6 +1664,18 @@ check("同一輸入可重現相同結果", () => {
   );
 });
 
+check("可回傳多組替代隊伍，且每組符文都不重複", () => {
+  const plan = planOf(optimizeTeam(teamReq(3, { alternatives: 20, beamWidth: 24 })));
+  const plans = [plan, ...plan.alternatives];
+  assert.equal(plans.length, 20, "應回傳 20 組隊伍");
+  const keys = plans.map((p) => p.members.map((m) => m.runeIds.join(",")).join("|"));
+  assert.equal(new Set(keys).size, 20, "20 組隊伍的符文分配不可重複");
+  for (const p of plans) {
+    assert.equal(p.members.length, 3);
+    assert.equal(new Set(p.members.flatMap((m) => m.runeIds)).size, 18, "每組隊伍符文不可重複");
+  }
+});
+
 check("攻擊順序：配出來的速度依 order 嚴格遞減", () => {
   const plan = planOf(
     optimizeTeam(

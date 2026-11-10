@@ -587,8 +587,10 @@ export function optimizeTeam(
   }
 
   const candidates = cands.map((l) => l.length);
-  const width = Math.max(4, Math.min(512, Math.round(req.beamWidth || 48)));
-  const altCount = Math.max(1, Math.min(10, Math.round(req.alternatives ?? 3)));
+  // 回傳的替代隊伍數量上限 100。Beam 寬度至少要跟結果數一樣，
+  // 否則「顯示 100 組」時最多只會有 beamWidth 組狀態可以選。
+  const altCount = Math.max(1, Math.min(100, Math.round(req.alternatives ?? 3)));
+  const width = Math.max(4, Math.min(512, Math.max(Math.round(req.beamWidth || 48), altCount)));
 
   // 最難配的先處理（候選最少），可以更早剪掉不可能的分支；
   // 有優先順序時，先處理高優先的魔靈，字典序比較才有意義。
@@ -763,12 +765,16 @@ export function optimizeTeam(
 
   onProgress?.({ stage: "refine", member: n - 1, total: n });
   const refined = states.map(refine);
-  refined.sort((a, b) => cmpState(b, a));
+  // 1-opt 會把分數相同的 Beam 狀態收斂到同一隊（例如三隻都能拿到滿分時），
+  // 只留 refined 會讓「可用隊伍」看起來很少。這裡把改良前的 Beam 狀態也當成
+  // 替代隊伍一起排序：分數高的改良版優先，其餘保留不同符文分配的選擇。
+  const pooled = [...refined, ...states];
+  pooled.sort((a, b) => cmpState(b, a));
 
   // 去重（不同 Beam 狀態可能被改良成同一隊）
   const seen = new Set<string>();
   const unique: State[] = [];
-  for (const st of refined) {
+  for (const st of pooled) {
     const key = st.picks
       .map((p) => p?.runeIds.join(",") ?? "")
       .join("|");
