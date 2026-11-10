@@ -1831,6 +1831,36 @@ export default function TeamOptimizerPage() {
 
               <details className="team-advanced">
                 <summary>套裝 / 主屬性</summary>
+                <div className="team-mode" style={{ marginBottom: 8 }}>
+                  <span>套裝模式</span>
+                  <div className="seg" role="radiogroup" aria-label={`第 ${i + 1} 隻套裝模式`}>
+                    <label className={`seg-item ${m.set4 !== 0 ? "on" : ""}`}>
+                      <input
+                        type="radio"
+                        name={`set-mode-${i}`}
+                        checked={m.set4 !== 0}
+                        onChange={() =>
+                          updateMember(i, {
+                            set4: m.set4 || FOUR_SETS[0]?.id || 0,
+                            set2b: 0,
+                            set2c: 0,
+                            ...(m.set2 === (m.set4 || FOUR_SETS[0]?.id) ? { set2: 0 } : {}),
+                          })
+                        }
+                      />
+                      4 + 2
+                    </label>
+                    <label className={`seg-item ${m.set4 === 0 ? "on" : ""}`}>
+                      <input
+                        type="radio"
+                        name={`set-mode-${i}`}
+                        checked={m.set4 === 0}
+                        onChange={() => updateMember(i, { set4: 0 })}
+                      />
+                      3 × 2（三個 2 件套）
+                    </label>
+                  </div>
+                </div>
                 <div className="team-fields">
                   <label>
                     <span>4 件套</span>
@@ -1895,7 +1925,7 @@ export default function TeamOptimizerPage() {
                 </div>
                 {m.set4 === 0 && (
                   <div className="tiny dim" style={{ marginTop: 4 }}>
-                    4 件套選「不指定」時，可用 ①②③ 三個 2 件套組成 3×2（例如意志 ×3）；同一套裝可重複選。
+                    3×2 可以只選 1～3 組，同一套裝也能重複選：例如 ①保護 ②意志 ③意志＝保護 ×2＋意志 ×4；三個都選保護＝保護 ×6。
                   </div>
                 )}
                 <div className="tiny dim" style={{ marginTop: 8 }}>

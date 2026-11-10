@@ -1729,6 +1729,30 @@ check("一鍵配隊：數值上限（速度 / 體力 / 攻擊）", () => {
   assert.equal(new Set(plan.members.flatMap((m) => m.runeIds)).size, 18, "符文不可重複");
 });
 
+check("3×2：三個 2 件套可合成同一套裝 6 件", () => {
+  const willRunes = [];
+  for (let slot = 1; slot <= 6; slot++) {
+    const rune = teamRunes.find((r) => r.slot_no === slot);
+    willRunes.push({ ...rune, rune_id: 800000 + slot, set_id: 15 });
+  }
+  const p = parseAccountJSON(JSON.stringify({ unit_list: [], runes: willRunes, building_list: [] }), "will6.json");
+  assert.equal(p.error, undefined, p.error);
+  const plan = planOf(
+    optimizeTeam(
+      teamReq(1, {
+        runes: p.account.runes,
+        members: [
+          mkTeamMember(900, {
+            sets: [{ set: 15, count: 2 }, { set: 15, count: 2 }, { set: 15, count: 2 }],
+          }),
+        ],
+      }),
+    ),
+  );
+  assert.equal(plan.members[0].sets[15], 6, "應使用 6 件意志（3×2）");
+  assert.equal(plan.members[0].runeIds.length, 6, "應裝備 6 顆符文");
+});
+
 check("固定符文（includeRunes）一定會入選", () => {
   const pinned = teamRuneList.find((r) => r.slot === 2);
   const plan = planOf(
