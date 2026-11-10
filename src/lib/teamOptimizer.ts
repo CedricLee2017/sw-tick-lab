@@ -25,7 +25,7 @@ import {
 import type { BaseStats } from "./stats";
 import type { BonusConfig, FocusEntry, Rune, Stats } from "./types";
 
-export type TeamRole = "speed" | "booster" | "dps" | "tank" | "support";
+export type TeamRole = "speed" | "booster" | "dps" | "tank" | "support" | "free";
 
 export const TEAM_ROLE_LABELS: Record<TeamRole, string> = {
   speed: "速隊長／一速",
@@ -33,9 +33,10 @@ export const TEAM_ROLE_LABELS: Record<TeamRole, string> = {
   dps: "打手",
   tank: "坦克",
   support: "輔助",
+  free: "自由",
 };
 
-/** 預設目標：一速看速度、打手看期望傷害、坦克看 EHP、輔助看綜合 */
+/** 預設目標：一速看速度、打手看期望傷害、坦克看 EHP、輔助看綜合，自由＝符文評分 */
 export function roleObjective(role: TeamRole): OptObjective {
   switch (role) {
     case "speed":
@@ -45,6 +46,8 @@ export function roleObjective(role: TeamRole): OptObjective {
       return "dps";
     case "tank":
       return "tank";
+    case "free":
+      return "score";
     default:
       return "support";
   }

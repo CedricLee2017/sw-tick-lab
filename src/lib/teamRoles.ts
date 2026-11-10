@@ -148,7 +148,7 @@ export function autoAssignRoles(args: {
     .map(({ i }) => i);
   const restSlots = slots
     .map((role, i) => ({ role, i }))
-    .filter(({ i }) => !usedSlots.has(i))
+    .filter(({ role, i }) => role !== "free" && !usedSlots.has(i))
     .map(({ role }) => role);
   restSlots.forEach((role, k) => {
     const unit = restUnits[k];
@@ -156,7 +156,7 @@ export function autoAssignRoles(args: {
   });
 
   // 提條 → 打手（坦克） → 輔助 → 速隊長
-  const rank: Record<TeamRole, number> = { booster: 0, dps: 1, tank: 1, support: 2, speed: 3 };
+  const rank: Record<TeamRole, number> = { booster: 0, dps: 1, tank: 1, support: 2, speed: 3, free: 4 };
   const ordered = units
     .map((u, i) => ({ i, role: roleOf[i] }))
     .filter((x): x is { i: number; role: TeamRole } => x.role != null)
@@ -261,6 +261,16 @@ export const ROLE_SETUPS: Record<TeamRole, RoleSetup> = {
       { key: "acc", weight: 8 },
       { key: "res", weight: 6 },
     ],
+  },
+  free: {
+    title: "自由",
+    weight: 1,
+    set4: 0,
+    set2: 0,
+    mains: {},
+    min: {},
+    tick: 0,
+    focus: [],
   },
 };
 

@@ -14,7 +14,7 @@ const STORAGE_KEY = "swtick:role-presets";
 const MAX_PRESETS = 40;
 const MAX_NAME = 20;
 
-const TEAM_ROLES: TeamRole[] = ["speed", "booster", "dps", "tank", "support"];
+const TEAM_ROLES: TeamRole[] = ["speed", "booster", "dps", "tank", "support", "free"];
 
 /** 與一鍵配隊頁的「目標」選項一致；分開定義避免 lib 反向依賴頁面。 */
 export const PRESET_OBJECTIVES = ["role", "skill", "spd", "atk", "def", "hp", "dps", "tank", "support", "score"] as const;

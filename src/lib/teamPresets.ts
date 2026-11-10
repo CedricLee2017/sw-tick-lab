@@ -17,7 +17,7 @@ const MAX_TEMPLATES = 30;
 const MAX_NAME = 24;
 const MAX_DESC = 80;
 
-const TEAM_ROLES: TeamRole[] = ["speed", "booster", "dps", "tank", "support"];
+const TEAM_ROLES: TeamRole[] = ["speed", "booster", "dps", "tank", "support", "free"];
 const CONTENTS: DeckContext[] = ["arena", "guild", "dungeon"];
 const OBJECTIVES = ["role", "skill", "spd", "atk", "def", "hp", "dps", "tank", "support", "score"] as const;
 const STAT_KEYS: StatKey[] = ["hp", "atk", "def", "spd", "cr", "cd", "res", "acc"];

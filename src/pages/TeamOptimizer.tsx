@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Gauge, Layers, Loader2, Lock, Pin, Plus, Save, Search,
+  AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Gauge, Layers, Loader2, Lock, Pin, Plus, RotateCcw, Save, Search,
   Shirt, Trash2, Users, Wand2, Zap,
 } from "lucide-react";
 import { monsterLabel, unitLabel, useLibrary, useStore, type DeckFav, type DeckFavUnit } from "../store";
@@ -222,6 +222,39 @@ function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
 
 function initialMembers(): MemberDraft[] {
   return templateMembers(teamTemplateOf("guild-speed"), 3).map((t) => draftFromTemplate(t));
+}
+
+/** 單隻「重置」後的空白設定：保留魔靈，其餘全部回到預設（定位＝自由） */
+function blankMember(unitId = 0): MemberDraft {
+  return {
+    unitId,
+    role: "free",
+    presetId: undefined,
+    title: TEAM_ROLE_LABELS.free,
+    weight: 1,
+    priority: 0,
+    objectiveMode: "role",
+    skillId: 0,
+    skillSlot: 0,
+    set4: 0,
+    set2: 0,
+    set2b: 0,
+    set2c: 0,
+    mains: {},
+    min: {},
+    max: {},
+    tick: 0,
+    speedMode: "panel",
+    panelExtra: 0,
+    panelExtraMax: 0,
+    order: 1,
+    boostPct: 0,
+    speedBuff: false,
+    artifactPct: 0,
+    leadPct: null,
+    focus: [],
+    includeRunes: [],
+  };
 }
 
 const STORAGE_KEY = "swtick:team-opt:v1";
@@ -864,7 +897,16 @@ export default function TeamOptimizerPage() {
     resetSequence();
   };
 
-  /** 套用自訂定位：一次填入套裝、主屬性、下限、Tick、焦點與目標 */
+  /** 重置單一成員：保留目前選的魔靈，其餘設定全部清空並改成「自由」 */
+  const resetMember = (i: number) => {
+    const m = members[i];
+    if (!m) return;
+    const v = viewOf(m.unitId);
+    setMembers((prev) => prev.map((x, j) => (j === i ? blankMember(x.unitId) : x)));
+    setPlan(null);
+    resetSequence();
+    notify(`已重置 ${v ? unitLabel(v.unit) : "這隻魔靈"} 的所有設定（定位：自由）`);
+  };
   const applyRolePreset = (i: number, preset: RolePreset) => {
     updateMember(i, {
       presetId: preset.id,
@@ -1938,6 +1980,14 @@ export default function TeamOptimizerPage() {
                 <div className="row" style={{ gap: 6 }}>
                   <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPickerIndex(i)}>
                     <Search size={12} /> {v ? "更換" : "選擇"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost team-collapse-toggle"
+                    onClick={() => resetMember(i)}
+                    title="重置這隻的所有設定（套裝、主屬性、上下限、Focus、定位改為自由）"
+                  >
+                    <RotateCcw size={12} /> 重置
                   </button>
                   <button
                     type="button"

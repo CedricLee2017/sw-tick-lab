@@ -1926,6 +1926,8 @@ check("隊長技只影響速度目標（leadSpd 逐隻帶入）", () => {
   assert.equal(roleObjective("dps"), "dps");
   assert.equal(roleObjective("tank"), "tank");
   assert.equal(roleObjective("support"), "support");
+  assert.equal(roleObjective("free"), "score", "自由定位不假設角色目標，改用符文評分");
+  assert.equal(TEAM_ROLE_LABELS.free, "自由");
 });
 
 check("優先順序：第 1 優先的魔靈拿到個人最佳（字典序）", () => {
@@ -2029,6 +2031,11 @@ check("一鍵配隊：依技能自動判定角色與出手順序", () => {
 
   // 三坦／自訂隊型維持原設定，不自動改角色
   assert.equal(autoAssignRoles({ units, slots: ["tank", "tank", "tank"], context: "guild", skillData: SKILLS }), null);
+
+  // 「自由」不屬於任何定位，自動安排時不會被塞角色
+  const freeOut = autoAssignRoles({ units, slots: ["speed", "booster", "free"], context: "guild", skillData: SKILLS });
+  assert.ok(freeOut);
+  assert.ok(freeOut.assignments.every((a) => a.role !== "free"), "自由不會被自動指派");
 });
 
 check("一鍵配隊：角色預設配裝", () => {
@@ -2046,6 +2053,8 @@ check("一鍵配隊：角色預設配裝", () => {
       `${role}＝迅速＋刀刃、速傷攻、暴率 100%`,
     );
   }
+  const free = roleSetup("free");
+  assert.deepEqual([free.set4, free.set2, free.min, free.focus.length], [0, 0, {}, 0], "自由＝不套用任何預設配裝");
 });
 
 check("面板速度下限換算：圖騰 / 隊長 / 強化會另外計入戰鬥速度", () => {
