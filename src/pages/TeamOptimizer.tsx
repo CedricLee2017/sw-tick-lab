@@ -1077,6 +1077,7 @@ export default function TeamOptimizerPage() {
         role: m.role,
         weight: m.weight,
         priority: m.priority,
+        order: m.order,
         sets,
         mains: m.mains,
         min,
@@ -1107,6 +1108,7 @@ export default function TeamOptimizerPage() {
       maxNodesPerSearch: budget.nodes,
       diversify: true,
       alternatives: 4,
+      teamSize: size,
     };
   };
 
@@ -1287,10 +1289,12 @@ export default function TeamOptimizerPage() {
 
   const totalWeight = members.reduce((s, m) => s + Math.max(1, m.weight), 0);
 
-  /** 每一隊自己的速度順序（結果頁顯示用） */
+  /** 每一隊自己的速度順序（結果頁顯示用；同速時依攻擊順序） */
   const planSpeedOrders: TeamPlan["members"][] = activePlan
     ? Array.from({ length: teams }, (_, t) =>
-        [...activePlan.members.slice(t * size, (t + 1) * size)].sort((a, b) => b.stats.spd - a.stats.spd),
+        [...activePlan.members.slice(t * size, (t + 1) * size)].sort(
+          (a, b) => b.stats.spd - a.stats.spd || a.order - b.order,
+        ),
       )
     : [];
 
@@ -2171,7 +2175,10 @@ export default function TeamOptimizerPage() {
           )}
 
           {Array.from({ length: teams }, (_, t) => {
-            const teamBuilds = activePlan.members.slice(t * size, (t + 1) * size);
+            // 結果卡片依攻擊順序排列（配出來的速度也會依這個順序遞減）
+            const teamBuilds = [...activePlan.members.slice(t * size, (t + 1) * size)].sort(
+              (a, b) => a.order - b.order,
+            );
             return (
               <div key={t}>
                 {teams > 1 && (
@@ -2214,6 +2221,7 @@ export default function TeamOptimizerPage() {
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 700, fontSize: 13 }}>{nameOf(m.unitId, m.master)}</div>
                         <div className="tiny dim">
+                          <span className="chip muted" style={{ marginRight: 4 }}>順序 {m.order}</span>
                           {m.priority > 0 && <span className="chip gold" style={{ marginRight: 4 }}>優先 {m.priority}</span>}
                           {TEAM_ROLE_LABELS[m.role]} · 個人最佳 {Math.round(m.norm * 100)}%
                           {m.objective === "skill" && m.skillName ? ` · ${m.skillName}` : ""}

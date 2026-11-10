@@ -1648,6 +1648,52 @@ check("同一輸入可重現相同結果", () => {
   );
 });
 
+check("攻擊順序：配出來的速度依 order 嚴格遞減", () => {
+  const plan = planOf(
+    optimizeTeam(
+      teamReq(3, {
+        members: [
+          mkTeamMember(900, { order: 3 }),
+          mkTeamMember(901, { order: 1 }),
+          mkTeamMember(902, { order: 2 }),
+        ],
+      }),
+    ),
+  );
+  const byOrder = [...plan.members].sort((a, b) => a.order - b.order);
+  assert.deepEqual(byOrder.map((m) => m.order), [1, 2, 3]);
+  for (let i = 1; i < byOrder.length; i++) {
+    assert.ok(
+      byOrder[i - 1].stats.spd > byOrder[i].stats.spd,
+      `順序 ${byOrder[i - 1].order} 的速度 ${byOrder[i - 1].stats.spd} 應大於順序 ${byOrder[i].order} 的 ${byOrder[i].stats.spd}`,
+    );
+  }
+});
+
+check("攻擊順序：5 人也能依 order 嚴格遞減", () => {
+  const plan = planOf(
+    optimizeTeam(
+      teamReq(5, {
+        members: [
+          mkTeamMember(900, { order: 5 }),
+          mkTeamMember(901, { order: 4 }),
+          mkTeamMember(902, { order: 3 }),
+          mkTeamMember(903, { order: 2 }),
+          mkTeamMember(904, { order: 1 }),
+        ],
+      }),
+    ),
+  );
+  const byOrder = [...plan.members].sort((a, b) => a.order - b.order);
+  for (let i = 1; i < byOrder.length; i++) {
+    assert.ok(
+      byOrder[i - 1].stats.spd > byOrder[i].stats.spd,
+      `順序 ${byOrder[i - 1].order} 的速度 ${byOrder[i - 1].stats.spd} 應大於順序 ${byOrder[i].order} 的 ${byOrder[i].stats.spd}`,
+    );
+  }
+  assert.equal(new Set(plan.members.flatMap((m) => m.runeIds)).size, 30, "5 人符文不可重複");
+});
+
 check("固定符文（includeRunes）一定會入選", () => {
   const pinned = teamRuneList.find((r) => r.slot === 2);
   const plan = planOf(

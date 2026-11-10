@@ -84,6 +84,11 @@ export interface TeamMemberSpec {
    * 0 / 未設定 = 不指定（排在已指定之後，依權重決定）。
    */
   priority?: number;
+  /**
+   * 攻擊順序（1 = 最先出手）。同一隊內會要求速度依順序嚴格遞減，
+   * 讓配出來的結果真的照指定的順序出手；不同隊之間互不影響。
+   */
+  order?: number;
 }
 
 export interface TeamRequest {
@@ -108,6 +113,11 @@ export interface TeamRequest {
   diversify?: boolean;
   /** 回傳幾組替代隊伍（預設 3） */
   alternatives?: number;
+  /**
+   * 每隊幾隻（用來判斷攻擊順序要在哪些成員之間比較）。
+   * 省略時視為全部成員同一隊。
+   */
+  teamSize?: number;
 }
 
 export interface TeamBuild {
@@ -133,6 +143,8 @@ export interface TeamBuild {
   objective: OptObjective;
   /** 優先順序（1 = 最優先；0 = 未指定） */
   priority: number;
+  /** 攻擊順序（1 = 最先出手） */
+  order: number;
   /** 技能傷害目標時顯示用 */
   skillName?: string;
 }
@@ -230,6 +242,10 @@ interface SearchOverride {
   mains?: Partial<Record<number, number>>;
   /** 覆寫「允許破套」 */
   relaxSub?: boolean;
+  /** 額外的戰鬥速度下限（攻擊順序用） */
+  minSpd?: number;
+  /** 額外的戰鬥速度上限（攻擊順序用） */
+  maxSpd?: number;
 }
 
 function searchOnce(
@@ -243,12 +259,17 @@ function searchOnce(
     ? "skill"
     : (spec.objective ?? roleObjective(spec.role));
   const sets = over.sets ?? spec.sets;
+  // 攻擊順序的速度限制：下限沿用使用者設定，上限只在需要壓速度時加上
+  const min = { ...spec.min };
+  if (over.minSpd != null) min.spd = Math.max(min.spd ?? 0, over.minSpd);
+  const max: Partial<Record<StatKey, number>> = {};
+  if (over.maxSpd != null) max.spd = over.maxSpd;
   const optReq: OptRequest = {
     base: spec.base,
     runes: req.runes,
     required: sets.filter((s) => s.set > 0 && s.count > 0),
-    min: spec.min,
-    max: {},
+    min,
+    max,
     // 隊伍模式固定不含公會技能；速度隊長技由 spec.leadSpd 逐隻帶入
     bonus: { ...req.bonus, leadSpd: spec.leadSpd, useGuild: false, grind: true },
     pool: req.pool,
@@ -374,6 +395,47 @@ export function optimizeTeam(
     return a.total - b.total || a.eff - b.eff || a.spd - b.spd;
   };
 
+  // ── 攻擊順序 ──
+  // 同一隊內 order 1 要最快、order 2 次之（嚴格遞減），避免配出來的速度
+  // 和設定的出手順序相反；不同隊之間互不影響。全部 order 相同時不啟用。
+  const teamSize = Math.max(1, Math.min(n, Math.round(req.teamSize ?? n)));
+  const teamOf = (i: number) => Math.floor(i / teamSize);
+  const orderOf = (i: number) => {
+    const o = Math.round(members[i].order ?? 1);
+    return o > 0 ? o : 1;
+  };
+  const orderMode = (() => {
+    const seen = new Map<number, Set<number>>();
+    for (let i = 0; i < n; i++) {
+      const t = teamOf(i);
+      const s = seen.get(t) ?? new Set<number>();
+      s.add(orderOf(i));
+      seen.set(t, s);
+    }
+    return [...seen.values()].some((s) => s.size > 1);
+  })();
+
+  /** 這組配裝放進 picks[mi] 後，是否仍符合攻擊順序 */
+  const fitsOrder = (picks: (Candidate | null)[], mi: number, c: Candidate): boolean => {
+    if (!orderMode) return true;
+    const t = teamOf(mi);
+    const oi = orderOf(mi);
+    for (let j = 0; j < n; j++) {
+      if (j === mi || teamOf(j) !== t) continue;
+      const p = picks[j];
+      if (!p) continue;
+      const oj = orderOf(j);
+      if (oj === oi) continue;
+      // 前面的魔靈一定要比後面快，配出來的速度順序才會和設定一致
+      if (oi < oj) {
+        if (c.stats.spd <= p.stats.spd) return false;
+      } else if (p.stats.spd <= c.stats.spd) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   // ── Stage A：每隻魔靈的候選配裝 ──
   const firstLists: TopBuild[][] = [];
   /** 每隻魔靈最後停在放寬階梯的第幾階（第二輪、補位都要沿用） */
@@ -382,6 +444,8 @@ export function optimizeTeam(
   const notes: string[] = [];
   let nodes = 0;
   let truncated = false;
+  /** 這一輪有幾組候選因為攻擊順序被排除（用來判斷失敗原因） */
+  let orderRejected = 0;
 
   // 找不到符合條件的配裝時，依序放寬「主屬性 → 破套 → 套裝」，
   // 至少讓整隊能配出來，並在結果頁說明放寬了什麼。
@@ -393,18 +457,44 @@ export function optimizeTeam(
   ];
 
   /** 從指定階梯開始往下試，直到找到候選為止 */
-  const runLadder = (i: number, exclude: number[], k: number, startAt = 0) => {
+  const runLadder = (i: number, exclude: number[], k: number, startAt = 0, extra: SearchOverride = {}) => {
     let idx = Math.max(0, Math.min(ladder.length - 1, startAt));
-    let r = searchOnce(req, members[i], exclude, k, ladder[idx].over);
+    let r = searchOnce(req, members[i], exclude, k, { ...ladder[idx].over, ...extra });
     nodes += r.nodes;
     truncated = truncated || r.truncated;
     while (r.builds.length === 0 && idx + 1 < ladder.length) {
       idx++;
-      r = searchOnce(req, members[i], exclude, k, ladder[idx].over);
+      r = searchOnce(req, members[i], exclude, k, { ...ladder[idx].over, ...extra });
       nodes += r.nodes;
       truncated = truncated || r.truncated;
     }
     return { r, idx };
+  };
+
+  /** 依已選好的隊友，算出這隻在攻擊順序下的允許速度範圍 */
+  const orderBounds = (mi: number, st: State): SearchOverride => {
+    if (!orderMode) return {};
+    const t = teamOf(mi);
+    const oi = orderOf(mi);
+    let minSpd: number | undefined;
+    let maxSpd: number | undefined;
+    for (let j = 0; j < n; j++) {
+      if (j === mi || teamOf(j) !== t) continue;
+      const p = st.picks[j];
+      if (!p) continue;
+      const oj = orderOf(j);
+      if (oj === oi) continue;
+      if (oi < oj) {
+        // mi 比較快：速度下限是 j 的速度 + 1
+        const v = p.stats.spd + 1;
+        minSpd = minSpd == null ? v : Math.max(minSpd, v);
+      } else {
+        // mi 比較慢：速度上限是 j 的速度 - 1
+        const v = p.stats.spd - 1;
+        maxSpd = maxSpd == null ? v : Math.min(maxSpd, v);
+      }
+    }
+    return { minSpd, maxSpd };
   };
 
   for (let i = 0; i < n; i++) {
@@ -445,6 +535,31 @@ export function optimizeTeam(
     }
   }
 
+  // 攻擊順序：後面的魔靈可能需要比前面慢，但每隻的最佳配裝通常都集中在
+  // 最高速度，排序約束會找不到可行組合。這裡額外產生幾個「速度上限」的
+  // 候選（每差 8 速一階），讓 Beam 有不同速度層可以挑。
+  if (orderMode) {
+    const step = 8;
+    const bands = Math.min(6, Math.max(1, teamSize));
+    for (let i = 0; i < n; i++) {
+      if (orderOf(i) <= 1) continue;
+      if (finalLists[i].length === 0) continue;
+      const maxSpd = Math.max(...finalLists[i].map((b) => b.stats.spd));
+      for (let b = 1; b <= bands; b++) {
+        const cap = maxSpd - step * b;
+        if (cap <= 0) break;
+        onProgress?.({ stage: "candidates", member: i, total: n });
+        const r = searchOnce(req, members[i], [], Math.max(4, Math.round(topK / 4)), {
+          ...ladder[overrideIdx[i]].over,
+          maxSpd: cap,
+        });
+        nodes += r.nodes;
+        truncated = truncated || r.truncated;
+        if (r.builds.length) finalLists[i] = dedupeBuilds([...finalLists[i], ...r.builds]);
+      }
+    }
+  }
+
   const cands: Candidate[][] = finalLists.map((list, i) =>
     list.map((b) =>
       toCandidate(
@@ -473,9 +588,15 @@ export function optimizeTeam(
 
   // 最難配的先處理（候選最少），可以更早剪掉不可能的分支；
   // 有優先順序時，先處理高優先的魔靈，字典序比較才有意義。
+  // 有攻擊順序時，先處理前面的魔靈，讓它先拿到最快的符文，
+  // 後面的魔靈再用較慢的速度層補齊（否則高分狀態會把慢速組合剪掉）。
   const order = members
     .map((_, i) => i)
     .sort((a, b) => {
+      if (orderMode) {
+        const d = orderOf(a) - orderOf(b);
+        if (d !== 0) return d;
+      }
       if (priorityMode && rankOf[a] !== rankOf[b]) return rankOf[a] - rankOf[b];
       return cands[a].length - cands[b].length || members[b].weight - members[a].weight;
     });
@@ -504,6 +625,11 @@ export function optimizeTeam(
           }
         }
         if (conflict) continue;
+        // 攻擊順序：同一隊內前面的魔靈一定要比後面的快
+        if (!fitsOrder(st.picks, mi, c)) {
+          orderRejected++;
+          continue;
+        }
         const used = new Set(st.used);
         for (const id of c.runeIds) used.add(id);
         const picks = st.picks.slice();
@@ -527,17 +653,25 @@ export function optimizeTeam(
 
   for (const mi of order) {
     onProgress?.({ stage: "search", member: mi, total: n });
+    orderRejected = 0;
     let next = extend(mi, states, cands[mi]);
 
     // 候選全是同一批熱門符文時（例如 3 隻同型坦克），Beam 可能全部衝突。
     // 這時以目前最佳狀態為底，重新搜尋「完全避開已用符文」的配裝補位；
     // 只是後備方案，一般情況仍以 Beam 的聯合挑選為準。
+    // 若是攻擊順序卡住（後面的魔靈比前面快），也順便帶入速度上限重新搜尋。
     for (let attempt = 0; next.length === 0 && attempt < 4; attempt++) {
       const key = (c: Candidate) => c.runeIds.join(",");
       const have = new Set(cands[mi].map(key));
       let added = false;
       for (const baseState of states.slice(0, 12)) {
-        const { r } = runLadder(mi, [...baseState.used], Math.max(8, topK), overrideIdx[mi]);
+        const { r } = runLadder(
+          mi,
+          [...baseState.used],
+          Math.max(8, topK),
+          overrideIdx[mi],
+          orderBounds(mi, baseState),
+        );
         const fresh = r.builds
           .map((b) => toCandidate(b, mi, members[mi], runeById, requiredOf(mi), req.intangible))
           .filter((c) => !c.runeIds.some((id) => baseState.used.has(id)) && !have.has(key(c)));
@@ -556,6 +690,14 @@ export function optimizeTeam(
     }
 
     if (next.length === 0) {
+      const who = members[mi].label ?? `第 ${mi + 1} 隻`;
+      if (orderMode && orderRejected > 0) {
+        return {
+          ok: false,
+          error: `攻擊順序衝突：「${who}」找不到符合速度順序的配裝。前面的魔靈必須比後面快，請調整攻擊順序、放寬速度 / Tick 下限，或減少互相搶速度的符文限制。`,
+          unitId: members[mi].unitId,
+        };
+      }
       return {
         ok: false,
         error: `符文衝突：第 ${mi + 1} 隻（${members[mi].label ?? "魔靈"}）找不到不重複的可用符文。請放寬套裝 / Tick 條件、增加候選數，或先排除部分符文。`,
@@ -584,6 +726,8 @@ export function optimizeTeam(
         for (const c of cands[i]) {
           if (c === current) continue;
           if (c.runeIds.some((id) => usedOthers.has(id))) continue;
+          // 改良時也要維持攻擊順序
+          if (!fitsOrder(best.picks, i, c)) continue;
           const keys = best.keys.slice();
           keys[rankOf[i]] = c.norm;
           const trial: State = {
@@ -681,6 +825,7 @@ function toPlan(state: State, members: TeamMemberSpec[]): TeamPlan {
       focusFit: c.fit,
       objective: members[i].skillObjective ? "skill" : (members[i].objective ?? roleObjective(members[i].role)),
       priority: members[i].priority ?? 0,
+      order: members[i].order ?? 1,
       skillName: members[i].skillObjective?.skill.n,
     });
   }
