@@ -1676,6 +1676,42 @@ check("可回傳多組替代隊伍，且每組符文都不重複", () => {
   }
 });
 
+check("逐隻配＋排除：每隻選好後排除符文，整隊不重複", () => {
+  const chosen = [];
+  const excluded = new Set();
+  for (let i = 0; i < 3; i++) {
+    const spec = mkTeamMember(900 + i);
+    const res = optimize({
+      base: spec.base,
+      runes: teamRuneList,
+      required: spec.sets,
+      min: {},
+      max: {},
+      bonus: { ...teamBonus, leadSpd: 0, useGuild: false, grind: true },
+      pool: 7,
+      allowEquipped: true,
+      targetUnit: spec.unitId,
+      rta: false,
+      maxNodes: 400_000,
+      mainFilters: {},
+      relaxSub: false,
+      intangible: false,
+      focus: [],
+      excludeRunes: [...excluded],
+      includeRunes: [],
+      lockedRunes: [],
+      topK: 20,
+      objective: "dps",
+    });
+    assert.ok((res.topBuilds?.length ?? 0) > 0, `第 ${i + 1} 隻應有候選配裝`);
+    const best = res.topBuilds[0];
+    chosen.push(best);
+    for (const id of best.runeIds) excluded.add(id);
+  }
+  assert.equal(new Set(chosen.flatMap((b) => b.runeIds)).size, 18, "逐隻選完 3 隻共 18 顆且不重複");
+  for (const b of chosen) assert.equal(new Set(b.runeIds).size, 6, "每隻 6 顆符文");
+});
+
 check("攻擊順序：配出來的速度依 order 嚴格遞減", () => {
   const plan = planOf(
     optimizeTeam(

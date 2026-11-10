@@ -19,9 +19,10 @@ import { loadSkillData, skillsForMonster, type DamageOptions, type Skill, type S
 import { autoAssignRoles, roleSetup, type RoleUnit } from "../lib/teamRoles";
 import { battleSpeedForPanelExtra, computeFollowPlan, leadBonus, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
 import {
-  TEAM_ROLE_LABELS, roleObjective, runeSupply,
-  type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
+  TEAM_ROLE_LABELS, roleObjective, runeSupply, teamSetsOf,
+  type TeamBuild, type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
 } from "../lib/teamOptimizer";
+import { normalizeFocus, type OptRequest, type TopBuild } from "../lib/optimizer";
 import { TEAM_TEMPLATES, teamTemplateOf, templateMembers, type TeamMemberTemplate, type TeamTemplate } from "../lib/teamTemplates";
 import { useTeamPresets } from "../lib/teamPresets";
 import { useRolePresets, type RolePreset } from "../lib/rolePresets";
@@ -233,6 +234,16 @@ const RESULT_COUNTS = [5, 10, 20, 50, 100] as const;
 
 /** 一次配幾隊（每隊 3～5 人，合計最多 15 隻） */
 type TeamCount = 1 | 2 | 3;
+/** 配隊方式：整隊聯合挑選，或逐隻配＋排除（SWOP 流程） */
+type OptimizeMode = "team" | "sequential";
+
+/** 逐隻模式找不到結果時的放寬順序（與整隊引擎相同） */
+const SEQ_LADDER: { mains: boolean; relaxSub: boolean; noSets: boolean; note: string | null }[] = [
+  { mains: false, relaxSub: false, noSets: false, note: null },
+  { mains: true, relaxSub: false, noSets: false, note: "找不到原本的條件，已改為不限主屬性。" },
+  { mains: true, relaxSub: true, noSets: false, note: "找不到原本的條件，已改為不限主屬性、允許破套。" },
+  { mains: true, relaxSub: true, noSets: true, note: "找不到原本的條件，已改為不限套裝與主屬性。" },
+];
 
 /** 頁面關掉 / 換頁再回來（或重新整理）時要保留的設定與結果 */
 interface SavedState {
@@ -246,6 +257,8 @@ interface SavedState {
   budgetKey: BudgetKey;
   /** 要顯示幾組隊伍（含主結果） */
   resultCount: number;
+  /** team = 整隊聯合配；sequential = 逐隻配＋排除 */
+  optMode: OptimizeMode;
   oppSpd: number;
   plan: TeamPlan | null;
   altIndex: number;
@@ -268,6 +281,7 @@ function loadSaved(): SavedState | null {
     const resultCount = RESULT_COUNTS.includes(v.resultCount as (typeof RESULT_COUNTS)[number])
       ? (v.resultCount as number)
       : 20;
+    const optMode: OptimizeMode = v.optMode === "sequential" ? "sequential" : "team";
     const total = teams * size;
     const slots = templateMembers(teamTemplateOf(templateId), size);
     const fallback = Array.from({ length: total }, (_, i) => draftFromTemplate(slots[i % size]));
@@ -292,6 +306,7 @@ function loadSaved(): SavedState | null {
       leadPcts,
       budgetKey,
       resultCount,
+      optMode,
       oppSpd: typeof v.oppSpd === "number" ? v.oppSpd : 0,
       plan,
       altIndex,
@@ -327,6 +342,34 @@ export default function TeamOptimizerPage() {
   const [leadPcts, setLeadPcts] = useState<number[]>(saved?.leadPcts ?? [0, 0, 0]);
   const [budgetKey, setBudgetKey] = useState<BudgetKey>(saved?.budgetKey ?? "standard");
   const [resultCount, setResultCount] = useState<number>(saved?.resultCount ?? 20);
+  const [optMode, setOptMode] = useState<OptimizeMode>(saved?.optMode ?? "team");
+
+  /** 逐隻配＋排除：目前已選的配裝（null = 尚未選） */
+  const [seqPicks, setSeqPicks] = useState<(TopBuild | null)[]>(() => {
+    const total = (saved?.members ?? initialMembers()).length;
+    if (saved?.optMode === "sequential" && saved.plan?.members.length === total) {
+      return saved.plan.members.map((m) => ({
+        runeIds: m.runeIds,
+        stats: m.stats,
+        ehp: m.ehp,
+        objective: m.score,
+        score: m.score,
+        eff: m.eff,
+        focusFit: m.focusFit,
+      }));
+    }
+    return Array.from({ length: total }, () => null);
+  });
+  /** 正在配第幾隻（0-based）；等於成員數 = 已完成 */
+  const [seqIndex, setSeqIndex] = useState(() => {
+    const total = (saved?.members ?? initialMembers()).length;
+    return saved?.optMode === "sequential" && saved.plan?.members.length === total ? total : 0;
+  });
+  const [seqCandidates, setSeqCandidates] = useState<TopBuild[]>([]);
+  const [seqRunning, setSeqRunning] = useState(false);
+  const [seqError, setSeqError] = useState<string | null>(null);
+  const [seqNote, setSeqNote] = useState<string | null>(null);
+  const [seqPage, setSeqPage] = useState(0);
 
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<TeamProgress | null>(null);
@@ -362,6 +405,20 @@ export default function TeamOptimizerPage() {
       else next.add(unitId);
       return next;
     });
+
+  /** 清空逐隻配＋排除的進度（改設定、換隊型或重新開始時） */
+  const resetSequence = (length = members.length) => {
+    seqWorkerRef.current?.terminate();
+    seqWorkerRef.current = null;
+    seqRunIdRef.current++;
+    setSeqPicks(Array.from({ length }, () => null));
+    setSeqIndex(0);
+    setSeqCandidates([]);
+    setSeqRunning(false);
+    setSeqError(null);
+    setSeqNote(null);
+    setSeqPage(0);
+  };
 
   /** 玩家自訂的預設定位 */
   const presets = useRolePresets((s) => s.presets);
@@ -412,6 +469,9 @@ export default function TeamOptimizerPage() {
 
   const workerRef = useRef<Worker | null>(null);
   const runIdRef = useRef(0);
+  /** 逐隻模式的單隻配符 Worker（optimizer.worker） */
+  const seqWorkerRef = useRef<Worker | null>(null);
+  const seqRunIdRef = useRef(0);
   /** 技能資料（判斷提條技能用）；載入後快取，之後切換隊型不必再等 */
   const skillRef = useRef<SkillData | null>(null);
   /** 技能下拉選單用（與 skillRef 同步） */
@@ -428,6 +488,7 @@ export default function TeamOptimizerPage() {
       importedAtRef.current = account.importedAt;
       setPlan(null);
       setError(null);
+      resetSequence();
     }
     setMembers((prev) => {
       if (!summary) return prev;
@@ -439,7 +500,7 @@ export default function TeamOptimizerPage() {
   // 設定與結果存到瀏覽器：跳去其他頁面再回來、或重新整理都不會不見
   useEffect(() => {
     const data: SavedState = {
-      templateId, size, teams, content, members, leadPcts, budgetKey, resultCount, oppSpd, plan, altIndex,
+      templateId, size, teams, content, members, leadPcts, budgetKey, resultCount, optMode, oppSpd, plan, altIndex,
       importedAt: account?.importedAt ?? null,
     };
     try {
@@ -447,7 +508,7 @@ export default function TeamOptimizerPage() {
     } catch {
       /* 忽略儲存失敗（例如容量不足） */
     }
-  }, [templateId, size, teams, content, members, leadPcts, budgetKey, resultCount, oppSpd, plan, altIndex, account?.importedAt]);
+  }, [templateId, size, teams, content, members, leadPcts, budgetKey, resultCount, optMode, oppSpd, plan, altIndex, account?.importedAt]);
 
   // 隊長技全部由數值欄位決定，不再依魔靈自動判斷
 
@@ -463,6 +524,8 @@ export default function TeamOptimizerPage() {
   useEffect(() => () => {
     workerRef.current?.terminate();
     workerRef.current = null;
+    seqWorkerRef.current?.terminate();
+    seqWorkerRef.current = null;
   }, []);
 
   const viewOf = (unitId: number): UnitView | undefined =>
@@ -607,6 +670,7 @@ export default function TeamOptimizerPage() {
     setMembers(nextMembers);
     setPlan(null);
     setError(null);
+    resetSequence(teams * s);
     notify(
       teams > 1
         ? `已套用隊型到 ${teams} 隊（共 ${teams * s} 隻）${nextLead.some((p) => p > 0) ? `，速度隊長技 ${nextLead.slice(0, teams).map((p) => `${p}%`).join(" / ")}` : ""}`
@@ -634,6 +698,7 @@ export default function TeamOptimizerPage() {
     setSize(nextSize);
     setPlan(null);
     setError(null);
+    resetSequence(nextTeams * nextSize);
   };
 
   /** 只重新安排某一隊的定位（依技能） */
@@ -649,6 +714,7 @@ export default function TeamOptimizerPage() {
     setMembers((prev) => prev.map((m, i) => (i >= start && i < start + size ? auto.members[i - start] : m)));
     setLeadPcts((prev) => prev.map((p, k) => (k === team ? auto.leadPct : p)));
     setPlan(null);
+    resetSequence();
     notify(`已依技能安排第 ${team + 1} 隊的定位：${roleSummary(auto.members)}`);
   };
 
@@ -730,6 +796,7 @@ export default function TeamOptimizerPage() {
     setMembers(finalMembers);
     setPlan(null);
     setError(null);
+    resetSequence(finalMembers.length);
     setDeckOpen(false);
     const roleText = auto
       ? `；自動角色：${roleSummary(finalMembers)}${leadPct > 0 ? `（速度隊長技 +${leadPct}%）` : ""}`
@@ -768,6 +835,7 @@ export default function TeamOptimizerPage() {
     });
     setMembers(next);
     setPlan(null);
+    resetSequence();
     notify(
       count > 0 ? `已套用 ${count} 隻的接速下限` : "目前沒有可套用的接速下限",
       count > 0 ? "ok" : "err",
@@ -793,6 +861,7 @@ export default function TeamOptimizerPage() {
       }),
     );
     setPlan(null);
+    resetSequence();
   };
 
   /** 套用自訂定位：一次填入套裝、主屬性、下限、Tick、焦點與目標 */
@@ -913,6 +982,7 @@ export default function TeamOptimizerPage() {
       }),
     );
     setPlan(null);
+    resetSequence();
     notify(
       src.boostPct > 0 || src.speedBuff
         ? `已把提條 ${src.boostPct}%${src.speedBuff ? " 與速度強化" : ""} 帶入後面 ${count} 隻（來源自身不套用）`
@@ -933,6 +1003,7 @@ export default function TeamOptimizerPage() {
       }),
     );
     setPlan(null);
+    resetSequence();
   };
 
   const patchMax = (i: number, key: StatKey, value: number) => {
@@ -948,6 +1019,7 @@ export default function TeamOptimizerPage() {
       }),
     );
     setPlan(null);
+    resetSequence();
   };
 
   /** 每隻所屬的隊伍（0-based；成員依隊伍順序排列） */
@@ -1070,91 +1142,99 @@ export default function TeamOptimizerPage() {
     return sortMonsterEntries(summary.views.map((v): OwnedUnit => ({ ...v, _dup: (dup.get(v.monster.id) ?? 0) > 1 })));
   }, [summary]);
 
+  /** 把單一成員草案轉成引擎需求 */
+  const specAt = (i: number): TeamMemberSpec | null => {
+    const m = members[i];
+    if (!m) return null;
+    const v = viewOf(m.unitId);
+    if (!v) return null;
+    const sets: { set: number; count: number }[] = [];
+    if (m.set4) {
+      sets.push({ set: m.set4, count: 4 });
+      if (m.set2 && m.set2 !== m.set4) sets.push({ set: m.set2, count: 2 });
+    } else {
+      // 4 件套不指定時，可用三個 2 件套組成 3×2；重複的套裝由引擎合併件數
+      if (m.set2) sets.push({ set: m.set2, count: 2 });
+      if (m.set2b) sets.push({ set: m.set2b, count: 2 });
+      if (m.set2c) sets.push({ set: m.set2c, count: 2 });
+    }
+
+    const min: Partial<Record<StatKey, number>> = { ...m.min };
+    // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度與隊長技以外的額外速度」。
+    // 引擎的 min.spd 比對的是戰鬥速度（含圖騰 / 隊長 / 速度強化），
+    // 因此先把面板額外速度換算成戰鬥速度，否則圖騰 / Buff 會把不足的速度補掉。
+    const battleSpdMin =
+      m.speedMode !== "tick" && m.panelExtra > 0
+        ? battleSpeedForPanelExtra(
+            v.base.spd,
+            m.panelExtra,
+            bonus.towerSpd + leadPctOf(i) + bonus.buffSpd,
+          )
+        : 0;
+    if (battleSpdMin > 0) min.spd = battleSpdMin;
+    else if (m.speedMode === "tick" && m.tick > 0) min.spd = speedForTick(m.tick, rta);
+    else delete min.spd;
+
+    // 數值上限：和下限一樣用實戰數值；速度上限另外用「面板額外速度」換算
+    const max: Partial<Record<StatKey, number>> = { ...m.max };
+    for (const k of Object.keys(max) as StatKey[]) if (!max[k] || max[k]! <= 0) delete max[k];
+    if (m.panelExtraMax > 0) {
+      const battleSpdMax = battleSpeedForPanelExtra(
+        v.base.spd,
+        m.panelExtraMax,
+        bonus.towerSpd + leadPctOf(i) + bonus.buffSpd,
+      );
+      max.spd = max.spd == null ? battleSpdMax : Math.min(max.spd, battleSpdMax);
+    }
+
+    const bySlot = new Map<number, number>();
+    for (const id of [...m.includeRunes, ...(globalIncludes.get(m.unitId) ?? [])]) {
+      const r = runeMap.get(id);
+      if (!r || bySlot.has(r.slot)) continue;
+      bySlot.set(r.slot, id);
+    }
+
+    // 技能傷害目標：優先使用指定技能；隊型用技能欄位（S1～S4）跨魔靈對應
+    const skills = skillData ? skillsForMonster(skillData, v.monster.id) : [];
+    const slotSkill = m.skillSlot ? skills.find((s) => s.slot === m.skillSlot) : undefined;
+    const skill =
+      m.objectiveMode === "skill"
+        ? (slotSkill ?? skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills))
+        : undefined;
+
+    return {
+      unitId: m.unitId,
+      master: v.monster.id,
+      label: unitLabel(v.unit),
+      base: v.base,
+      role: m.role,
+      weight: m.weight,
+      priority: m.priority,
+      order: m.order,
+      sets,
+      mains: m.mains,
+      min,
+      max,
+      focus: m.focus,
+      includeRunes: [...bySlot.values()],
+      leadSpd: leadPctOf(i),
+      objective: skill
+        ? "skill"
+        : m.objectiveMode === "role"
+          ? roleObjective(m.role)
+          : m.objectiveMode,
+      skillObjective: skill ? { skill, opts: TEAM_DAMAGE_OPTS } : undefined,
+    };
+  };
+
   /** 把草案轉成引擎需求 */
   const buildRequest = (): TeamRequest | null => {
     if (!account || !summary) return null;
     const specs: TeamMemberSpec[] = [];
     for (let i = 0; i < members.length; i++) {
-      const m = members[i];
-      const v = viewOf(m.unitId);
-      if (!v) return null;
-      const sets: { set: number; count: number }[] = [];
-      if (m.set4) {
-        sets.push({ set: m.set4, count: 4 });
-        if (m.set2 && m.set2 !== m.set4) sets.push({ set: m.set2, count: 2 });
-      } else {
-        // 4 件套不指定時，可用三個 2 件套組成 3×2；重複的套裝由引擎合併件數
-        if (m.set2) sets.push({ set: m.set2, count: 2 });
-        if (m.set2b) sets.push({ set: m.set2b, count: 2 });
-        if (m.set2c) sets.push({ set: m.set2c, count: 2 });
-      }
-
-      const min: Partial<Record<StatKey, number>> = { ...m.min };
-      // 面板速度 / 目標 Tick 二選一；面板輸入的是「基礎速度與隊長技以外的額外速度」。
-      // 引擎的 min.spd 比對的是戰鬥速度（含圖騰 / 隊長 / 速度強化），
-      // 因此先把面板額外速度換算成戰鬥速度，否則圖騰 / Buff 會把不足的速度補掉。
-      const battleSpdMin =
-        m.speedMode !== "tick" && m.panelExtra > 0
-          ? battleSpeedForPanelExtra(
-              v.base.spd,
-              m.panelExtra,
-              bonus.towerSpd + leadPctOf(i) + bonus.buffSpd,
-            )
-          : 0;
-      if (battleSpdMin > 0) min.spd = battleSpdMin;
-      else if (m.speedMode === "tick" && m.tick > 0) min.spd = speedForTick(m.tick, rta);
-      else delete min.spd;
-
-      // 數值上限：和下限一樣用實戰數值；速度上限另外用「面板額外速度」換算
-      const max: Partial<Record<StatKey, number>> = { ...m.max };
-      for (const k of Object.keys(max) as StatKey[]) if (!max[k] || max[k]! <= 0) delete max[k];
-      if (m.panelExtraMax > 0) {
-        const battleSpdMax = battleSpeedForPanelExtra(
-          v.base.spd,
-          m.panelExtraMax,
-          bonus.towerSpd + leadPctOf(i) + bonus.buffSpd,
-        );
-        max.spd = max.spd == null ? battleSpdMax : Math.min(max.spd, battleSpdMax);
-      }
-
-      const bySlot = new Map<number, number>();
-      for (const id of [...m.includeRunes, ...(globalIncludes.get(m.unitId) ?? [])]) {
-        const r = runeMap.get(id);
-        if (!r || bySlot.has(r.slot)) continue;
-        bySlot.set(r.slot, id);
-      }
-
-      // 技能傷害目標：優先使用指定技能；隊型用技能欄位（S1～S4）跨魔靈對應
-      const skills = skillData ? skillsForMonster(skillData, v.monster.id) : [];
-      const slotSkill = m.skillSlot ? skills.find((s) => s.slot === m.skillSlot) : undefined;
-      const skill =
-        m.objectiveMode === "skill"
-          ? (slotSkill ?? skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills))
-          : undefined;
-
-      specs.push({
-        unitId: m.unitId,
-        master: v.monster.id,
-        label: unitLabel(v.unit),
-        base: v.base,
-        role: m.role,
-        weight: m.weight,
-        priority: m.priority,
-        order: m.order,
-        sets,
-        mains: m.mains,
-        min,
-        max,
-        focus: m.focus,
-        includeRunes: [...bySlot.values()],
-        leadSpd: leadPctOf(i),
-        objective: skill
-          ? "skill"
-          : m.objectiveMode === "role"
-            ? roleObjective(m.role)
-            : m.objectiveMode,
-        skillObjective: skill ? { skill, opts: TEAM_DAMAGE_OPTS } : undefined,
-      });
+      const spec = specAt(i);
+      if (!spec) return null;
+      specs.push(spec);
     }
     return {
       members: specs,
@@ -1175,6 +1255,260 @@ export default function TeamOptimizerPage() {
       beamWidth: Math.max(budget.beam, resultCount),
       teamSize: size,
     };
+  };
+
+  /** 逐隻配＋排除：把已選的候選配裝轉成整隊結果（沿用既有結果卡片） */
+  const planFromSequence = (picks: (TopBuild | null)[]): TeamPlan | null => {
+    const builds: TeamBuild[] = [];
+    let totalEff = 0;
+    let totalScore = 0;
+    for (let i = 0; i < members.length; i++) {
+      const b = picks[i];
+      const spec = specAt(i);
+      if (!b || !spec) return null;
+      const weight = Math.max(1, Math.min(10, spec.weight || 1));
+      const sets = teamSetsOf(
+        b.runeIds,
+        runeMap,
+        spec.sets.filter((s) => s.set > 0 && s.count > 0),
+        false,
+      );
+      totalEff += b.eff;
+      totalScore += weight;
+      builds.push({
+        unitId: spec.unitId,
+        master: spec.master,
+        role: spec.role,
+        runeIds: b.runeIds,
+        stats: b.stats,
+        ehp: b.ehp,
+        sets,
+        score: b.objective,
+        norm: 1,
+        weight,
+        contribution: weight,
+        eff: b.eff,
+        focusFit: b.focusFit,
+        objective: spec.skillObjective ? "skill" : (spec.objective ?? roleObjective(spec.role)),
+        priority: spec.priority ?? 0,
+        order: spec.order ?? 1,
+        skillName: spec.skillObjective?.skill.n,
+      });
+    }
+    return {
+      members: builds,
+      teamScore: totalScore,
+      totalEff: builds.length > 0 ? totalEff / builds.length : 0,
+      nodes: 0,
+      searchMs: 0,
+      truncated: false,
+      alternatives: [],
+      candidates: builds.map(() => 1),
+      notes: [
+        "逐隻配＋排除模式：依序為每隻挑選候選配裝，已選的符文會自動排除，不會分配給後面的魔靈。",
+      ],
+    };
+  };
+
+  /** 逐隻配＋排除：建立單隻配符需求；stage 是找不到結果時的放寬階梯 */
+  const buildSeqRequest = (
+    index: number,
+    picks: (TopBuild | null)[],
+    stage: number,
+  ): { req?: OptRequest; error?: string } => {
+    const spec = specAt(index);
+    if (!spec) return { error: "無法建立這隻魔靈的配符需求，請重新選擇魔靈。" };
+    const used = new Set<number>(settings.excludedRunes);
+    for (const p of picks) {
+      if (!p) continue;
+      for (const id of p.runeIds) used.add(id);
+    }
+    const conflict = (spec.includeRunes ?? []).filter((id) => used.has(id));
+    if (conflict.length > 0) {
+      return {
+        error: `${spec.label ?? "魔靈"} 的「包括」符文已被前面的魔靈使用，請先解除該符文，或不要固定這顆符文。`,
+      };
+    }
+    const relax = SEQ_LADDER[Math.max(0, Math.min(SEQ_LADDER.length - 1, stage))];
+    return {
+      req: {
+        base: spec.base,
+        runes: account?.runes ?? [],
+        required: relax.noSets ? [] : spec.sets.filter((s) => s.set > 0 && s.count > 0),
+        min: spec.min,
+        max: spec.max ?? {},
+        bonus: { ...bonus, leadSpd: spec.leadSpd, useGuild: false, grind: true },
+        pool: budget.pool,
+        allowEquipped: true,
+        targetUnit: spec.unitId,
+        rta,
+        maxNodes: budget.nodes,
+        mainFilters: relax.mains ? {} : spec.mains,
+        relaxSub: relax.relaxSub,
+        intangible: false,
+        focus: normalizeFocus(spec.focus),
+        excludeRunes: [...used],
+        includeRunes: spec.includeRunes ?? [],
+        lockedRunes: settings.lockedRunes,
+        topK: Math.max(1, Math.min(300, resultCount)),
+        objective: spec.skillObjective ? "skill" : (spec.objective ?? roleObjective(spec.role)),
+        skillObjective: spec.skillObjective,
+      },
+    };
+  };
+
+  /** 逐隻配＋排除：執行某一隻的候選搜尋（找不到就自動往下放寬） */
+  const runSeqStage = (index: number, picks: (TopBuild | null)[], stage: number) => {
+    const built = buildSeqRequest(index, picks, stage);
+    if (!built.req) {
+      setSeqRunning(false);
+      setSeqError(built.error ?? "無法建立配符需求。");
+      return;
+    }
+    seqWorkerRef.current?.terminate();
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("../lib/optimizer.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      setSeqRunning(false);
+      setSeqError("瀏覽器無法啟動配符運算模組，請重新整理頁面或改用 Chrome / Edge。");
+      return;
+    }
+    seqWorkerRef.current = worker;
+    const id = ++seqRunIdRef.current;
+    setSeqRunning(true);
+    setSeqError(null);
+    setSeqCandidates([]);
+    setSeqNote(stage > 0 ? SEQ_LADDER[stage].note : null);
+
+    const timer = window.setTimeout(() => {
+      if (seqWorkerRef.current !== worker) return;
+      worker.terminate();
+      seqWorkerRef.current = null;
+      setSeqRunning(false);
+      setSeqError("單隻配符超過 60 秒，已停止。請把預算改成「快速」、放寬條件，或減少結果數量。");
+    }, 60_000);
+
+    const done = () => {
+      window.clearTimeout(timer);
+      worker.terminate();
+      if (seqWorkerRef.current === worker) seqWorkerRef.current = null;
+    };
+
+    worker.onmessage = (e: MessageEvent<{
+      id: number;
+      res?: { topBuilds?: TopBuild[] };
+      error?: string;
+    }>) => {
+      if (e.data.id !== id) return;
+      if (e.data.error) {
+        done();
+        setSeqRunning(false);
+        setSeqError(e.data.error);
+        return;
+      }
+      const builds = e.data.res?.topBuilds ?? [];
+      if (builds.length === 0 && stage < SEQ_LADDER.length - 1) {
+        done();
+        runSeqStage(index, picks, stage + 1);
+        return;
+      }
+      done();
+      setSeqRunning(false);
+      if (builds.length === 0) {
+        setSeqError(
+          `「${members[index]?.title ?? `第 ${index + 1} 隻`}」找不到符合條件的配裝，即使不限套裝與主屬性也一樣。請放寬數值上下限、解除排除 / 鎖定，或確認每個位置都有足夠符文。`,
+        );
+        return;
+      }
+      setSeqCandidates(builds);
+      setSeqNote(stage > 0 ? SEQ_LADDER[stage].note : null);
+      setSeqPage(0);
+    };
+    worker.onerror = (ev) => {
+      console.error("sequential optimizer worker error", ev);
+      done();
+      setSeqRunning(false);
+      setSeqError("配符運算模組載入失敗（可能是網站剛更新）。請按 Ctrl + F5 重新整理後再試。");
+    };
+    worker.postMessage({ id, req: built.req });
+  };
+
+  /** 從指定的一隻開始逐隻配；index 之後的選擇會先清空 */
+  const startSeqAt = (index: number, picks: (TopBuild | null)[] = seqPicks) => {
+    if (!account) return notify("請先匯入存檔", "err");
+    if (members.length !== teams * size) return notify("隊伍人數不一致，請重新選擇", "err");
+    if (members.some((m) => !m.unitId)) return notify("還有位置未選擇魔靈", "err");
+    if (new Set(members.map((m) => m.unitId)).size !== members.length) {
+      return notify("同一隻魔靈不能重複加入隊伍", "err");
+    }
+    if (index < 0 || index >= members.length) return;
+    const cleared = picks.map((p, i) => (i < index ? p : null));
+    setSeqPicks(cleared);
+    setSeqIndex(index);
+    setSeqPage(0);
+    setPlan(null);
+    setAltIndex(0);
+    runSeqStage(index, cleared, 0);
+  };
+
+  /** 採用目前這隻的某一組候選，排除它的符文後自動配下一隻 */
+  const chooseSeqBuild = (build: TopBuild) => {
+    const picks = seqPicks.map((p, i) => (i < seqIndex ? p : i === seqIndex ? build : null));
+    setSeqPicks(picks);
+    setSeqCandidates([]);
+    setSeqPage(0);
+    const next = seqIndex + 1;
+    if (next < members.length) {
+      setSeqIndex(next);
+      setPlan(null);
+      runSeqStage(next, picks, 0);
+      return;
+    }
+    setSeqIndex(next);
+    const plan = planFromSequence(picks);
+    if (plan) {
+      setPlan(plan);
+      setAltIndex(0);
+      setOpenResults(new Set(plan.members.slice(0, 1).map((m) => m.unitId)));
+      notify(`逐隻配完成：已為 ${plan.members.length} 隻魔靈選好符文`);
+    } else {
+      setSeqError("無法組合逐隻配結果，請重新整理頁面後再試。");
+    }
+  };
+
+  /** 回到某一隻重配（該隻與後面已選的都會清空） */
+  const goSeqTo = (index: number) => {
+    const picks = seqPicks.map((p, i) => (i < index ? p : null));
+    setSeqPicks(picks);
+    setSeqIndex(index);
+    setPlan(null);
+    setAltIndex(0);
+    runSeqStage(index, picks, 0);
+  };
+
+  const switchMode = (mode: OptimizeMode) => {
+    if (mode === optMode) return;
+    workerRef.current?.terminate();
+    workerRef.current = null;
+    setRunning(false);
+    setProgress(null);
+    setOptMode(mode);
+    setPlan(null);
+    setAltIndex(0);
+    setError(null);
+    resetSequence();
+  };
+
+  const cancelSeq = () => {
+    seqWorkerRef.current?.terminate();
+    seqWorkerRef.current = null;
+    setSeqRunning(false);
+  };
+
+  const runPrimary = () => {
+    if (optMode === "team") run();
+    else startSeqAt(0, Array.from({ length: members.length }, () => null));
   };
 
   const run = () => {
@@ -1306,12 +1640,14 @@ export default function TeamOptimizerPage() {
     setMembers((prev) => prev.map((m) => (m.unitId === unitId ? { ...m, includeRunes: b.runeIds } : m)));
     setPlan(null);
     setAltIndex(0);
+    resetSequence();
     notify(`已固定 ${nameOf(b.unitId, b.master)} 的 6 顆符文，按「一鍵配隊」會重新配其他魔靈`);
   };
 
   const unpinMember = (unitId: number) => {
     setMembers((prev) => prev.map((m) => (m.unitId === unitId ? { ...m, includeRunes: [] } : m)));
     setPlan(null);
+    resetSequence();
   };
 
   const equipPlan = () => {
@@ -1379,6 +1715,15 @@ export default function TeamOptimizerPage() {
       )
     : [];
 
+  /** 逐隻模式的候選分頁與已排除符文 */
+  const seqPageCount = Math.max(1, Math.ceil(seqCandidates.length / RESULT_PAGE_SIZE));
+  const seqPageSafe = Math.min(seqPage, seqPageCount - 1);
+  const seqPageStart = seqPageSafe * RESULT_PAGE_SIZE;
+  const seqPageBuilds = seqCandidates.slice(seqPageStart, seqPageStart + RESULT_PAGE_SIZE);
+  const seqUsedRunes = new Set<number>(seqPicks.flatMap((p) => p?.runeIds ?? []));
+  const seqCurrent = members[seqIndex];
+  const seqCurrentView = seqCurrent ? viewOf(seqCurrent.unitId) : undefined;
+
   return (
     <>
       <div className="row between wrap" style={{ gap: 10, marginBottom: 14 }}>
@@ -1388,20 +1733,39 @@ export default function TeamOptimizerPage() {
           </div>
           <div className="card-sub team-page-sub">
             每隊 3～5 隻、最多 3 隊（合計 15 隻），再一次配好所有隊伍的符文；同一顆符文不會重複分配給兩隻魔靈。RTA 用 1 隊 5 隻，混沌 PVE 可用 2～3 隊。
+            「逐隻配＋排除」會先配第 1 隻，選好一組後自動排除它的符文，再配下一隻（SWOP 流程）。
           </div>
         </div>
         <div className="row wrap" style={{ gap: 6 }}>
+          <span className="tiny dim">模式</span>
+          <button
+            type="button"
+            className={`chip ${optMode === "team" ? "gold" : "muted"}`}
+            style={{ cursor: "pointer" }}
+            onClick={() => switchMode("team")}
+          >
+            整隊一起配
+          </button>
+          <button
+            type="button"
+            className={`chip ${optMode === "sequential" ? "gold" : "muted"}`}
+            style={{ cursor: "pointer" }}
+            onClick={() => switchMode("sequential")}
+          >
+            逐隻配＋排除
+          </button>
           <button type="button" className="btn btn-sm" onClick={() => setDeckOpen(true)}>
             <Layers size={13} /> 從儲存庫載入
           </button>
           <button
             type="button"
             className="btn btn-sm btn-primary"
-            onClick={run}
-            disabled={running || members.some((m) => !m.unitId)}
-            title="不用滑到頁面底部，直接開始配隊"
+            onClick={runPrimary}
+            disabled={running || seqRunning || members.some((m) => !m.unitId)}
+            title={optMode === "team" ? "不用滑到頁面底部，直接開始配隊" : "從第 1 隻開始逐隻配＋排除"}
           >
-            {running ? <Loader2 size={13} className="spin" /> : <Wand2 size={13} />} 開始配隊
+            {running || seqRunning ? <Loader2 size={13} className="spin" /> : <Wand2 size={13} />}
+            {optMode === "team" ? "開始配隊" : "開始逐隻配"}
           </button>
           {activePlan && (
             <button
@@ -1471,10 +1835,10 @@ export default function TeamOptimizerPage() {
               <Trash2 size={12} />
             </button>
           )}
-          <select className="select" style={{ width: 180 }} value={content} onChange={(e) => { setContent(e.target.value as DeckContext); setPlan(null); }}>
+          <select className="select" style={{ width: 180 }} value={content} onChange={(e) => { setContent(e.target.value as DeckContext); setPlan(null); resetSequence(); }}>
             {(["arena", "guild", "dungeon"] as DeckContext[]).map((c) => <option key={c} value={c}>{DECK_CONTEXT_LABEL[c]}</option>)}
           </select>
-          <select className="select" style={{ width: 170 }} value={budgetKey} onChange={(e) => setBudgetKey(e.target.value as BudgetKey)}>
+          <select className="select" style={{ width: 170 }} value={budgetKey} onChange={(e) => { setBudgetKey(e.target.value as BudgetKey); if (optMode === "sequential") resetSequence(); }}>
             {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => <option key={k} value={k}>預算：{BUDGETS[k].label}（{BUDGETS[k].hint}）</option>)}
           </select>
           <select
@@ -1485,15 +1849,25 @@ export default function TeamOptimizerPage() {
               setResultCount(Number(e.target.value));
               setPlan(null);
               setAltIndex(0);
+              if (optMode === "sequential") resetSequence();
             }}
-            title="一次回傳並可切換瀏覽的隊伍數量；數量越多，運算時間越長"
+            title={
+              optMode === "team"
+                ? "一次回傳並可切換瀏覽的隊伍數量；數量越多，運算時間越長"
+                : "逐隻配時，每一隻要列出幾組候選配裝；數量越多，運算時間越長"
+            }
           >
-            {RESULT_COUNTS.map((n) => <option key={n} value={n}>結果：{n} 組隊伍</option>)}
+            {RESULT_COUNTS.map((n) => (
+              <option key={n} value={n}>
+                {optMode === "team" ? "結果" : "候選"}：{n} 組{optMode === "team" ? "隊伍" : "配裝"}
+              </option>
+            ))}
           </select>
         </div>
         <div className="tiny dim team-help" style={{ marginTop: 6 }}>
           自訂隊型會保存這台裝置的第一隊設定（定位稱呼、出手順序、套裝 3×2／主屬性、面板速度或 Tick、面板下限、目標技能）；不綁定魔靈，套用時再選隊員。
           「結果」可一次產生 5～100 組隊伍，翻頁瀏覽後再挑一組上符；數量越多，運算時間越長。
+          「逐隻配＋排除」模式則把這個數量當成單隻魔靈的候選配裝數。
         </div>
 
         <div className="row wrap team-help" style={{ gap: 8, marginTop: 8 }}>
@@ -1538,6 +1912,7 @@ export default function TeamOptimizerPage() {
                             const next = Math.max(0, Math.min(50, pct));
                             setLeadPcts((prev) => prev.map((p, k) => (k === teamIndex ? next : p)));
                             setPlan(null);
+                            resetSequence();
                           }}
                           title="這一隊的速度隊長技加成，以每隻的基礎速度計算；0 = 沒有隊長技"
                         />
@@ -2229,23 +2604,38 @@ export default function TeamOptimizerPage() {
             ))}
           </div>
           <div className="row" style={{ gap: 6 }}>
-            {running ? (
+            {running || seqRunning ? (
               <>
                 <span className="tiny dim row" style={{ gap: 6 }}>
                   <Loader2 size={13} className="spin" />
-                  {progress
-                    ? progress.stage === "candidates"
-                      ? `正在產生第 ${progress.member + 1}/${progress.total} 隻的候選配裝…`
-                      : progress.stage === "search"
-                        ? `正在聯合挑選第 ${progress.member + 1}/${progress.total} 隻…`
-                        : "正在局部改良…"
-                    : "運算中…"}
+                  {seqRunning
+                    ? `正在為第 ${seqIndex + 1}/${members.length} 隻產生候選配裝…`
+                    : progress
+                      ? progress.stage === "candidates"
+                        ? `正在產生第 ${progress.member + 1}/${progress.total} 隻的候選配裝…`
+                        : progress.stage === "search"
+                          ? `正在聯合挑選第 ${progress.member + 1}/${progress.total} 隻…`
+                          : "正在局部改良…"
+                      : "運算中…"}
                 </span>
-                <button type="button" className="btn btn-sm btn-ghost" onClick={cancel}>取消</button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={seqRunning ? cancelSeq : cancel}
+                >
+                  取消
+                </button>
               </>
             ) : (
-              <button type="button" className="btn btn-primary" onClick={run} disabled={members.some((m) => !m.unitId)}>
-                <Wand2 size={15} /> {teams > 1 ? `一鍵配 ${teams} 隊` : "一鍵配一隊"}
+              <button type="button" className="btn btn-primary" onClick={runPrimary} disabled={members.some((m) => !m.unitId)}>
+                <Wand2 size={15} />{" "}
+                {optMode === "sequential"
+                  ? seqPicks.some(Boolean)
+                    ? "重新開始逐隻配"
+                    : "開始逐隻配"
+                  : teams > 1
+                    ? `一鍵配 ${teams} 隊`
+                    : "一鍵配一隊"}
               </button>
             )}
           </div>
@@ -2256,6 +2646,196 @@ export default function TeamOptimizerPage() {
           </div>
         )}
       </div>
+
+      {optMode === "sequential" && (
+        <div id="seq-panel" className="card card-pad" style={{ marginTop: 14 }}>
+          <div className="row between wrap" style={{ gap: 8 }}>
+            <div>
+              <div className="card-title row" style={{ gap: 7 }}>
+                <Wand2 size={15} className="gold" /> 逐隻配＋排除
+              </div>
+              <div className="tiny dim" style={{ marginTop: 3 }}>
+                先配第 1 隻，從候選中選一組後自動排除它的符文，再配下一隻。就像 SWOP 的逐隻流程。
+              </div>
+            </div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {seqPicks.some(Boolean) && !seqRunning && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => {
+                    resetSequence();
+                    startSeqAt(0, Array.from({ length: members.length }, () => null));
+                  }}
+                >
+                  重新開始
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="row wrap" style={{ gap: 6, marginTop: 10 }}>
+            {members.map((m, i) => {
+              const v = viewOf(m.unitId);
+              const pick = seqPicks[i];
+              const active = i === seqIndex;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  className={`chip ${active ? "gold" : pick ? "green" : "muted"}`}
+                  style={{ cursor: seqRunning ? "default" : "pointer" }}
+                  disabled={seqRunning}
+                  onClick={() => goSeqTo(i)}
+                  title={pick ? `已選：戰鬥 SPD ${pick.stats.spd}；點一下可重配這隻與後面` : "點一下從這隻開始配"}
+                >
+                  {i + 1}. {v ? unitLabel(v.unit) : "未選擇"}
+                  {pick ? ` · SPD ${pick.stats.spd}` : active ? " · 進行中" : ""}
+                </button>
+              );
+            })}
+            {seqIndex >= members.length && <span className="chip green"><Check size={11} /> 完成</span>}
+          </div>
+
+          <div className="tiny dim" style={{ marginTop: 6 }}>
+            已選 {seqPicks.filter(Boolean).length}/{members.length} 隻
+            · 這次逐隻配已排除 {seqUsedRunes.size} 顆符文
+            {settings.excludedRunes.length > 0 ? `（含全域排除 ${settings.excludedRunes.length} 顆）` : ""}
+          </div>
+
+          {!seqRunning && seqCandidates.length === 0 && !seqPicks.some(Boolean) && (
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => startSeqAt(0, Array.from({ length: members.length }, () => null))}
+              >
+                <Wand2 size={13} /> 開始逐隻配（第 1 隻）
+              </button>
+            </div>
+          )}
+
+          {seqError && (
+            <div className="tiny" style={{ color: "var(--red)", marginTop: 8 }}>
+              <AlertTriangle size={12} /> {seqError}
+            </div>
+          )}
+          {seqNote && (
+            <div className="tiny" style={{ color: "var(--gold, #f2c65c)", marginTop: 8 }}>
+              <AlertTriangle size={12} /> {seqNote}
+            </div>
+          )}
+
+          {seqRunning && (
+            <div className="row tiny dim" style={{ gap: 6, marginTop: 10 }}>
+              <Loader2 size={13} className="spin" /> 正在計算第 {seqIndex + 1}/{members.length} 隻的候選配裝…
+            </div>
+          )}
+
+          {!seqRunning && seqCandidates.length > 0 && (
+            <>
+              <div className="row between wrap" style={{ gap: 8, marginTop: 12 }}>
+                <div className="tiny" style={{ fontSize: 12.5 }}>
+                  第 <b className="gold">{seqIndex + 1}</b>/{members.length} 隻：
+                  <b style={{ margin: "0 4px" }}>
+                    {seqCurrentView ? unitLabel(seqCurrentView.unit) : "魔靈"}
+                  </b>
+                  的候選配裝（{seqCandidates.length} 組）
+                  {seqCurrent && (
+                    <span className="chip muted" style={{ marginLeft: 6 }}>
+                      目標：{OBJECTIVE_LABELS[seqCurrent.objectiveMode]}
+                    </span>
+                  )}
+                </div>
+                <div className="row wrap" style={{ gap: 5 }}>
+                  <span className="tiny dim">候選 {seqPageStart + 1}–{Math.min(seqPageStart + RESULT_PAGE_SIZE, seqCandidates.length)} / {seqCandidates.length}</span>
+                  {seqPageCount > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        className="chip muted"
+                        style={{ cursor: "pointer" }}
+                        disabled={seqPageSafe === 0}
+                        onClick={() => setSeqPage((p) => Math.max(0, p - 1))}
+                        title="上一頁候選"
+                      >
+                        ‹
+                      </button>
+                      <button
+                        type="button"
+                        className="chip muted"
+                        style={{ cursor: "pointer" }}
+                        disabled={seqPageSafe >= seqPageCount - 1}
+                        onClick={() => setSeqPage((p) => Math.min(seqPageCount - 1, p + 1))}
+                        title="下一頁候選"
+                      >
+                        ›
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                {seqPageBuilds.map((b, i) => {
+                  const rank = seqPageStart + i + 1;
+                  const runes = b.runeIds
+                    .map((id) => runeMap.get(id))
+                    .filter((r): r is NonNullable<typeof r> => !!r);
+                  const setsText = setSummary(teamSetsOf(b.runeIds, runeMap, [], false));
+                  return (
+                    <div key={rank} className="card" style={{ padding: 10, marginTop: i === 0 ? 0 : 8 }}>
+                      <div className="row between wrap" style={{ gap: 8 }}>
+                        <div className="row wrap" style={{ gap: 6, minWidth: 0 }}>
+                          <span className={`chip ${rank === 1 ? "gold" : "muted"}`}>#{rank}</span>
+                          <span className="chip muted">{setsText || "無套裝"}</span>
+                          {b.focusFit > 0 && <span className="chip muted">焦點契合 {Math.round(b.focusFit)}%</span>}
+                          <span className="chip muted">效率 {Math.round(b.eff)}%</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          onClick={() => chooseSeqBuild(b)}
+                        >
+                          {seqIndex + 1 >= members.length ? "用這組，完成" : "用這組 → 下一隻"}
+                        </button>
+                      </div>
+                      <div className="row wrap tiny mono" style={{ gap: 10, marginTop: 7 }}>
+                        <span>目標 <b className="gold">{fmt(b.objective)}</b></span>
+                        <span>SPD <b>{b.stats.spd}</b> <TickBadge spd={b.stats.spd} rta={rta} /></span>
+                        <span>HP {fmt(b.stats.hp)}</span>
+                        <span>ATK {fmt(b.stats.atk)}</span>
+                        <span>DEF {fmt(b.stats.def)}</span>
+                        <span>CR {b.stats.cr}%</span>
+                        <span>CD {b.stats.cd}%</span>
+                        <span>RES {b.stats.res}%</span>
+                        <span>ACC {b.stats.acc}%</span>
+                        <span>EHP {fmt(b.ehp)}</span>
+                      </div>
+                      <details style={{ marginTop: 7 }}>
+                        <summary className="tiny dim" style={{ cursor: "pointer" }}>
+                          符文 {runes.length}/6 · 依遊戲位置 1 → 6
+                        </summary>
+                        <div style={{ marginTop: 8 }}>
+                          <RuneBoard
+                            runes={runes}
+                            renderRune={(r) => (
+                              <RuneCard
+                                rune={r}
+                                owner={seqCurrentView ? unitLabel(seqCurrentView.unit) : undefined}
+                              />
+                            )}
+                          />
+                        </div>
+                      </details>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="card card-pad" style={{ marginTop: 12, borderColor: "rgba(255,107,107,.35)" }}>
@@ -2271,7 +2851,7 @@ export default function TeamOptimizerPage() {
           <div className="row between wrap" style={{ gap: 8 }}>
             <div>
               <div className="card-title row" style={{ gap: 7 }}>
-                <Check size={15} className="gold" /> 配隊結果
+                <Check size={15} className="gold" /> {optMode === "sequential" ? "逐隻配結果" : "配隊結果"}
               </div>
               <div className="tiny dim" style={{ marginTop: 3 }}>
                 隊伍分數 <b className="gold">{Math.round(activePlan.teamScore * 10) / 10}</b> / {totalWeight}
@@ -2508,7 +3088,7 @@ export default function TeamOptimizerPage() {
             <button type="button" className="btn btn-sm" onClick={lockPlan}><Lock size={13} /> {teams > 1 ? "鎖定全部符文" : "鎖定這隊符文"}</button>
             <button type="button" className="btn btn-sm" onClick={savePlan}><Save size={13} /> {teams > 1 ? `儲存 ${teams} 隊` : "儲存到儲存庫"}</button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={copyPlan}><Copy size={13} /> 複製清單</button>
-            <button type="button" className="btn btn-sm btn-ghost" onClick={run}><Gauge size={13} /> 重新計算</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={runPrimary}><Gauge size={13} /> 重新配一次</button>
           </div>
           <div className="tiny dim" style={{ marginTop: 6 }}>
             上符只修改本工具的模擬資料，不會更動遊戲存檔；儲存後可在「儲存庫」或「Speed Tick → 從儲存庫載入」使用。
