@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Layers, Save, Search } from "lucide-react";
-import { MONSTER_MAP, monsterLabel, unitLabel, useStore } from "../store";
+import { MONSTER_MAP, monsterLabel, unitLabel, useLibrary, useStore } from "../store";
 import { ELEMENTS } from "../lib/constants";
 import { baseStats, statsForRunes } from "../lib/stats";
 import { DECK_TYPE_NUMBERS, deckTypeLabel } from "../lib/deckTypes";
@@ -19,7 +19,7 @@ export default function DecksPage() {
   const saveDeckFav = useStore((s) => s.saveDeckFav);
   const saveLoadout = useStore((s) => s.saveLoadout);
   const notify = useStore((s) => s.notify);
-  const deckFavs = useStore((s) => s.deckFavs);
+  const { deckFavs } = useLibrary();
   const [q, setQ] = useState("");
   const [type, setType] = useState(0);
   const [open, setOpen] = useState<DeckWithEquip | null>(null);

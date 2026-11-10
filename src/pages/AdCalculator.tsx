@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Calculator, Flame, Search } from "lucide-react";
-import { MONSTER_MAP, unitLabel, unitLabelById, useStore, type Loadout } from "../store";
+import { MONSTER_MAP, unitLabel, unitLabelById, useLibrary, useStore, type Loadout } from "../store";
 import {
   addAdEffects,
   artifactAdEffects,
@@ -37,7 +37,7 @@ export default function AdCalculatorPage() {
   const settings = useStore((s) => s.settings);
   const runeMap = useStore((s) => s.runeMap);
   const notify = useStore((s) => s.notify);
-  const loadouts = useStore((s) => s.loadouts);
+  const { loadouts } = useLibrary();
   const [unitId, setUnitId] = useState(0);
   const [saved, setSaved] = useState<Loadout | null>(null);
   const [stats, setStats] = useState<AdStats>({ hp: 40000, atk: 2000, def: 1000, spd: 200 });

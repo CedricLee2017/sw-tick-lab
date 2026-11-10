@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { RotateCcw, Save as SaveIcon, Timer, Trash2, Upload, X, Copy, ArrowRight, Plus } from "lucide-react";
 import { ELEMENTS } from "../lib/constants";
 import { deckTypeLabel } from "../lib/deckTypes";
-import { MONSTERS, MONSTER_MAP, useStore } from "../store";
+import { MONSTERS, MONSTER_MAP, useLibrary, useStore } from "../store";
 import { MonsterIcon, Modal, NumberInput } from "../components/ui";
 import { MonsterPickerModal, sortMonsterEntries, toMonsterEntries } from "../components/MonsterPicker";
 import type { DeckFav, Loadout } from "../store";
@@ -119,8 +119,7 @@ const clampTick = (v: number) => Math.max(0, Math.min(TICKS[TICKS.length - 1], M
 
 export default function SpeedTickPage() {
   const runeMap = useStore((s) => s.runeMap);
-  const loadouts = useStore((s) => s.loadouts);
-  const deckFavs = useStore((s) => s.deckFavs);
+  const { loadouts, deckFavs } = useLibrary();
   const notify = useStore((s) => s.notify);
   const [init] = useState<CalcState>(loadState);
   const [rate, setRate] = useState(init.rate);

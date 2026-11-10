@@ -185,7 +185,10 @@ export interface Account {
   importedAt: number;
   /** 解析規則版本；舊快取會在新版載入時要求重新匯入 */
   parseVersion?: number;
+  /** 遊戲內召喚師名稱（沒有名稱時退回 wizard_id） */
   wizard: string;
+  /** 遊戲內玩家 ID（wizard_id）；舊存檔可能沒有，需重新匯入 */
+  wizardId?: number;
   units: Unit[];
   runes: Rune[];
   artifacts: Artifact[];

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Ban, Bookmark, Layers, Loader2, RefreshCw, RotateCcw, Shirt, Trash2, Unlock, Wand2 } from "lucide-react";
-import { MONSTER_MAP, unitLabel, useStore, monsterLabel } from "../store";
+import { MONSTER_MAP, accountGameLabel, unitLabel, useLibrary, useStore, monsterLabel } from "../store";
 import { SET_BY_ID } from "../lib/constants";
 import { setSummary, baseStats } from "../lib/stats";
 import { deckTypeLabel } from "../lib/deckTypes";
@@ -12,9 +12,8 @@ import type { DeckFav, Loadout } from "../store";
 export default function BuildsPage() {
   const account = useStore((s) => s.account);
   const runeMap = useStore((s) => s.runeMap);
-  const loadouts = useStore((s) => s.loadouts);
+  const { loadouts, deckFavs } = useLibrary();
   const removeLoadout = useStore((s) => s.removeLoadout);
-  const deckFavs = useStore((s) => s.deckFavs);
   const removeDeckFav = useStore((s) => s.removeDeckFav);
   const notify = useStore((s) => s.notify);
   const syncLibrary = useStore((s) => s.syncLibrary);
@@ -182,7 +181,10 @@ export default function BuildsPage() {
       <div className="row between wrap" style={{ gap: 10, marginBottom: 14 }}>
         <div>
           <div className="card-title">儲存庫</div>
-          <div className="card-sub">整隊存到預設隊儲存庫，單隻魔靈存到配裝儲存庫；隨時查看或帶回配符頁</div>
+          <div className="card-sub">
+            整隊存到預設隊儲存庫，單隻魔靈存到配裝儲存庫；隨時查看或帶回配符頁
+            {account ? ` · 目前顯示「${accountGameLabel(account)}」的項目` : ""}
+          </div>
         </div>
         <div className="row wrap" style={{ gap: 6, alignItems: "center" }}>
           <button

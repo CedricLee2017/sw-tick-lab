@@ -505,7 +505,10 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
   }
 
   // 以遊戲內暱稱為主；沒有暱稱時退回 wizard_id（玩家遊戲 ID）。
-  const wizard = String(body.wizard_info?.wizard_name || body.wizard_info?.wizard_id || "");
+  const wizardId = num(body.wizard_info?.wizard_id) || num(body.wizard_id) || undefined;
+  const wizard = String(
+    body.wizard_info?.wizard_name || body.wizard_name || body.wizard_info?.wizard_id || body.wizard_id || "",
+  );
   const version = body.unit_list ? (body.runes?.[0]?.ancient !== undefined ? "SWEX / SWOP" : "SWEX") : "未知";
 
   // RTA（世界競技場）：一般與 RTA 共用符文 / 神器庫，但裝備配置是兩套獨立清單。
@@ -615,6 +618,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       importedAt: Date.now(),
       parseVersion: PARSE_VERSION,
       wizard: String(wizard ?? ""),
+      wizardId,
       units,
       runes,
       artifacts,

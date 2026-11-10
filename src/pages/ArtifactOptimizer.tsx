@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, X } from "lucide-react";
-import { MONSTER_MAP, unitLabelById, useStore, type Loadout } from "../store";
+import { MONSTER_MAP, unitLabelById, useLibrary, useStore, type Loadout } from "../store";
 import { ArtifactStage } from "../components/ArtifactStage";
 import { DamagePanel } from "../components/DamagePanel";
 import { ArtifactCard, MonsterIcon, MonsterPanel, TickBadge } from "../components/ui";
@@ -13,7 +13,7 @@ import type { Artifact, Rune } from "../lib/types";
 export default function ArtifactOptimizerPage() {
   const account = useStore((s) => s.account);
   const settings = useStore((s) => s.settings);
-  const loadouts = useStore((s) => s.loadouts);
+  const { loadouts } = useLibrary();
   const notify = useStore((s) => s.notify);
   const runeMap = useStore((s) => s.runeMap);
   const [unitId, setUnitId] = useState(0);

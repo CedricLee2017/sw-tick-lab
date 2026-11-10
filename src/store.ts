@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useMemo } from "react";
 import { del, get, set } from "idb-keyval";
 import monstersJson from "./data/monsters.json";
 import { PARSE_VERSION, parseAccountJSON } from "./lib/parse";
@@ -36,6 +37,65 @@ export function unitLabelById(
 }
 
 /**
+ * 遊戲存檔的識別 key：優先使用 wizard_id（遊戲 ID）；
+ * 舊存檔沒有 ID 時退回召喚師名稱或檔名。
+ */
+export function accountGameKey(account: Account | null | undefined): string {
+  if (!account) return "";
+  if (typeof account.wizardId === "number" && account.wizardId > 0) return `id:${account.wizardId}`;
+  const wizard = account.wizard?.trim();
+  if (wizard) return `w:${wizard}`;
+  return account.fileName ? `f:${account.fileName}` : "";
+}
+
+/** 畫面上顯示的存檔名稱（含遊戲 ID） */
+export function accountGameLabel(account: Account | null | undefined): string {
+  if (!account) return "尚未載入存檔";
+  const name = account.wizard?.trim();
+  const id = typeof account.wizardId === "number" && account.wizardId > 0 ? account.wizardId : null;
+  if (id && name) return `${name} · ID ${id}`;
+  if (id) return `ID ${id}`;
+  return name || account.fileName;
+}
+
+/**
+ * 把舊版沒有 gameKey（或舊的召喚師名稱 key）的儲存庫歸到目前存檔。
+ * 有明確屬於其他遊戲 ID 的項目不會被動到。
+ */
+function canonicalizeLibrary(
+  account: Account | null,
+  loadouts: Loadout[],
+  deckFavs: DeckFav[],
+  extraOldKeys: string[] = [],
+): { loadouts: Loadout[]; deckFavs: DeckFav[]; changed: boolean } {
+  const key = accountGameKey(account);
+  if (!account || !key) return { loadouts, deckFavs, changed: false };
+  // 只把「沒有 key」或舊版用名稱 / 檔名當 key 的項目歸到目前存檔；
+  // 明確屬於其他遊戲 ID 的項目一律不動。
+  const aliases = new Set<string>(
+    [key, ...extraOldKeys].filter((k) => k === key || k.startsWith("w:") || k.startsWith("f:")),
+  );
+  const wizard = account.wizard?.trim();
+  if (wizard) aliases.add(`w:${wizard}`);
+  if (account.fileName) aliases.add(`f:${account.fileName}`);
+
+  let changed = false;
+  const fix = <T extends { gameKey?: string }>(items: T[]): T[] =>
+    items.map((item) => {
+      if (item.gameKey === key) return item;
+      // 已經有明確的遊戲 ID 且不是這份存檔 → 保持不動
+      if (item.gameKey?.startsWith("id:")) return item;
+      if (!item.gameKey || aliases.has(item.gameKey)) {
+        changed = true;
+        return { ...item, gameKey: key };
+      }
+      return item;
+    });
+
+  return { loadouts: fix(loadouts), deckFavs: fix(deckFavs), changed };
+}
+
+/**
  * 產生不重複的魔靈名稱：第一次使用圖鑑原名，之後依序加上 2、3、4…
  * 例如「水仙人」→「水仙人2」→「水仙人3」。
  */
@@ -56,6 +116,8 @@ export interface Loadout {
   monsterId: number;
   /** 儲存時的 unit_id（同一隻魔靈可能有多份，舊資料可能沒有） */
   unitId?: number;
+  /** 這筆配裝屬於哪個遊戲存檔（accountGameKey；舊資料沒有時會歸到目前存檔） */
+  gameKey?: string;
   runeIds: number[];
   stats: Stats;
   createdAt: number;
@@ -76,6 +138,8 @@ export interface DeckFavUnit {
 export interface DeckFav {
   id: string;
   name: string;
+  /** 這筆預設隊屬於哪個遊戲存檔（accountGameKey；舊資料沒有時會歸到目前存檔） */
+  gameKey?: string;
   /** 預設隊類型（含防守隊 100–102） */
   type: number;
   seq: number;
@@ -142,6 +206,7 @@ function savedMeta(id: string, account: Account): SavedAccount {
     id,
     fileName: account.fileName,
     wizard: account.wizard,
+    wizardId: account.wizardId,
     importedAt: account.importedAt,
     units: account.units.length,
     runes: account.runes.length,
@@ -194,6 +259,8 @@ export interface SavedAccount {
   id: string;
   fileName: string;
   wizard: string;
+  /** 遊戲內玩家 ID（wizard_id）；舊存檔可能沒有 */
+  wizardId?: number;
   importedAt: number;
   units: number;
   runes: number;
@@ -344,6 +411,20 @@ export const useStore = create<Store>((setState, getState) => ({
         });
         void set(SETTINGS_KEY, saved);
       }
+      // 舊版儲存庫沒有 gameKey：歸到目前載入的存檔（之後切換 JSON 才不會混在一起）
+      const canon = canonicalizeLibrary(acc, loadouts ?? [], deckFavs ?? []);
+      if (canon.changed) {
+        void set(LOADOUT_KEY, canon.loadouts);
+        void set(DECK_FAV_KEY, canon.deckFavs);
+      }
+      // 舊存檔清單沒有遊戲 ID 時補上（重新匯入前也能先用目前帳號的 ID 顯示）
+      if (acc && currentId) {
+        const i = saves.findIndex((s) => s.id === currentId);
+        if (i >= 0 && (saves[i].wizardId !== acc.wizardId || saves[i].wizard !== acc.wizard)) {
+          saves = saves.map((s, j) => (j === i ? { ...s, wizardId: acc.wizardId, wizard: acc.wizard } : s));
+          void set(SAVES_KEY, saves);
+        }
+      }
       setState({
         ready: true,
         account: acc ?? null,
@@ -351,8 +432,8 @@ export const useStore = create<Store>((setState, getState) => ({
         currentSaveId: currentId,
         runeMap: new Map((acc?.runes ?? []).map((r) => [r.id, r])),
         settings: saved,
-        loadouts: loadouts ?? [],
-        deckFavs: deckFavs ?? [],
+        loadouts: canon.loadouts,
+        deckFavs: canon.deckFavs,
       });
       if (stale) getState().notify("解析規則已更新，請重新匯入 SWEX 存檔");
     } catch {
@@ -366,15 +447,20 @@ export const useStore = create<Store>((setState, getState) => ({
     if (!parsed.account) return { ok: false, error, warnings };
     let account = parsed.account;
     const state = getState();
-    // 同名檔案視為同一份存檔（重新上傳會更新它，不會多一筆）
-    const existing = state.saves.find((s) => s.fileName.toLowerCase() === fileName.toLowerCase());
+    // 以遊戲 ID（wizard_id）視為同一份存檔：同一個帳號重新上傳會更新原本那筆，
+    // 不同帳號就算檔名相同也會各自保留。舊存檔沒有 ID 時才用檔名比對。
+    const existing =
+      account.wizardId != null
+        ? (state.saves.find((s) => s.wizardId === account.wizardId) ??
+           state.saves.find((s) => s.wizardId == null && s.fileName.toLowerCase() === fileName.toLowerCase()))
+        : state.saves.find((s) => s.wizardId == null && s.fileName.toLowerCase() === fileName.toLowerCase());
 
     // 重新匯入同一份存檔時保留先前新增的自訂魔靈（清空配裝，避免參照到舊存檔的符文）
+    const previous = existing
+      ? (state.currentSaveId === existing.id ? state.account : await get<Account>(saveKey(existing.id)))
+      : null;
     let keptCustom: Unit[] = [];
-    if (existing) {
-      const previous = state.currentSaveId === existing.id ? state.account : await get<Account>(saveKey(existing.id));
-      keptCustom = (previous?.units ?? []).filter((u) => u.custom);
-    }
+    if (existing) keptCustom = (previous?.units ?? []).filter((u) => u.custom);
     if (keptCustom.length) {
       const used = new Set(account.units.map((u) => u.id));
       let nextId = -1;
@@ -388,6 +474,16 @@ export const useStore = create<Store>((setState, getState) => ({
       account = { ...account, units: [...account.units, ...carried] };
     }
 
+    // 舊版儲存庫（或舊的召喚師名稱 key）重新歸到這份存檔的遊戲 ID
+    const oldKeys: string[] = [];
+    if (previous) {
+      const pk = accountGameKey(previous);
+      if (pk) oldKeys.push(pk);
+      if (previous.wizard?.trim()) oldKeys.push(`w:${previous.wizard.trim()}`);
+      if (previous.fileName) oldKeys.push(`f:${previous.fileName}`);
+    }
+    const canon = canonicalizeLibrary(account, state.loadouts, state.deckFavs, oldKeys);
+
     const id = existing?.id ?? newSaveId();
     // 建築一律以全滿等計算（速度圖騰 15%、競技場 20%、屬性塔 21%、公會 20/25%）。
     // 若存檔有建築等級，可在「設定」頁按「套用存檔建築等級」覆寫。
@@ -400,11 +496,18 @@ export const useStore = create<Store>((setState, getState) => ({
       currentSaveId: id,
       runeMap: new Map(account.runes.map((r) => [r.id, r])),
       settings,
+      loadouts: canon.loadouts,
+      deckFavs: canon.deckFavs,
     });
     // 寫入本機失敗（例如瀏覽器儲存空間不足）時要讓使用者知道，
     // 否則重新整理後會回到舊存檔，看起來就像「匯入沒有更新」。
     try {
-      await Promise.all([set(saveKey(id), account), set(SAVES_KEY, saves), set(CURRENT_SAVE_KEY, id)]);
+      await Promise.all([
+        set(saveKey(id), account),
+        set(SAVES_KEY, saves),
+        set(CURRENT_SAVE_KEY, id),
+        ...(canon.changed ? [set(LOADOUT_KEY, canon.loadouts), set(DECK_FAV_KEY, canon.deckFavs)] : []),
+      ]);
     } catch {
       getState().notify("存檔已載入，但無法寫入瀏覽器儲存空間；重新整理後可能回到舊存檔", "err");
     }
@@ -432,10 +535,22 @@ export const useStore = create<Store>((setState, getState) => ({
       getState().notify("這份存檔是舊版解析規則，請重新上傳同名 JSON 更新", "err");
       return false;
     }
-    // 離開前先把目前這份存檔的數量更新到清單（新增自訂魔靈後會變動）
-    const current = state.account && state.currentSaveId
-      ? state.saves.map((s) => (s.id === state.currentSaveId ? savedMeta(s.id, state.account!) : s))
-      : state.saves;
+    // 離開前先把目前這份存檔的數量更新到清單（新增自訂魔靈後會變動），
+    // 同時把新載入存檔的遊戲 ID 補進清單。
+    const current = state.saves.map((s) => {
+      if (s.id === state.currentSaveId && state.account) return savedMeta(s.id, state.account);
+      if (s.id === id) return { ...s, wizard: account.wizard, wizardId: account.wizardId };
+      return s;
+    });
+    // 切換存檔時，把舊版未分類的儲存庫歸到新載入的存檔
+    const oldKeys: string[] = [];
+    if (state.account) {
+      const pk = accountGameKey(state.account);
+      if (pk) oldKeys.push(pk);
+      if (state.account.wizard?.trim()) oldKeys.push(`w:${state.account.wizard.trim()}`);
+      if (state.account.fileName) oldKeys.push(`f:${state.account.fileName}`);
+    }
+    const canon = canonicalizeLibrary(account, state.loadouts, state.deckFavs, oldKeys);
     const settings = settingsForNewAccount(state.settings);
     setState({
       account,
@@ -443,10 +558,16 @@ export const useStore = create<Store>((setState, getState) => ({
       currentSaveId: id,
       runeMap: new Map(account.runes.map((r) => [r.id, r])),
       settings,
+      loadouts: canon.loadouts,
+      deckFavs: canon.deckFavs,
     });
     void set(SAVES_KEY, current);
     void set(CURRENT_SAVE_KEY, id);
     void set(SETTINGS_KEY, settings);
+    if (canon.changed) {
+      void set(LOADOUT_KEY, canon.loadouts);
+      void set(DECK_FAV_KEY, canon.deckFavs);
+    }
     getState().notify(`已切換存檔：${account.fileName}`);
     return true;
   },
@@ -716,8 +837,10 @@ export const useStore = create<Store>((setState, getState) => ({
 
   saveLoadout: (l) => {
     const now = Date.now();
+    const gameKey = accountGameKey(getState().account);
     const loadout: Loadout = {
       ...l,
+      ...(gameKey ? { gameKey } : {}),
       id: `lo_${now}_${Math.random().toString(36).slice(2, 7)}`,
       createdAt: now,
       updatedAt: now,
@@ -730,15 +853,17 @@ export const useStore = create<Store>((setState, getState) => ({
   },
 
   saveDeckFav: (d, opts) => {
-    // 同類型、同序號且隊員完全相同視為同一組，直接覆蓋更新
+    // 同類型、同序號且隊員完全相同視為同一組，直接覆蓋更新（只比對同一份存檔）
     const signature = (x: { type: number; seq: number; units: { unitId: number }[] }) =>
       `${x.type}|${x.seq}|${x.units.map((u) => u.unitId).join(",")}`;
     const sig = signature(d);
+    const gameKey = accountGameKey(getState().account);
     const prev = getState().deckFavs;
-    const existing = prev.find((x) => signature(x) === sig);
+    const existing = prev.find((x) => (!gameKey || !x.gameKey || x.gameKey === gameKey) && signature(x) === sig);
     const now = Date.now();
     const fav: DeckFav = {
       ...d,
+      ...(gameKey ? { gameKey } : {}),
       id: existing?.id ?? `dk_${now}_${Math.random().toString(36).slice(2, 7)}`,
       // 建立時間保留第一次儲存的時間；修改時間另外記錄，雲端合併才不會用舊資料蓋新資料
       createdAt: existing?.createdAt ?? now,
@@ -791,10 +916,12 @@ export const useStore = create<Store>((setState, getState) => ({
 
         const mergedLoadouts = mergeLibrary(local.loadouts, remote.loadouts, lastSyncAt);
         const mergedDecks = mergeLibrary(local.deckFavs, remote.deckFavs, lastSyncAt);
-        const loadouts = mergedLoadouts.items;
-        const deckFavs = mergedDecks.items;
-        const changed = mergedLoadouts.changed || mergedDecks.changed;
-        const needsPush = mergedLoadouts.push || mergedDecks.push;
+        // 雲端可能還有舊版沒有 gameKey 的項目：歸到目前載入的存檔
+        const canon = canonicalizeLibrary(getState().account, mergedLoadouts.items, mergedDecks.items);
+        const loadouts = canon.loadouts;
+        const deckFavs = canon.deckFavs;
+        const changed = mergedLoadouts.changed || mergedDecks.changed || canon.changed;
+        const needsPush = mergedLoadouts.push || mergedDecks.push || canon.changed;
 
         if (changed) {
           setState({ loadouts, deckFavs });
@@ -849,6 +976,26 @@ export const useStore = create<Store>((setState, getState) => ({
     setTimeout(() => setState({ toasts: getState().toasts.filter((t) => t.id !== id) }), 3200);
   },
 }));
+
+/**
+ * 目前存檔的儲存庫（配裝 + 預設隊）。
+ * 每個項目都有 gameKey，切換不同的 JSON 存檔時只會看到該遊戲 ID 的項目。
+ */
+export function useLibrary() {
+  const account = useStore((s) => s.account);
+  const loadouts = useStore((s) => s.loadouts);
+  const deckFavs = useStore((s) => s.deckFavs);
+  return useMemo(() => {
+    const gameKey = accountGameKey(account);
+    // 沒有 gameKey 的舊資料先保留顯示，載入存檔 / 同步時會自動歸類
+    const match = (item: { gameKey?: string }) => !item.gameKey || !gameKey || item.gameKey === gameKey;
+    return {
+      gameKey,
+      loadouts: loadouts.filter(match),
+      deckFavs: deckFavs.filter(match),
+    };
+  }, [account, loadouts, deckFavs]);
+}
 
 /** 儲存庫變更後延遲回寫雲端，避免連續操作打出多次請求。 */
 let libraryPushTimer: ReturnType<typeof setTimeout> | null = null;

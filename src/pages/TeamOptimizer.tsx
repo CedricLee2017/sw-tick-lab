@@ -3,7 +3,7 @@ import {
   AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Gauge, Layers, Loader2, Lock, Pin, Plus, Save, Search,
   Shirt, Trash2, Users, Wand2, Zap,
 } from "lucide-react";
-import { monsterLabel, unitLabel, useStore, type DeckFav, type DeckFavUnit } from "../store";
+import { monsterLabel, unitLabel, useLibrary, useStore, type DeckFav, type DeckFavUnit } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
 import { MonsterIcon, Modal, NumberInput, RuneCard, RuneBoard, StatRows, TickBadge, fmt, ArtifactCard } from "../components/ui";
 import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPicker";
@@ -299,7 +299,7 @@ export default function TeamOptimizerPage() {
   const summary = useSummary();
   const notify = useStore((s) => s.notify);
   const saveDeckFav = useStore((s) => s.saveDeckFav);
-  const deckFavs = useStore((s) => s.deckFavs);
+  const { deckFavs } = useLibrary();
   const equipTeam = useStore((s) => s.equipTeam);
   const setRuneFlag = useStore((s) => s.setRuneFlag);
 

@@ -220,7 +220,7 @@ export default function ImportPage() {
                 <Database size={15} /> 已儲存的存檔
               </div>
               <div className="card-sub">
-                上傳過的 JSON 都留在這台裝置，之後直接選一份讀取，不用重新上傳。同名檔案會更新原本的存檔。
+                上傳過的 JSON 都留在這台裝置，之後直接選一份讀取，不用重新上傳。同一個遊戲 ID 會更新原本的存檔；不同帳號即使檔名相同也會分開保存。
               </div>
             </div>
             <span className="chip muted">{saves.length} 份</span>
@@ -248,7 +248,8 @@ export default function ImportPage() {
                       {stale && <span className="chip muted">需重新匯入</span>}
                     </div>
                     <div className="tiny dim" style={{ marginTop: 3 }}>
-                      {s.wizard || "未知召喚師"} · {fmt(s.units)} 魔靈 · {fmt(s.runes)} 符文 · {fmt(s.artifacts)} 神器 ·{" "}
+                      {s.wizard || "未知召喚師"}
+                      {s.wizardId ? ` · ID ${s.wizardId}` : ""} · {fmt(s.units)} 魔靈 · {fmt(s.runes)} 符文 · {fmt(s.artifacts)} 神器 ·{" "}
                       {new Date(s.importedAt).toLocaleString("zh-TW")}
                     </div>
                   </div>
@@ -365,7 +366,7 @@ export default function ImportPage() {
             <div className="card-head">
               <div>
                 <div className="card-title">目前載入的存檔</div>
-                <div className="card-sub">{account.fileName} · {new Date(account.importedAt).toLocaleString("zh-TW")}</div>
+                <div className="card-sub">{account.fileName} · {new Date(account.importedAt).toLocaleString("zh-TW")}{account.wizardId ? ` · ID ${account.wizardId}` : ""}</div>
               </div>
               <div className="row">
                 <span className="chip green"><ShieldCheck size={12} /> 本機解析</span>

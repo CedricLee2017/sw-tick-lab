@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import {
   Building2, Download, Gauge, Info, RefreshCw, RotateCcw, Trash2, Zap, ShieldCheck,
 } from "lucide-react";
-import { unitLabelById, useStore } from "../store";
+import { unitLabelById, useLibrary, useStore } from "../store";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
 import { deriveVerifier } from "../lib/password";
@@ -58,7 +58,8 @@ export default function SettingsPage() {
   const patchBonus = useStore((s) => s.patchBonus);
   const setRta = useStore((s) => s.setRta);
   const setPool = useStore((s) => s.setPool);
-  const loadouts = useStore((s) => s.loadouts);
+  const { loadouts } = useLibrary();
+  const allLoadouts = useStore((s) => s.loadouts);
   const removeLoadout = useStore((s) => s.removeLoadout);
   const clearAccount = useStore((s) => s.clearAccount);
   const notify = useStore((s) => s.notify);
@@ -113,7 +114,7 @@ export default function SettingsPage() {
   const resetAll = () => {
     if (!confirm("要清除所有已儲存的存檔與配裝紀錄嗎？（設定會保留）")) return;
     void clearAccount({ all: true });
-    for (const l of loadouts) removeLoadout(l.id);
+    for (const l of allLoadouts) removeLoadout(l.id);
     notify("已清除本機資料");
   };
 
@@ -338,6 +339,7 @@ export default function SettingsPage() {
               <>
                 <div className="kv"><span className="k">檔案</span><span className="v">{account.fileName}</span></div>
                 <div className="kv"><span className="k">玩家</span><span className="v">{account.wizard || "—"}</span></div>
+                <div className="kv"><span className="k">遊戲 ID</span><span className="v">{account.wizardId ?? "—"}</span></div>
                 <div className="kv"><span className="k">魔靈 / 符文</span><span className="v">{fmt(account.units.length)} / {fmt(account.runes.length)}</span></div>
                 <div className="kv"><span className="k">匯入時間</span><span className="v">{new Date(account.importedAt).toLocaleString("zh-TW")}</span></div>
                 <div className="row" style={{ gap: 8, marginTop: 4 }}>

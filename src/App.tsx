@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 
 import {
   Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target,
 } from "lucide-react";
-import { ensureOwner, useStore } from "./store";
+import { accountGameLabel, ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
 import { Modal } from "./components/ui";
 import LoginPage, { LoginForm } from "./pages/Login";
@@ -99,7 +99,7 @@ export default function App() {
   const [route, setRoute] = useState<RouteKey>(currentRoute());
   /** 已經開過的頁面：切換頁籤時只隱藏、不卸載，設定才不會消失 */
   const [visited, setVisited] = useState<Set<RouteKey>>(() => new Set([currentRoute()]));
-  const { hydrate, ready, account, toasts, settings, importText, notify, syncLibrary } = useStore();
+  const { hydrate, ready, account, toasts, settings, importText, notify, syncLibrary, saves, currentSaveId, switchSave } = useStore();
   const { ready: authReady, user, config, init: initAuth, signOut } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
   /** 手機「更多」面板 */
@@ -313,6 +313,32 @@ export default function App() {
           ) : (
             <div className="tiny dim" style={{ padding: "0 8px" }}>尚未匯入存檔</div>
           )}
+          {saves.length > 0 && (
+            <div className="card" style={{ padding: 9 }}>
+              <div className="row between" style={{ gap: 6, marginBottom: 6 }}>
+                <span className="tiny dim">遊戲存檔（{saves.length}）</span>
+                <button type="button" className="btn btn-sm btn-ghost" style={{ padding: "1px 6px" }} onClick={() => go("import")}>
+                  管理
+                </button>
+              </div>
+              <select
+                className="select"
+                value={currentSaveId ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (id) void switchSave(id);
+                }}
+                title="切換要分析的 JSON 存檔"
+              >
+                {!currentSaveId && <option value="">未載入存檔</option>}
+                {saves.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.wizardId ? `ID ${s.wizardId} · ` : ""}{s.fileName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="row tiny dim" style={{ padding: "0 8px", gap: 6 }}>
             <ShieldCheck size={13} /> 資料只在你的瀏覽器運算
           </div>
@@ -332,7 +358,7 @@ export default function App() {
             <div className="sub">{meta.sub}</div>
             {account && (
               <div className="tiny dim" style={{ marginTop: 2 }}>
-                目前存檔：{account.fileName} · {new Date(account.importedAt).toLocaleString("zh-TW")} · {account.runes.length} 顆符文
+                目前存檔：{accountGameLabel(account)} · {account.fileName} · {new Date(account.importedAt).toLocaleString("zh-TW")} · {account.runes.length} 顆符文
               </div>
             )}
           </div>

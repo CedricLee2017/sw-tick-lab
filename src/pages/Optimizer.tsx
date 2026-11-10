@@ -3,7 +3,7 @@ import {
   AlertTriangle, ArrowRight, Copy, Loader2, Save, Sparkles, Wand2, Gauge, ChevronDown, Plus, Target, X, Zap,
   Lock, Unlock, Ban, Pin, RotateCcw, Shirt,
 } from "lucide-react";
-import { useStore, unitLabel, unitLabelById, type Loadout, type RuneFlag } from "../store";
+import { useLibrary, useStore, unitLabel, unitLabelById, type Loadout, type RuneFlag } from "../store";
 import { useSummary } from "../lib/accountStats";
 import { MonsterIcon, NumberField, NumberInput, RuneBoard, RuneCard, StatGrid, TickBadge, Modal, fmt, setColor, statLabel, statSuffix, statText } from "../components/ui";
 import { MonsterPickerField } from "../components/MonsterPicker";
@@ -208,7 +208,7 @@ export default function OptimizerPage() {
   const notify = useStore((s) => s.notify);
   const setRuneFlag = useStore((s) => s.setRuneFlag);
   const equipRunes = useStore((s) => s.equipRunes);
-  const loadouts = useStore((s) => s.loadouts);
+  const { loadouts } = useLibrary();
 
   const [monsterId, setMonsterId] = useState(0);
   const [setGroups, setSetGroups] = useState<{ set: number; pieces: number }[]>([
