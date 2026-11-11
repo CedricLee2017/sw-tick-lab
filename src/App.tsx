@@ -104,8 +104,8 @@ export default function App() {
   const [loginOpen, setLoginOpen] = useState(false);
   /** 手機「更多」面板 */
   const [moreOpen, setMoreOpen] = useState(false);
-  /** 自動還原雲端存檔只嘗試一次，避免每次重新渲染都重打 API */
-  const cloudTried = useRef(false);
+  /** 自動還原雲端存檔：每個會員只嘗試一次，避免換帳號後不再還原或重複重打 API */
+  const cloudTriedFor = useRef<number | null>(null);
 
   useEffect(() => {
     void hydrate();
@@ -119,8 +119,8 @@ export default function App() {
   // 本機已有存檔就不覆蓋，避免蓋掉剛上符的符文配置。
   useEffect(() => {
     if (!ready || !authReady || !user || !config?.uploads) return;
-    if (cloudTried.current) return;
-    cloudTried.current = true;
+    if (cloudTriedFor.current === user.id) return;
+    cloudTriedFor.current = user.id;
 
     void (async () => {
       try {
@@ -142,6 +142,11 @@ export default function App() {
       }
     })();
   }, [ready, authReady, user, config?.uploads, account, importText, notify]);
+
+  // 登出後清除標記，下次登入（即使是同一個帳號）仍會再嘗試還原一次。
+  useEffect(() => {
+    if (!user) cloudTriedFor.current = null;
+  }, [user]);
 
   // 登入後合併本機與雲端的儲存庫（配裝 / 預設隊）。
   useEffect(() => {

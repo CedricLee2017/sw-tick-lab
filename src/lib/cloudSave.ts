@@ -70,15 +70,7 @@ export async function listMyUploads(limit = 10): Promise<CloudUpload[]> {
   }));
 }
 
-/** GET /api/uploads/latest → 最新一筆存檔原文；沒有紀錄時回 null。 */
-export async function loadLatestSave(): Promise<LatestCloudSave | null> {
-  const res = await fetch("/api/uploads/latest", {
-    credentials: "same-origin",
-    cache: "no-store",
-  });
-  if (res.status === 204 || res.status === 401) return null;
-  if (!res.ok) throw new Error(`讀取雲端存檔失敗（HTTP ${res.status}）`);
-
+async function readSaveResponse(res: Response): Promise<LatestCloudSave | null> {
   const text = await res.text();
   if (!text.trim()) return null;
 
@@ -91,6 +83,35 @@ export async function loadLatestSave(): Promise<LatestCloudSave | null> {
     runeCount: num(res.headers.get("x-sw-runes")),
     text,
   };
+}
+
+/** GET /api/uploads/latest → 最新一筆存檔原文；沒有紀錄時回 null。 */
+export async function loadLatestSave(): Promise<LatestCloudSave | null> {
+  const res = await fetch("/api/uploads/latest", {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (res.status === 204 || res.status === 401) return null;
+  if (!res.ok) throw new Error(`讀取雲端存檔失敗（HTTP ${res.status}）`);
+
+  return readSaveResponse(res);
+}
+
+/** GET /api/uploads/:id → 指定一筆存檔原文（只能讀自己的紀錄）。 */
+export async function loadSave(id: number): Promise<LatestCloudSave> {
+  const res = await fetch(`/api/uploads/${id}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (res.status === 401) throw new Error("登入已過期，請重新登入");
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || `讀取雲端存檔失敗（HTTP ${res.status}）`);
+  }
+
+  const save = await readSaveResponse(res);
+  if (!save) throw new Error("雲端存檔是空的");
+  return save;
 }
 
 /** 把 Unix 秒轉成在地時間字串。 */
