@@ -262,8 +262,53 @@ const CONTEXTS: DeckContext[] = ["arena", "guild", "dungeon"];
 const BUDGET_KEYS: BudgetKey[] = ["fast", "standard", "full"];
 /** 結果頁一次顯示幾組替代隊伍 */
 const RESULT_PAGE_SIZE = 10;
+/** 表格檢視一頁幾組 */
+const TABLE_PAGE_SIZE = 20;
 /** 可選的回傳隊伍數（1 組主結果 + 其他替代） */
 const RESULT_COUNTS = [5, 10, 20, 50, 100] as const;
+
+/** 表格檢視可顯示 / 篩選 / 排序的面板數值 */
+type TableStatKey = "panelSpd" | "spd" | "hp" | "atk" | "def" | "cr" | "cd" | "res" | "acc" | "ehp";
+const TABLE_STATS: { key: TableStatKey; label: string; pct?: boolean }[] = [
+  { key: "panelSpd", label: "面板速" },
+  { key: "spd", label: "戰鬥速" },
+  { key: "hp", label: "體力" },
+  { key: "atk", label: "攻擊" },
+  { key: "def", label: "防禦" },
+  { key: "cr", label: "暴率", pct: true },
+  { key: "cd", label: "暴傷", pct: true },
+  { key: "res", label: "抵抗", pct: true },
+  { key: "acc", label: "命中", pct: true },
+  { key: "ehp", label: "EHP" },
+];
+const TABLE_STAT_LABEL: Record<TableStatKey, string> = Object.fromEntries(
+  TABLE_STATS.map((s) => [s.key, s.label]),
+) as Record<TableStatKey, string>;
+
+interface TableFilter {
+  member: number;
+  stat: TableStatKey;
+  min?: number;
+  max?: number;
+}
+interface TableSort {
+  member: number | null;
+  stat: TableStatKey | "score";
+  dir: "asc" | "desc";
+}
+
+/** 表格顯示 / 篩選 / 排序用的數值（面板速優先使用 panelSpd） */
+function tableStatValue(m: TeamBuild, key: TableStatKey): number {
+  if (key === "ehp") return m.ehp;
+  if (key === "panelSpd") return m.stats.panelSpd ?? m.stats.spd;
+  return m.stats[key];
+}
+
+function tableStatText(value: number, stat: TableStatKey): string {
+  if (stat === "cr" || stat === "cd" || stat === "res" || stat === "acc") return `${Math.round(value)}%`;
+  if (stat === "hp" || stat === "atk" || stat === "def" || stat === "ehp") return fmt(value);
+  return String(Math.round(value));
+}
 
 /** 一次配幾隊（每隊 3～5 人，合計最多 15 隻） */
 type TeamCount = 1 | 2 | 3;
@@ -376,6 +421,16 @@ export default function TeamOptimizerPage() {
   const [budgetKey, setBudgetKey] = useState<BudgetKey>(saved?.budgetKey ?? "standard");
   const [resultCount, setResultCount] = useState<number>(saved?.resultCount ?? 20);
   const [optMode, setOptMode] = useState<OptimizeMode>(saved?.optMode ?? "team");
+  /** 結果顯示方式：卡片或表格 */
+  const [resultView, setResultView] = useState<"cards" | "table">("cards");
+  /** 表格篩選 / 排序 / 分頁 */
+  const [tableFilters, setTableFilters] = useState<TableFilter[]>([]);
+  const [tableSort, setTableSort] = useState<TableSort>({ member: null, stat: "score", dir: "desc" });
+  const [tablePage, setTablePage] = useState(0);
+  const [filterMember, setFilterMember] = useState(0);
+  const [filterStat, setFilterStat] = useState<TableStatKey>("panelSpd");
+  const [filterMin, setFilterMin] = useState("");
+  const [filterMax, setFilterMax] = useState("");
 
   /** 逐隻配＋排除：目前已選的配裝（null = 尚未選） */
   const [seqPicks, setSeqPicks] = useState<(TopBuild | null)[]>(() => {
@@ -542,6 +597,11 @@ export default function TeamOptimizerPage() {
       /* 忽略儲存失敗（例如容量不足） */
     }
   }, [templateId, size, teams, content, members, leadPcts, budgetKey, resultCount, optMode, oppSpd, plan, altIndex, account?.importedAt]);
+
+  // 表格篩選 / 排序變動或換了結果時回到第 1 頁
+  useEffect(() => {
+    setTablePage(0);
+  }, [tableFilters, tableSort, plan]);
 
   // 隊長技全部由數值欄位決定，不再依魔靈自動判斷
 
@@ -1553,6 +1613,32 @@ export default function TeamOptimizerPage() {
     else startSeqAt(0, Array.from({ length: members.length }, () => null));
   };
 
+  const addTableFilter = () => {
+    const min = filterMin.trim() === "" ? undefined : Number(filterMin);
+    const max = filterMax.trim() === "" ? undefined : Number(filterMax);
+    if (min == null && max == null) return notify("請先輸入下限或上限", "err");
+    if ((min != null && !Number.isFinite(min)) || (max != null && !Number.isFinite(max))) {
+      return notify("篩選數值格式不正確", "err");
+    }
+    if (min != null && max != null && min > max) return notify("篩選下限不可高於上限", "err");
+    const member = Math.min(filterMember, Math.max(0, (plan?.members.length ?? 1) - 1));
+    setTableFilters((prev) => [...prev, { member, stat: filterStat, min, max }]);
+    setFilterMin("");
+    setFilterMax("");
+  };
+
+  const removeTableFilter = (index: number) => {
+    setTableFilters((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const toggleHeaderSort = (member: number, stat: TableStatKey) => {
+    setTableSort((prev) =>
+      prev.member === member && prev.stat === stat
+        ? { ...prev, dir: prev.dir === "desc" ? "asc" : "desc" }
+        : { member, stat, dir: "desc" },
+    );
+  };
+
   const run = () => {
     if (!account) return notify("請先匯入存檔", "err");
     if (members.length !== teams * size) return notify("隊伍人數不一致，請重新選擇", "err");
@@ -1765,6 +1851,32 @@ export default function TeamOptimizerPage() {
   const seqUsedRunes = new Set<number>(seqPicks.flatMap((p) => p?.runeIds ?? []));
   const seqCurrent = members[seqIndex];
   const seqCurrentView = seqCurrent ? viewOf(seqCurrent.unitId) : undefined;
+
+  /** 表格檢視：套用篩選、排序後再分頁（每頁 20 組） */
+  const tableRows = allPlans
+    .map((p, index) => ({ p, index }))
+    .filter(({ p }) =>
+      tableFilters.every((f) => {
+        const m = p.members[f.member];
+        if (!m) return false;
+        const v = tableStatValue(m, f.stat);
+        return (f.min == null || v >= f.min) && (f.max == null || v <= f.max);
+      }),
+    );
+  const sortValueOf = (p: TeamPlan): number => {
+    if (tableSort.member == null || tableSort.stat === "score") return p.teamScore;
+    const m = p.members[tableSort.member];
+    return m ? tableStatValue(m, tableSort.stat) : 0;
+  };
+  tableRows.sort((a, b) => {
+    const d = sortValueOf(a.p) - sortValueOf(b.p);
+    if (d !== 0) return tableSort.dir === "asc" ? d : -d;
+    return b.p.teamScore - a.p.teamScore;
+  });
+  const tablePageCount = Math.max(1, Math.ceil(tableRows.length / TABLE_PAGE_SIZE));
+  const tablePageSafe = Math.min(tablePage, tablePageCount - 1);
+  const tablePageStart = tablePageSafe * TABLE_PAGE_SIZE;
+  const tablePageRows = tableRows.slice(tablePageStart, tablePageStart + TABLE_PAGE_SIZE);
 
   return (
     <>
@@ -2926,59 +3038,80 @@ export default function TeamOptimizerPage() {
               )}
             </div>
             <div className="row wrap" style={{ gap: 5 }}>
-              <span className="tiny dim" style={{ marginRight: 2 }}>
-                隊伍 {altIndex + 1} / {allPlans.length}
-              </span>
-              {resultPageCount > 1 && (
-                <button
-                  type="button"
-                  className="chip muted"
-                  style={{ cursor: "pointer" }}
-                  disabled={resultPage === 0}
-                  onClick={() => setAltIndex(Math.max(0, (resultPage - 1) * RESULT_PAGE_SIZE))}
-                  title="上一頁隊伍"
-                >
-                  ‹
-                </button>
-              )}
-              {pagePlans.map((p, i) => {
-                const idx = resultPageStart + i;
-                return (
-                  <button
-                    key={idx}
-                    type="button"
-                    className={`chip ${altIndex === idx ? "gold" : "muted"}`}
-                    style={{ cursor: "pointer" }}
-                    title={`隊伍分數 ${Math.round(p.teamScore * 10) / 10} / ${totalWeight}（${Math.round((p.teamScore / Math.max(1, totalWeight)) * 100)}%）`}
-                    onClick={() => setAltIndex(idx)}
-                  >
-                    {idx + 1}
-                  </button>
-                );
-              })}
-              {resultPageCount > 1 && (
-                <button
-                  type="button"
-                  className="chip muted"
-                  style={{ cursor: "pointer" }}
-                  disabled={resultPage >= resultPageCount - 1}
-                  onClick={() => setAltIndex(Math.min(allPlans.length - 1, (resultPage + 1) * RESULT_PAGE_SIZE))}
-                  title="下一頁隊伍"
-                >
-                  ›
-                </button>
-              )}
+              <span className="tiny dim">顯示</span>
               <button
                 type="button"
-                className="btn btn-sm btn-ghost team-collapse-toggle"
-                onClick={() =>
-                  setOpenResults((prev) =>
-                    prev.size > 0 ? new Set() : new Set(activePlan.members.map((m) => m.unitId)),
-                  )
-                }
+                className={`chip ${resultView === "cards" ? "gold" : "muted"}`}
+                style={{ cursor: "pointer" }}
+                onClick={() => setResultView("cards")}
               >
-                {openResults.size > 0 ? "收合全部" : "展開全部"}
+                卡片
               </button>
+              <button
+                type="button"
+                className={`chip ${resultView === "table" ? "gold" : "muted"}`}
+                style={{ cursor: "pointer" }}
+                onClick={() => setResultView("table")}
+              >
+                表格
+              </button>
+              {resultView === "cards" && (
+                <>
+                  <span className="tiny dim" style={{ marginRight: 2 }}>
+                    隊伍 {altIndex + 1} / {allPlans.length}
+                  </span>
+                  {resultPageCount > 1 && (
+                    <button
+                      type="button"
+                      className="chip muted"
+                      style={{ cursor: "pointer" }}
+                      disabled={resultPage === 0}
+                      onClick={() => setAltIndex(Math.max(0, (resultPage - 1) * RESULT_PAGE_SIZE))}
+                      title="上一頁隊伍"
+                    >
+                      ‹
+                    </button>
+                  )}
+                  {pagePlans.map((p, i) => {
+                    const idx = resultPageStart + i;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        className={`chip ${altIndex === idx ? "gold" : "muted"}`}
+                        style={{ cursor: "pointer" }}
+                        title={`隊伍分數 ${Math.round(p.teamScore * 10) / 10} / ${totalWeight}（${Math.round((p.teamScore / Math.max(1, totalWeight)) * 100)}%）`}
+                        onClick={() => setAltIndex(idx)}
+                      >
+                        {idx + 1}
+                      </button>
+                    );
+                  })}
+                  {resultPageCount > 1 && (
+                    <button
+                      type="button"
+                      className="chip muted"
+                      style={{ cursor: "pointer" }}
+                      disabled={resultPage >= resultPageCount - 1}
+                      onClick={() => setAltIndex(Math.min(allPlans.length - 1, (resultPage + 1) * RESULT_PAGE_SIZE))}
+                      title="下一頁隊伍"
+                    >
+                      ›
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost team-collapse-toggle"
+                    onClick={() =>
+                      setOpenResults((prev) =>
+                        prev.size > 0 ? new Set() : new Set(activePlan.members.map((m) => m.unitId)),
+                      )
+                    }
+                  >
+                    {openResults.size > 0 ? "收合全部" : "展開全部"}
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 className="btn btn-sm btn-ghost team-collapse-toggle"
@@ -3002,7 +3135,220 @@ export default function TeamOptimizerPage() {
             </div>
           )}
 
-          {Array.from({ length: teams }, (_, t) => {
+          {resultView === "table" && (
+            <div style={{ marginTop: 12 }}>
+              <div className="row wrap" style={{ gap: 6, alignItems: "center" }}>
+                <span className="tiny dim">篩選</span>
+                <select
+                  className="select"
+                  style={{ width: 150 }}
+                  value={filterMember}
+                  onChange={(e) => setFilterMember(Number(e.target.value))}
+                >
+                  {activePlan.members.map((m, i) => (
+                    <option key={i} value={i}>{nameOf(m.unitId, m.master)}</option>
+                  ))}
+                </select>
+                <select
+                  className="select"
+                  style={{ width: 120 }}
+                  value={filterStat}
+                  onChange={(e) => setFilterStat(e.target.value as TableStatKey)}
+                >
+                  {TABLE_STATS.map((s) => (
+                    <option key={s.key} value={s.key}>{s.label}</option>
+                  ))}
+                </select>
+                <input
+                  className="input mono"
+                  style={{ width: 82 }}
+                  type="number"
+                  placeholder="下限"
+                  value={filterMin}
+                  onChange={(e) => setFilterMin(e.target.value)}
+                />
+                <input
+                  className="input mono"
+                  style={{ width: 82 }}
+                  type="number"
+                  placeholder="上限"
+                  value={filterMax}
+                  onChange={(e) => setFilterMax(e.target.value)}
+                />
+                <button type="button" className="btn btn-sm" onClick={addTableFilter}>加入篩選</button>
+                <span className="tiny dim" style={{ marginLeft: 8 }}>排序</span>
+                <select
+                  className="select"
+                  style={{ width: 190 }}
+                  value={tableSort.member == null ? "score" : `${tableSort.member}:${tableSort.stat}`}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "score") {
+                      setTableSort({ member: null, stat: "score", dir: "desc" });
+                      return;
+                    }
+                    const [mi, stat] = v.split(":");
+                    setTableSort({ member: Number(mi), stat: stat as TableStatKey, dir: "desc" });
+                  }}
+                >
+                  <option value="score">組合分數</option>
+                  {activePlan.members.flatMap((m, mi) =>
+                    TABLE_STATS.map((s) => (
+                      <option key={`${mi}:${s.key}`} value={`${mi}:${s.key}`}>
+                        {nameOf(m.unitId, m.master)} · {s.label}
+                      </option>
+                    )),
+                  )}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => setTableSort((prev) => ({ ...prev, dir: prev.dir === "asc" ? "desc" : "asc" }))}
+                  title="切換排序方向"
+                >
+                  {tableSort.dir === "asc" ? "↑ 低到高" : "↓ 高到低"}
+                </button>
+                {tableFilters.length > 0 && (
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => setTableFilters([])}>
+                    清除全部
+                  </button>
+                )}
+              </div>
+
+              {tableFilters.length > 0 && (
+                <div className="row wrap" style={{ gap: 5, marginTop: 7 }}>
+                  {tableFilters.map((f, i) => (
+                    <span key={i} className="chip muted">
+                      {activePlan.members[f.member] ? nameOf(activePlan.members[f.member].unitId, activePlan.members[f.member].master) : `第 ${f.member + 1} 隻`}
+                      {" · "}
+                      {TABLE_STAT_LABEL[f.stat]}
+                      {f.min != null ? ` ≥ ${f.min}` : ""}
+                      {f.max != null ? ` ≤ ${f.max}` : ""}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost btn-icon"
+                        style={{ marginLeft: 3, padding: 0 }}
+                        onClick={() => removeTableFilter(i)}
+                        title="移除這個篩選"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="row between wrap" style={{ gap: 8, marginTop: 8 }}>
+                <span className="tiny dim">
+                  符合 <b className="gold">{tableRows.length}</b> / {allPlans.length} 組
+                  · 每頁 {TABLE_PAGE_SIZE} 組
+                </span>
+                <div className="row" style={{ gap: 5 }}>
+                  <button
+                    type="button"
+                    className="chip muted"
+                    style={{ cursor: "pointer" }}
+                    disabled={tablePageSafe <= 0}
+                    onClick={() => setTablePage((p) => Math.max(0, p - 1))}
+                    title="上一頁"
+                  >
+                    ‹
+                  </button>
+                  <span className="tiny dim">第 {tablePageSafe + 1} / {tablePageCount} 頁</span>
+                  <button
+                    type="button"
+                    className="chip muted"
+                    style={{ cursor: "pointer" }}
+                    disabled={tablePageSafe >= tablePageCount - 1}
+                    onClick={() => setTablePage((p) => Math.min(tablePageCount - 1, p + 1))}
+                    title="下一頁"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+
+              <div className="table-scroll" style={{ marginTop: 6 }}>
+                <table className="table" style={{ minWidth: 150 + activePlan.members.length * 650 }}>
+                  <thead>
+                    <tr>
+                      <th rowSpan={2}>#</th>
+                      <th
+                        rowSpan={2}
+                        style={{ cursor: "pointer" }}
+                        onClick={() =>
+                          setTableSort((prev) =>
+                            prev.member == null
+                              ? { ...prev, dir: prev.dir === "desc" ? "asc" : "desc" }
+                              : { member: null, stat: "score", dir: "desc" },
+                          )
+                        }
+                        title="點擊依組合分數排序"
+                      >
+                        分數{tableSort.member == null ? (tableSort.dir === "asc" ? " ↑" : " ↓") : ""}
+                      </th>
+                      {activePlan.members.map((m, mi) => (
+                        <th key={mi} colSpan={TABLE_STATS.length} style={{ textAlign: "center" }}>
+                          {nameOf(m.unitId, m.master)}
+                        </th>
+                      ))}
+                    </tr>
+                    <tr>
+                      {activePlan.members.flatMap((m, mi) =>
+                        TABLE_STATS.map((s) => {
+                          const active = tableSort.member === mi && tableSort.stat === s.key;
+                          return (
+                            <th
+                              key={`${mi}:${s.key}`}
+                              style={{ cursor: "pointer", whiteSpace: "nowrap" }}
+                              onClick={() => toggleHeaderSort(mi, s.key)}
+                              title="點擊切換排序（再點一次切換高低）"
+                            >
+                              {s.label}{active ? (tableSort.dir === "asc" ? " ↑" : " ↓") : ""}
+                            </th>
+                          );
+                        }),
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tablePageRows.map(({ p, index }) => (
+                      <tr
+                        key={index}
+                        style={{ cursor: "pointer", background: altIndex === index ? "rgba(242,198,92,.08)" : undefined }}
+                        onClick={() => setAltIndex(index)}
+                      >
+                        <td className="num"><b>#{index + 1}</b></td>
+                        <td className="num">
+                          {Math.round(p.teamScore * 10) / 10}
+                          <span className="tiny dim"> / {totalWeight}</span>
+                        </td>
+                        {p.members.flatMap((m, mi) =>
+                          TABLE_STATS.map((s) => (
+                            <td key={`${mi}:${s.key}`} className="num">
+                              {tableStatText(tableStatValue(m, s.key), s.key)}
+                            </td>
+                          )),
+                        )}
+                      </tr>
+                    ))}
+                    {tableRows.length === 0 && (
+                      <tr>
+                        <td colSpan={2 + activePlan.members.length * TABLE_STATS.length} className="tiny dim" style={{ textAlign: "center", padding: 18 }}>
+                          沒有符合目前篩選條件的組合，請放寬下限 / 上限或清除篩選。
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="tiny dim" style={{ marginTop: 5 }}>
+                點表格列可切換到該組（再按上方「卡片」看完整符文）；點欄位標題可依該數值排序，再點一次切換高低。
+              </div>
+            </div>
+          )}
+
+          {resultView === "cards" && (Array.from({ length: teams }, (_, t) => {
             // 結果卡片依攻擊順序排列（配出來的速度也會依這個順序遞減）
             const teamBuilds = [...activePlan.members.slice(t * size, (t + 1) * size)].sort(
               (a, b) => a.order - b.order,
@@ -3131,7 +3477,7 @@ export default function TeamOptimizerPage() {
                 </div>
               </div>
             );
-          })}
+          }))}
 
           <div className="row wrap" style={{ gap: 6, marginTop: 12 }}>
             <button type="button" className="btn btn-primary btn-sm" onClick={equipPlan}><Shirt size={13} /> {teams > 1 ? "全部上符" : "整隊上符"}</button>
