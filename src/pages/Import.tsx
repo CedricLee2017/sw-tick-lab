@@ -134,9 +134,14 @@ export default function ImportPage() {
     const acc = useStore.getState().account;
     const auth = useAuth.getState();
     if (acc && auth.user && auth.config?.uploads && !name.startsWith("demo-account")) {
-      void uploadSave(text, name, { wizard: acc.wizard, monsters: acc.units.length, runes: acc.runes.length })
-        .then(() => {
-          notify("已自動備份存檔");
+      void uploadSave(text, name, {
+        wizard: acc.wizard,
+        wizardId: acc.wizardId,
+        monsters: acc.units.length,
+        runes: acc.runes.length,
+      })
+        .then((saved) => {
+          notify(saved.replaced > 0 ? "已自動備份存檔，並取代同一個遊戲 ID 的舊備份" : "已自動備份存檔");
           void refreshCloud();
         })
         .catch((err) => notify(`存檔備份失敗：${err instanceof Error ? err.message : "未知錯誤"}`, "err"));

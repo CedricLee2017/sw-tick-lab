@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS uploads (
   size          INTEGER NOT NULL DEFAULT 0,
   sha256        TEXT,
   wizard        TEXT,
+  -- 遊戲內玩家 ID（wizard_id）；同一個會員上傳同一個 ID 時取代舊備份
+  wizard_id     INTEGER,
   monster_count INTEGER,
   rune_count    INTEGER,
   created_at    INTEGER NOT NULL,
@@ -47,6 +49,7 @@ CREATE TABLE IF NOT EXISTS uploads (
 
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_uploads_created ON uploads(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uploads_user_wizard ON uploads(user_id, wizard_id, created_at DESC);
 
 -- 執行期開關（例如 force_login），改一行 SQL 就能生效，不必重新部署
 CREATE TABLE IF NOT EXISTS settings (

@@ -116,6 +116,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   const now = Math.floor(Date.now() / 1000);
   const wizard = decodeHeader(request.headers.get("x-sw-wizard")).trim().slice(0, 80) || null;
+  const rawWizardId = Number(request.headers.get("x-sw-wizard-id") ?? "");
+  const wizardId = Number.isInteger(rawWizardId) && rawWizardId > 0 ? rawWizardId : null;
   const who = wizard ? `${safeSegment(wizard)}-` : "";
   const key = `saves/u${user.id}/${who}${stamp()}-${name}`;
   const monsters = Number(request.headers.get("x-sw-monsters") ?? 0) || null;
@@ -127,15 +129,55 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       customMetadata: { userId: String(user.id), fileName: name },
     });
 
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO uploads (user_id, file_id, object_key, storage, file_name, size, wizard, monster_count, rune_count, created_at)
-         VALUES (?1, NULL, ?2, 'r2', ?3, ?4, ?5, ?6, ?7, ?8)`,
-      ).bind(user.id, key, name, size, wizard, monsters, runes, now),
-      env.DB.prepare("UPDATE users SET consent_at = COALESCE(consent_at, ?1) WHERE id = ?2").bind(now, user.id),
-    ]);
+    const inserted = await env.DB.prepare(
+      `INSERT INTO uploads (user_id, file_id, object_key, storage, file_name, size, wizard, wizard_id, monster_count, rune_count, created_at)
+       VALUES (?1, NULL, ?2, 'r2', ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+       RETURNING id`,
+    )
+      .bind(user.id, key, name, size, wizard, wizardId, monsters, runes, now)
+      .first<{ id: number }>();
 
-    return json({ ok: true, key, name });
+    await env.DB.prepare("UPDATE users SET consent_at = COALESCE(consent_at, ?1) WHERE id = ?2")
+      .bind(now, user.id)
+      .run();
+
+    // 同一個遊戲 ID 只保留最新一份；舊的 R2 檔案一起刪掉。
+    // 舊版紀錄沒有 wizard_id，退回用召喚師名稱比對（只比對自己的紀錄）。
+    let replaced = 0;
+    if (wizardId && inserted?.id) {
+      try {
+        const rows = await env.DB.prepare(
+          `SELECT id, object_key, wizard, wizard_id FROM uploads
+           WHERE user_id = ?1 AND deleted_at IS NULL AND id <> ?2`,
+        )
+          .bind(user.id, inserted.id)
+          .all<{ id: number; object_key: string | null; wizard: string | null; wizard_id: number | null }>();
+
+        const matches = (rows.results ?? []).filter((row) =>
+          row.wizard_id != null
+            ? Number(row.wizard_id) === wizardId
+            : Boolean(wizard) && decodeHeader(row.wizard) === wizard,
+        );
+
+        if (matches.length) {
+          await Promise.allSettled(
+            matches.map((row) => (row.object_key ? env.SAVES.delete(row.object_key) : Promise.resolve())),
+          );
+          const deletedAt = Math.floor(Date.now() / 1000);
+          await env.DB.batch(
+            matches.map((row) =>
+              env.DB.prepare("UPDATE uploads SET deleted_at = ?1 WHERE id = ?2").bind(deletedAt, row.id),
+            ),
+          );
+          replaced = matches.length;
+        }
+      } catch (err) {
+        // 取代舊檔失敗不影響這次上傳；使用者仍可從清單手動刪除。
+        console.error("replace old saves failed", err instanceof Error ? err.message : err);
+      }
+    }
+
+    return json({ ok: true, key, name, replaced });
   } catch (err) {
     console.error("upload failed", err instanceof Error ? err.message : err);
     return bad(502, "存檔上傳失敗，請稍後再試");
