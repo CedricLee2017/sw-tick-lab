@@ -16,7 +16,7 @@
   - 使用 sw-exporter 官方 stat / set ID（速度 = 8、暴走 = 13、意志 = 15…），並正確換算遠古符文（`class` / `rank` +10）。
   - 容忍多層包裝（`data` / `save` / `swop`）、以 id 為 key 的物件格式，以及字串形式的套裝 / 屬性名稱。
 - **安裝成 App（PWA）**：側邊欄與手機頂部都有「安裝成 App」按鈕。Chrome / Edge / Android 會叫用瀏覽器原生的安裝提示；iPhone / iPad 的 Safari 會顯示「分享 → 加入主畫面」圖解步驟。安裝後以獨立視窗開啟，Service Worker 會快取介面，短暫離線也能開啟（API 與存檔上傳仍需要網路）。
-- **自動還原雲端存檔**：登入後如果本機沒有存檔，會自動載回上次上傳的 JSON（換手機、換電腦都一樣）；「匯入」頁的「雲端存檔」卡片會列出這個帳號最近 10 筆備份，每一筆都能直接載入或下載原始 JSON。本機已有存檔時不自動覆蓋，按「載入」即可切換。
+- **自動還原雲端存檔**：登入後如果本機沒有存檔，會自動載回上次上傳的 JSON（換手機、換電腦都一樣）；「匯入」頁的「雲端存檔」卡片會列出這個帳號的備份（每次 10 筆、可載入更多），每一筆都能直接載入、下載原始 JSON 或**永久刪除**。本機已有存檔時不自動覆蓋，按「載入」即可切換。
 - **首頁 QR code**：首頁（匯入頁）與登入頁都有「用手機或平板開啟」的 QR code，內容是目前網站的網址；手機或平板掃描就能直接開啟同一個網站，登入後會自動還原存檔與儲存庫。旁邊也能一鍵複製網址。QR code 在手機／平板尺寸會自動隱藏。
 - **帳號總覽**：魔靈數量、符文數量、Speed Tick 分布、一速排名、套裝統計。
 - **速度實驗室**：Tick ↔ 速度雙向換算、各 Tick 門檻表、建築與隊長技加成試算、隊伍出手順序模擬。
@@ -246,13 +246,13 @@ npx wrangler pages deploy dist --project-name sw-tick-lab
 ```bash
 npx wrangler d1 execute sw-tick-lab-db --remote --command "UPDATE settings SET v='1' WHERE k='force_login'"
 ```
-- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/logout`、`GET /api/uploads`（自己的上傳紀錄）、`POST /api/uploads`、`GET /api/uploads/latest`（最新存檔原文）、`GET /api/uploads/:id`（自己的指定存檔原文／下載）、`GET|PUT /api/library`（儲存庫同步），以及 `/api/admin/*`。
+- **已上線的 API**：`GET /api/config`、`GET /api/auth/me`、`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/logout`、`GET /api/uploads`（自己的上傳紀錄）、`POST /api/uploads`、`GET /api/uploads/latest`（最新存檔原文）、`GET /api/uploads/:id`（自己的指定存檔原文／下載）、`DELETE /api/uploads/:id`（刪除自己的雲端存檔）、`GET|PUT /api/library`（儲存庫同步），以及 `/api/admin/*`。
 - **重設密碼**：管理員可在本機執行 `npm run set-password -- email`（互動輸入），或加上 `--generate` 產生臨時密碼；寫入的是同一套 PBKDF2 verifier 格式，網站可直接登入。
 - **存檔自動備份（Cloudflare R2）**：登入後在「匯入」頁上傳 JSON，瀏覽器解析完會背景呼叫 `POST /api/uploads`；Worker 把原始 JSON 串流寫進 R2（`saves/u{會員}/…`），再於 D1 記一筆（玩家遊戲 ID、檔名、大小、魔靈數、符文數）。R2 的 object key 與後台下載檔名都會帶上玩家遊戲 ID，方便辨識。
   - 每位會員每 24 小時最多 30 次、單檔上限 25MB；示範帳號不會上傳。
   - 免費額度 10GB／月，下載不計流量費。
   - 建立 bucket：`npx wrangler r2 bucket create swticklab-saves`（`wrangler.toml` 已綁定 `SAVES`）。
-- **雲端存檔還原**：登入後如果本機還沒有任何存檔，App 會自動呼叫 `GET /api/uploads/latest` 把最新一筆存檔載回來（含換手機／換電腦）。本機已有存檔時不會自動覆蓋，避免蓋掉剛上符的配置；需要時可在「匯入」頁的「雲端存檔」卡片看到最近 10 筆備份，按「載入」還原任一筆，或按右側下載圖示取回原始 JSON。清單只會顯示目前登入會員自己的紀錄（`GET /api/uploads/:id` 也會驗證 `user_id`）。`importText` 只在本機解析，不會因此重複上傳。
+- **雲端存檔還原**：登入後如果本機還沒有任何存檔，App 會自動呼叫 `GET /api/uploads/latest` 把最新一筆存檔載回來（含換手機／換電腦）。本機已有存檔時不會自動覆蓋，避免蓋掉剛上符的配置；需要時可在「匯入」頁的「雲端存檔」卡片看到自己的備份（每次載入 10 筆，可再載入更舊的），按「載入」還原任一筆、按右側下載圖示取回原始 JSON，或按「刪除」永久移除該筆雲端備份（同時刪除 R2 檔案並標記 D1 紀錄，不影響本機已載入的存檔）。清單只會顯示目前登入會員自己的紀錄（`GET`／`DELETE /api/uploads/:id` 都會驗證 `user_id`）。`importText` 只在本機解析，不會因此重複上傳。
 - **儲存庫同步**：登入後把「配裝儲存庫」與「預設隊儲存庫」同步到 R2 的 `library/u{會員}.json`（沿用 `SAVES` bucket，不需要新的 D1 資料表）。登入時先以 `id` 取聯集合併本機與雲端資料（本機優先，上限各 60 筆），本機有雲端沒有的項目就回寫；之後每次儲存／刪除配裝或預設隊都會延遲 1.2 秒自動上傳。
 - **換帳號保護**：IndexedDB 會記住本機資料屬於哪個會員（`swtick:owner`）。同一個瀏覽器換帳號登入時，會先清掉前一個會員的存檔與儲存庫，再從新帳號的雲端還原，避免把別人的資料同步進新帳號。
 - **後台 `/admin`**（出現在側邊欄的「後台」）：會員列表、搜尋、停用／啟用、設為管理員；上傳紀錄會顯示玩家遊戲 ID（`wizard_info` 的暱稱，沒有暱稱時用 `wizard_id`）、原始檔名、下載原始 JSON、刪除（同步刪 R2）、容量統計。

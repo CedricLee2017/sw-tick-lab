@@ -39,8 +39,10 @@ function num(raw: string | null): number {
 }
 
 /** GET /api/uploads → 自己的上傳紀錄（新到舊）。未登入時回空陣列。 */
-export async function listMyUploads(limit = 10): Promise<CloudUpload[]> {
-  const res = await fetch(`/api/uploads?limit=${limit}`, {
+export async function listMyUploads(limit = 10, offset = 0): Promise<CloudUpload[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (offset > 0) params.set("offset", String(offset));
+  const res = await fetch(`/api/uploads?${params}`, {
     credentials: "same-origin",
     cache: "no-store",
   });
@@ -112,6 +114,18 @@ export async function loadSave(id: number): Promise<LatestCloudSave> {
   const save = await readSaveResponse(res);
   if (!save) throw new Error("雲端存檔是空的");
   return save;
+}
+
+/** DELETE /api/uploads/:id → 永久刪除自己的一筆雲端存檔。 */
+export async function deleteSave(id: number): Promise<void> {
+  const res = await fetch(`/api/uploads/${id}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  if (res.status === 204) return;
+  if (res.status === 401) throw new Error("登入已過期，請重新登入");
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  throw new Error(data.error || `刪除雲端存檔失敗（HTTP ${res.status}）`);
 }
 
 /** 把 Unix 秒轉成在地時間字串。 */

@@ -48,7 +48,7 @@ interface MyUploadRow {
 }
 
 /**
- * GET /api/uploads?limit=
+ * GET /api/uploads?limit=&offset=
  * 目前登入會員自己的上傳紀錄（新到舊），用來顯示「雲端存檔」。
  */
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
@@ -58,6 +58,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url);
   const raw = Number(url.searchParams.get("limit") ?? 10);
   const limit = Number.isFinite(raw) ? Math.min(30, Math.max(1, Math.floor(raw))) : 10;
+  const rawOffset = Number(url.searchParams.get("offset") ?? 0);
+  const offset = Number.isFinite(rawOffset) ? Math.min(100_000, Math.max(0, Math.floor(rawOffset))) : 0;
 
   try {
     const rows = await env.DB.prepare(
@@ -65,9 +67,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
        FROM uploads
        WHERE user_id = ?1 AND deleted_at IS NULL
        ORDER BY created_at DESC, id DESC
-       LIMIT ?2`,
+       LIMIT ?2 OFFSET ?3`,
     )
-      .bind(user.id, limit)
+      .bind(user.id, limit, offset)
       .all<MyUploadRow>();
 
     return json({

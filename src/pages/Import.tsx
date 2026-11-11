@@ -7,10 +7,12 @@ import { PARSE_VERSION } from "../lib/parse";
 import { useSummary } from "../lib/accountStats";
 import { useAuth } from "../lib/auth";
 import { uploadSave } from "../lib/upload";
-import { formatCloudTime, listMyUploads, loadSave, type CloudUpload } from "../lib/cloudSave";
+import { formatCloudTime, listMyUploads, loadSave, deleteSave, type CloudUpload } from "../lib/cloudSave";
 import { Modal, fmt } from "../components/ui";
 import { SiteQrCard } from "../components/SiteQr";
 import { buildingPct } from "../lib/stats";
+
+const CLOUD_PAGE = 10;
 
 function fileSize(bytes: number): string {
   if (!bytes) return "大小不明";
@@ -32,21 +34,27 @@ export default function ImportPage() {
   const [cloud, setCloud] = useState<CloudUpload[] | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudBusy, setCloudBusy] = useState<number | null>(null);
+  const [cloudDeleting, setCloudDeleting] = useState<number | null>(null);
+  const [cloudHasMore, setCloudHasMore] = useState(false);
+  const [cloudLoadingMore, setCloudLoadingMore] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // 登入後讀取自己的雲端存檔清單（只用來顯示，不會自動覆蓋本機）
-  const refreshCloud = useCallback(async () => {
+  const refreshCloud = useCallback(async (limit = CLOUD_PAGE) => {
     if (!uploadsEnabled || !user) {
       setCloud(null);
       setCloudError(null);
+      setCloudHasMore(false);
       return;
     }
     try {
-      const list = await listMyUploads(10);
+      const list = await listMyUploads(limit);
       setCloud(list);
       setCloudError(null);
+      setCloudHasMore(list.length >= limit);
     } catch (err) {
       setCloud([]);
+      setCloudHasMore(false);
       setCloudError(err instanceof Error ? err.message : "讀取雲端存檔失敗");
     }
   }, [uploadsEnabled, user]);
@@ -54,6 +62,38 @@ export default function ImportPage() {
   useEffect(() => {
     void refreshCloud();
   }, [refreshCloud, account]);
+
+  const loadMoreCloud = async () => {
+    if (!cloud || cloudLoadingMore) return;
+    setCloudLoadingMore(true);
+    try {
+      const list = await listMyUploads(CLOUD_PAGE, cloud.length);
+      setCloud((prev) => {
+        const seen = new Set((prev ?? []).map((u) => u.id));
+        return [...(prev ?? []), ...list.filter((u) => !seen.has(u.id))];
+      });
+      setCloudHasMore(list.length >= CLOUD_PAGE);
+      setCloudError(null);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "讀取雲端存檔失敗", "err");
+    } finally {
+      setCloudLoadingMore(false);
+    }
+  };
+
+  const deleteCloud = async (u: CloudUpload) => {
+    if (!confirm(`要永久刪除雲端備份「${u.fileName}」嗎？\n\n此動作無法復原；這台裝置已載入的存檔不受影響。`)) return;
+    setCloudDeleting(u.id);
+    try {
+      await deleteSave(u.id);
+      notify(`已刪除雲端備份：${u.fileName}`);
+      await refreshCloud(Math.max(CLOUD_PAGE, cloud?.length ?? CLOUD_PAGE));
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "刪除雲端存檔失敗", "err");
+    } finally {
+      setCloudDeleting(null);
+    }
+  };
 
   const loadCloud = async (id: number) => {
     const item = cloud?.find((u) => u.id === id);
@@ -298,12 +338,14 @@ export default function ImportPage() {
               <div className="card-sub">登入後自動備份；在任何電腦或手機登入，都能看到並載入自己的存檔</div>
             </div>
             <div className="row" style={{ gap: 6 }}>
-              {user && cloud && cloud.length > 0 && <span className="chip gold">{cloud.length} 筆</span>}
+              {user && cloud && cloud.length > 0 && (
+                <span className="chip gold">{cloud.length}{cloudHasMore ? "+" : ""} 筆</span>
+              )}
               {user && (
                 <button
                   type="button"
                   className="btn btn-sm btn-ghost"
-                  disabled={cloudBusy !== null}
+                  disabled={cloudBusy !== null || cloudDeleting !== null}
                   onClick={() => void refreshCloud()}
                 >
                   <RefreshCw size={13} /> 重新整理
@@ -358,7 +400,7 @@ export default function ImportPage() {
                         <button
                           type="button"
                           className="btn btn-sm btn-primary"
-                          disabled={cloudBusy !== null}
+                          disabled={cloudBusy !== null || cloudDeleting !== null}
                           onClick={() => void loadCloud(u.id)}
                         >
                           <CloudDownload size={13} /> {cloudBusy === u.id ? "載入中…" : "載入"}
@@ -366,10 +408,30 @@ export default function ImportPage() {
                         <a className="btn btn-sm btn-ghost" href={`/api/uploads/${u.id}`} download={u.fileName} title="下載原始 JSON">
                           <Download size={13} />
                         </a>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          title="刪除雲端備份"
+                          disabled={cloudBusy !== null || cloudDeleting !== null}
+                          onClick={() => void deleteCloud(u)}
+                        >
+                          <Trash2 size={13} /> {cloudDeleting === u.id ? "刪除中…" : "刪除"}
+                        </button>
                       </div>
                     </div>
                   ))}
                 </div>
+                {cloudHasMore && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    style={{ marginTop: 10, width: "100%" }}
+                    disabled={cloudLoadingMore || cloudDeleting !== null}
+                    onClick={() => void loadMoreCloud()}
+                  >
+                    {cloudLoadingMore ? "載入中…" : "載入更舊的備份"}
+                  </button>
+                )}
                 <div className="tiny dim" style={{ marginTop: 10, lineHeight: 1.7 }}>
                   清單只包含目前登入帳號自己的備份。本機沒有存檔時，登入後會自動載入最新一筆；已有存檔時按「載入」即可切換。
                 </div>
