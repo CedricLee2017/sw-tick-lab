@@ -6,6 +6,7 @@ import {
 import { monsterLabel, unitLabel, useLibrary, useStore, type DeckFav, type DeckFavUnit } from "../store";
 import { useSummary, type UnitView } from "../lib/accountStats";
 import { MonsterIcon, Modal, NumberInput, RuneCard, RuneBoard, StatRows, TickBadge, fmt, ArtifactCard } from "../components/ui";
+import { FocusEditor } from "../components/FocusEditor";
 import { MonsterPickerModal, sortMonsterEntries } from "../components/MonsterPicker";
 import { RUNE_SETS, SET_BY_ID, type StatKey } from "../lib/constants";
 import { setSummary, speedForTick, statsForRunes } from "../lib/stats";
@@ -264,6 +265,8 @@ const BUDGET_KEYS: BudgetKey[] = ["fast", "standard", "full"];
 const RESULT_PAGE_SIZE = 10;
 /** 表格檢視一頁幾組 */
 const TABLE_PAGE_SIZE = 20;
+/** 表格篩選最多 4 個條件 */
+const MAX_TABLE_FILTERS = 4;
 /** 可選的回傳隊伍數（1 組主結果 + 其他替代） */
 const RESULT_COUNTS = [5, 10, 20, 50, 100] as const;
 
@@ -1614,6 +1617,9 @@ export default function TeamOptimizerPage() {
   };
 
   const addTableFilter = () => {
+    if (tableFilters.length >= MAX_TABLE_FILTERS) {
+      return notify(`表格篩選最多 ${MAX_TABLE_FILTERS} 個條件，請先移除其中一個`, "err");
+    }
     const min = filterMin.trim() === "" ? undefined : Number(filterMin);
     const max = filterMax.trim() === "" ? undefined : Number(filterMax);
     if (min == null && max == null) return notify("請先輸入下限或上限", "err");
@@ -2548,11 +2554,17 @@ export default function TeamOptimizerPage() {
                     </label>
                   ))}
                 </div>
-                <div className="tiny dim" style={{ marginTop: 4 }}>
-                  焦點：{m.focus.length ? m.focus.map((f) => `${f.key} ${f.weight}`).join(" / ") : "無"}
-                  {pinned && <> · 已固定 {m.includeRunes.length} 顆符文</>}
-                </div>
               </details>
+
+              <FocusEditor
+                value={m.focus}
+                onChange={(focus) => updateMember(i, { focus })}
+              />
+              {(pinned || m.includeRunes.length > 0) && (
+                <div className="tiny dim" style={{ marginTop: 4 }}>
+                  已固定 {m.includeRunes.length} 顆符文
+                </div>
+              )}
 
               {pinned && (
                 <div className="row" style={{ gap: 6, marginTop: 6 }}>
@@ -3138,7 +3150,7 @@ export default function TeamOptimizerPage() {
           {resultView === "table" && (
             <div style={{ marginTop: 12 }}>
               <div className="row wrap" style={{ gap: 6, alignItems: "center" }}>
-                <span className="tiny dim">篩選</span>
+                <span className="tiny dim">篩選 {tableFilters.length}/{MAX_TABLE_FILTERS}</span>
                 <select
                   className="select"
                   style={{ width: 150 }}
@@ -3175,7 +3187,15 @@ export default function TeamOptimizerPage() {
                   value={filterMax}
                   onChange={(e) => setFilterMax(e.target.value)}
                 />
-                <button type="button" className="btn btn-sm" onClick={addTableFilter}>加入篩選</button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={addTableFilter}
+                  disabled={tableFilters.length >= MAX_TABLE_FILTERS}
+                  title={tableFilters.length >= MAX_TABLE_FILTERS ? `最多 ${MAX_TABLE_FILTERS} 個篩選條件` : "加入篩選條件"}
+                >
+                  加入篩選
+                </button>
                 <span className="tiny dim" style={{ marginLeft: 8 }}>排序</span>
                 <select
                   className="select"
