@@ -201,6 +201,36 @@ export function followSpeedAgainstOpponent(o: {
   return Math.max(1, Math.ceil(need - 1e-9));
 }
 
+/**
+ * 把各順序的「接速下限」轉成實際面板速度。
+ *
+ * 後面的成員要接的 Tick 越晚，鏡像對手的攻擊條越高，最低速度通常也越高；
+ * 若直接把每隻都設成自己的下限，後面的隊友就會比前面的快，違反攻擊順序。
+ * 這裡由後往前推：後一位的速度 + 1 是前一位的底線，再和自己的下限取大，
+ * 這樣每隻都達到下限，同時保持「前面的出手順序一定比較快」。
+ *
+ * current 只用於起手（position 0）：起手本來可能比後面的打手慢，
+ * 但為了讓它真的先出手，必要時也要一起調快。
+ */
+export function orderSafeFloorSpeeds(
+  rows: { index: number; order: number; floor: number | null; current: number | null }[],
+): Map<number, number> {
+  const sorted = [...rows].sort((a, b) => a.order - b.order || a.index - b.index);
+  const out = new Map<number, number>();
+  let later: { order: number; speed: number } | null = null;
+  for (let p = sorted.length - 1; p >= 0; p--) {
+    const row = sorted[p];
+    const floor = Number.isFinite(row.floor) ? Math.max(0, row.floor as number) : 0;
+    let target = floor;
+    if (later && later.order !== row.order) target = Math.max(target, later.speed + 1);
+    // 起手不要為了順序被調慢；它原本的面板速度是下限
+    if (p === 0 && row.current != null) target = Math.max(target, row.current);
+    if (target > 0) out.set(row.index, target);
+    later = { order: row.order, speed: target > 0 ? target : (row.current ?? 0) };
+  }
+  return out;
+}
+
 export type SpeedMode = "panel" | "tick";
 
 export interface FollowMemberInput {

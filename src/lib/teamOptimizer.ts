@@ -701,9 +701,46 @@ export function optimizeTeam(
     if (next.length === 0) {
       const who = members[mi].label ?? `第 ${mi + 1} 隻`;
       if (orderMode && orderRejected > 0) {
+        // 找出是哪一對順序 / 速度下限卡住，直接告訴使用者要調哪一隻
+        const oi = orderOf(mi);
+        const sample = states[0];
+        const speeds = cands[mi].map((c) => c.stats.spd);
+        const candMax = speeds.length ? Math.max(...speeds) : Infinity;
+        const candMin = speeds.length ? Math.min(...speeds) : 0;
+        let detail = "";
+        if (sample) {
+          for (let j = 0; j < n; j++) {
+            if (j === mi || teamOf(j) !== teamOf(mi)) continue;
+            const p = sample.picks[j];
+            if (!p) continue;
+            const oj = orderOf(j);
+            if (oj === oi) continue;
+            const other = members[j].label ?? `第 ${j + 1} 隻`;
+            const minSpd = members[mi].min.spd ?? 0;
+            const maxSpd = members[mi].max?.spd;
+            if (oi > oj) {
+              detail =
+                `「${who}」被排在順序 ${oi}，必須比前一位「${other}」（順序 ${oj}，速度 ${p.stats.spd}）慢；` +
+                (minSpd > 0
+                  ? `但它的速度下限是 ${minSpd}，`
+                  : `但它的候選配裝最快只有 ${Number.isFinite(candMax) ? candMax : "—"}，`) +
+                `兩者無法同時成立。請提高「${other}」的速度，或降低「${who}」的速度下限${maxSpd != null ? `／速度上限 ${maxSpd}` : ""}。`;
+              break;
+            }
+            detail =
+              `「${who}」被排在順序 ${oi}，必須比後一位「${other}」（順序 ${oj}，速度 ${p.stats.spd}）快；` +
+              (maxSpd != null
+                ? `但它的速度上限是 ${maxSpd}，`
+                : `但候選配裝最快只有 ${Number.isFinite(candMax) ? candMax : "—"}，`) +
+              `找不到更快的配裝。請提高「${who}」的速度上限，或降低「${other}」的速度。`;
+            break;
+          }
+        }
         return {
           ok: false,
-          error: `攻擊順序衝突：「${who}」找不到符合速度順序的配裝。前面的魔靈必須比後面快，請調整攻擊順序、放寬速度 / Tick 下限，或減少互相搶速度的符文限制。`,
+          error:
+            detail ||
+            `攻擊順序衝突：「${who}」找不到符合速度順序的配裝（目前候選速度 ${Number.isFinite(candMin) ? candMin : "—"}–${Number.isFinite(candMax) ? candMax : "—"}）。前面的魔靈必須比後面快，請調整攻擊順序、放寬速度 / Tick 下限，或減少互相搶速度的符文限制。`,
           unitId: members[mi].unitId,
         };
       }

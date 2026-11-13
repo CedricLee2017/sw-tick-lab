@@ -44,7 +44,7 @@ const {
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
   computeFollowPlan, mirrorTimeline, followSpeedAgainstOpponent, opponentAttackBar,
-  panelSpeed, panelExtraFor, battleSpeedForPanelExtra, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost,
+  panelSpeed, panelExtraFor, battleSpeedForPanelExtra, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost, orderSafeFloorSpeeds,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
   autoAssignRoles, roleSetup, hasAtbBoost,
@@ -2096,6 +2096,38 @@ check("接速：鏡像對手的攻擊條就是門檻", () => {
   assert.equal(followSpeedAgainstOpponent({ targetTick: 6, ratePct: 7, opponentSpeed: 341 }), 341);
   // 神器放大 Buff → 門檻下降
   assert.equal(followSpeedAgainstOpponent({ targetTick: 5, ratePct: 7, opponentSpeed: 391, boostPct: 30, buffPct: 36, buffStartTick: 4 }), 285);
+});
+
+check("接速：套用下限時保持攻擊順序（後面的下限較高會把前面一起調快）", () => {
+  // 樓主情境：Nicki 第 3、Celestara 第 4；後面要接的 Tick 較晚，下限反而較高。
+  const speeds = orderSafeFloorSpeeds([
+    { index: 0, order: 1, floor: null, current: 222 },
+    { index: 1, order: 2, floor: 257, current: null },
+    { index: 2, order: 3, floor: 257, current: null },
+    { index: 3, order: 4, floor: 268, current: null },
+  ]);
+  assert.equal(speeds.get(3), 268);
+  assert.equal(speeds.get(2), 269);
+  assert.equal(speeds.get(1), 270);
+  assert.equal(speeds.get(0), 271);
+
+  // 下限本來就遞減時不動，維持原本速度
+  const kept = orderSafeFloorSpeeds([
+    { index: 0, order: 1, floor: null, current: 300 },
+    { index: 1, order: 2, floor: 280, current: null },
+    { index: 2, order: 3, floor: 260, current: null },
+    { index: 3, order: 4, floor: 240, current: null },
+  ]);
+  assert.deepEqual([0, 1, 2, 3].map((i) => kept.get(i)), [300, 280, 260, 240]);
+
+  // 相同順序（並排）不強制比速度
+  const tied = orderSafeFloorSpeeds([
+    { index: 0, order: 1, floor: null, current: 250 },
+    { index: 1, order: 2, floor: 200, current: null },
+    { index: 2, order: 2, floor: 240, current: null },
+  ]);
+  assert.equal(tied.get(1), 200);
+  assert.equal(tied.get(2), 240);
 });
 
 check("接速：起手沒有下限，之後每隻都要贏過鏡像對手", () => {

@@ -18,7 +18,7 @@ import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
 import { loadSkillData, skillsForMonster, type DamageOptions, type Skill, type SkillData } from "../lib/damage";
 import { autoAssignRoles, roleSetup, type RoleUnit } from "../lib/teamRoles";
-import { battleSpeedForPanelExtra, computeFollowPlan, leadBonus, mirrorTimeline, panelExtraFor } from "../lib/teamSpeed";
+import { battleSpeedForPanelExtra, computeFollowPlan, leadBonus, mirrorTimeline, orderSafeFloorSpeeds, panelExtraFor } from "../lib/teamSpeed";
 import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply, teamSetsOf,
   type TeamBuild, type TeamMemberSpec, type TeamPlan, type TeamProgress, type TeamRequest, type TeamRole,
@@ -932,37 +932,88 @@ export default function TeamOptimizerPage() {
     );
   };
 
-  /** 把某一隻的面板速度設成即時算出的接速下限 */
-  const applyFollowFloor = (index: number) => {
-    const r = followRowOf(index);
-    const m = members[index];
-    const v = m ? viewOf(m.unitId) : undefined;
-    if (!r || !v || !Number.isFinite(r.minSpeed)) return;
-    updateMember(index, {
-      panelExtra: panelExtraFor(v.base.spd, r.minSpeed, r.leadPct),
-      speedMode: "panel",
+  /**
+   * 把「接速下限」套用成面板速度。
+   * 後面的成員需要更高速度才不會被插隊，所以由後往前推：前面的成員至少要比
+   * 後一位快 1 點，這樣才不會出現「Celestara 的下限比 Nicki 高 → 後面的先出手」。
+   * team / upToOrder 有值時只處理指定隊伍、指定順序以前的成員（單隻套用時用）。
+   */
+  const applyFollowFloors = (team?: number, upToOrder?: number) => {
+    const next = members.map((m) => ({ ...m }));
+    let changed = 0;
+    followInfo.forEach((info, t) => {
+      if (team != null && t !== team) return;
+      const rows = info.ordered
+        .filter((r) => upToOrder == null || Math.max(1, Math.round(members[r.index]?.order || 1)) <= upToOrder)
+        .map((r) => {
+          const m = members[r.index];
+          const v = m ? viewOf(m.unitId) : undefined;
+          if (!m || !v) return null;
+          const lead = Math.max(0, m.leadPct ?? leadPcts[t] ?? 0);
+          const isOpener = r.position === 0;
+          // 起手只有面板速度時，用它當「不要為了順序被調慢」的基準
+          const current =
+            isOpener && m.speedMode === "panel" && m.panelExtra > 0
+              ? v.base.spd + leadBonus(v.base.spd, lead) + m.panelExtra
+              : null;
+          return {
+            index: r.index,
+            order: Math.max(1, Math.round(m.order || 1)),
+            floor: isOpener || !Number.isFinite(r.minSpeed) ? null : r.minSpeed,
+            current,
+          };
+        })
+        .filter((r): r is { index: number; order: number; floor: number | null; current: number | null } => !!r);
+      const targets = orderSafeFloorSpeeds(rows);
+      targets.forEach((speed, i) => {
+        const m = next[i];
+        const v = m ? viewOf(m.unitId) : undefined;
+        if (!m || !v) return;
+        // 目標 Tick 模式是由 Tick 決定速度，不覆寫使用者的設定
+        if (m.speedMode === "tick") return;
+        const lead = Math.max(0, m.leadPct ?? leadPcts[t] ?? 0);
+        const panelExtra = Math.max(0, panelExtraFor(v.base.spd, speed, lead));
+        if (m.panelExtra !== panelExtra || m.speedMode !== "panel") {
+          next[i] = { ...m, speedMode: "panel", panelExtra };
+          changed++;
+        }
+      });
     });
-    notify(`已將 ${unitLabel(v.unit)} 的面板速度設為接速下限 ${r.minSpeed}`);
+    if (changed > 0) {
+      setMembers(next);
+      setPlan(null);
+      resetSequence();
+    }
+    return changed;
   };
 
-  /** 一次把每一隊的面板速度設成接速下限 */
-  const applyAllFollow = () => {
-    let count = 0;
-    const rows = new Map(followInfo.flatMap((info) => info.rows).map((r) => [r.index, r]));
-    const next = members.map((m, i) => {
-      const r = rows.get(i);
-      const v = viewOf(m.unitId);
-      if (!r || !v || !Number.isFinite(r.minSpeed)) return m;
-      count++;
-      const panelExtra = panelExtraFor(v.base.spd, r.minSpeed, r.leadPct);
-      return m.panelExtra === panelExtra && m.speedMode === "panel" ? m : { ...m, panelExtra, speedMode: "panel" as const };
-    });
-    setMembers(next);
-    setPlan(null);
-    resetSequence();
+  /** 把某一隻的面板速度設成接速下限，並同步調快前面出手的隊友 */
+  const applyFollowFloor = (index: number) => {
+    const row = followRowOf(index);
+    const m = members[index];
+    const v = m ? viewOf(m.unitId) : undefined;
+    if (!row || !v || !Number.isFinite(row.minSpeed)) {
+      notify("這一隻目前沒有可套用的接速下限", "err");
+      return;
+    }
+    const team = Math.min(teams - 1, Math.floor(index / size));
+    const changed = applyFollowFloors(team, Math.max(1, Math.round(m.order || 1)));
     notify(
-      count > 0 ? `已套用 ${count} 隻的接速下限` : "目前沒有可套用的接速下限",
-      count > 0 ? "ok" : "err",
+      changed > 0
+        ? `已套用接速下限${changed > 1 ? `（含前面 ${changed - 1} 隻一起調快）` : ""}，維持攻擊順序`
+        : "目前速度已符合接速下限",
+      changed > 0 ? "ok" : "err",
+    );
+  };
+
+  /** 一次把每一隊的面板速度設成接速下限（自動維持攻擊順序） */
+  const applyAllFollow = () => {
+    const changed = applyFollowFloors();
+    notify(
+      changed > 0
+        ? `已套用 ${changed} 隻的接速下限（前面的成員會自動調快，維持攻擊順序）`
+        : "目前速度都已符合接速下限與攻擊順序",
+      changed > 0 ? "ok" : "err",
     );
   };
 
@@ -1233,6 +1284,47 @@ export default function TeamOptimizerPage() {
     }
     return undefined;
   };
+
+  /**
+   * 面板速度與攻擊順序衝突：後面的成員速度反而比前面高。
+   * 只比較有設定面板速度的成員（單位一致），讓使用者在開跑前就看到問題。
+   */
+  const orderConflicts = useMemo(() => {
+    const out: {
+      team: number;
+      earlier: number;
+      later: number;
+      earlierOrder: number;
+      laterOrder: number;
+      earlierSpd: number;
+      laterSpd: number;
+    }[] = [];
+    followInfo.forEach((info, team) => {
+      const rows = info.ordered
+        .map((r) => {
+          const m = members[r.index];
+          const spd = r.panelSpd;
+          return m && spd != null ? { index: r.index, order: Math.max(1, Math.round(m.order || 1)), spd } : null;
+        })
+        .filter((r): r is { index: number; order: number; spd: number } => !!r);
+      for (let a = 0; a < rows.length; a++) {
+        for (let b = a + 1; b < rows.length; b++) {
+          if (rows[a].order === rows[b].order) continue;
+          if (rows[a].spd > rows[b].spd) continue;
+          out.push({
+            team,
+            earlier: rows[a].index,
+            later: rows[b].index,
+            earlierOrder: rows[a].order,
+            laterOrder: rows[b].order,
+            earlierSpd: rows[a].spd,
+            laterSpd: rows[b].spd,
+          });
+        }
+      }
+    });
+    return out;
+  }, [followInfo, members]);
 
   /** 全域「包括」符文：分配給目前裝備它的隊員（不在隊上的忽略） */
   const globalIncludes = useMemo(() => {
@@ -2619,6 +2711,17 @@ export default function TeamOptimizerPage() {
             <div className="tiny dim team-follow-desc" style={{ marginTop: 3, maxWidth: 780 }}>
               提條角先出手後，對手的防守提條角仍會繼續累積攻擊條（可以溢出 100%）。只要接速成員在輪到它的 Tick 攻擊條高過對手，就不會被插隊；攻擊條相同時進攻方先動。預設對手＝和你起手同速的鏡像防守。提條與速度強化都在起手之後才生效。
             </div>
+            {orderConflicts.length > 0 && (
+              <div className="tiny" style={{ color: "var(--red)", marginTop: 5, lineHeight: 1.7 }}>
+                <AlertTriangle size={12} /> 攻擊順序衝突：
+                {orderConflicts.slice(0, 3).map((c) => {
+                  const a = viewOf(members[c.earlier]?.unitId ?? 0);
+                  const b = viewOf(members[c.later]?.unitId ?? 0);
+                  return `${a ? unitLabel(a.unit) : `#${c.earlier + 1}`}（順序 ${c.earlierOrder}，${c.earlierSpd}）沒有比 ${b ? unitLabel(b.unit) : `#${c.later + 1}`}（順序 ${c.laterOrder}，${c.laterSpd}）快`;
+                }).join("；")}
+                。後面的接速下限較高時，請按「修正順序」把前面的成員一起調快。
+              </div>
+            )}
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
             <label className="row" style={{ gap: 5 }}>
@@ -2638,6 +2741,16 @@ export default function TeamOptimizerPage() {
             <button type="button" className="btn btn-sm" onClick={applyAllFollow}>
               <Gauge size={12} /> 全部套用接速
             </button>
+            {orderConflicts.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={applyAllFollow}
+                title="把前面出手的成員一起調快，讓速度順序符合攻擊順序"
+              >
+                <Wand2 size={12} /> 修正順序
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-sm btn-ghost team-collapse-toggle"
