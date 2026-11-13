@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Gauge, Layers, Loader2, Lock, Pin, Plus, RotateCcw, Save, Search,
   Shirt, Trash2, Users, Wand2, Zap,
@@ -264,7 +264,35 @@ const BUDGET_KEYS: BudgetKey[] = ["fast", "standard", "full"];
 /** 結果頁一次顯示幾組替代隊伍 */
 const RESULT_PAGE_SIZE = 10;
 /** 表格檢視一頁幾組 */
-const TABLE_PAGE_SIZE = 20;
+const TABLE_PAGE_SIZE = 10;
+
+/**
+ * 表格檢視時每隻魔靈的專屬顏色（最多 15 隻，全部不重複）。
+ * 只用在「一鍵配隊 → 表格」的欄位分組，讓一眼就能看出數值屬於哪一隻。
+ */
+const MEMBER_ACCENTS: { c: string; rgb: string }[] = [
+  { c: "#f2c65c", rgb: "242, 198, 92" },
+  { c: "#5aa9ff", rgb: "90, 169, 255" },
+  { c: "#43d98a", rgb: "67, 217, 138" },
+  { c: "#c084fc", rgb: "192, 132, 252" },
+  { c: "#ff9f5a", rgb: "255, 159, 90" },
+  { c: "#ff7ac6", rgb: "255, 122, 198" },
+  { c: "#4de2e8", rgb: "77, 226, 232" },
+  { c: "#b9e35c", rgb: "185, 227, 92" },
+  { c: "#ff8a80", rgb: "255, 138, 128" },
+  { c: "#8f9bff", rgb: "143, 155, 255" },
+  { c: "#5ce0b8", rgb: "92, 224, 184" },
+  { c: "#ffd166", rgb: "255, 209, 102" },
+  { c: "#7bd0ff", rgb: "123, 208, 255" },
+  { c: "#e8a0ff", rgb: "232, 160, 255" },
+  { c: "#a3e635", rgb: "163, 230, 53" },
+];
+const memberAccent = (index: number) => MEMBER_ACCENTS[index % MEMBER_ACCENTS.length];
+/** 把魔靈代表色傳給 CSS（--mc = "r, g, b"；--mc-c = 主要色碼） */
+const accentVars = (index: number): CSSProperties => {
+  const a = memberAccent(index);
+  return { "--mc": a.rgb, "--mc-c": a.c } as CSSProperties;
+};
 /** 表格篩選最多 4 個條件 */
 const MAX_TABLE_FILTERS = 4;
 /** 可選的回傳隊伍數（1 組主結果 + 其他替代） */
@@ -1858,7 +1886,7 @@ export default function TeamOptimizerPage() {
   const seqCurrent = members[seqIndex];
   const seqCurrentView = seqCurrent ? viewOf(seqCurrent.unitId) : undefined;
 
-  /** 表格檢視：套用篩選、排序後再分頁（每頁 20 組） */
+  /** 表格檢視：套用篩選、排序後再分頁（每頁 10 組） */
   const tableRows = allPlans
     .map((p, index) => ({ p, index }))
     .filter(({ p }) =>
@@ -3158,7 +3186,9 @@ export default function TeamOptimizerPage() {
                   onChange={(e) => setFilterMember(Number(e.target.value))}
                 >
                   {activePlan.members.map((m, i) => (
-                    <option key={i} value={i}>{nameOf(m.unitId, m.master)}</option>
+                    <option key={i} value={i} style={{ color: memberAccent(i).c }}>
+                      {i + 1}. {nameOf(m.unitId, m.master)}
+                    </option>
                   ))}
                 </select>
                 <select
@@ -3214,8 +3244,8 @@ export default function TeamOptimizerPage() {
                   <option value="score">組合分數</option>
                   {activePlan.members.flatMap((m, mi) =>
                     TABLE_STATS.map((s) => (
-                      <option key={`${mi}:${s.key}`} value={`${mi}:${s.key}`}>
-                        {nameOf(m.unitId, m.master)} · {s.label}
+                      <option key={`${mi}:${s.key}`} value={`${mi}:${s.key}`} style={{ color: memberAccent(mi).c }}>
+                        {mi + 1}. {nameOf(m.unitId, m.master)} · {s.label}
                       </option>
                     )),
                   )}
@@ -3238,7 +3268,7 @@ export default function TeamOptimizerPage() {
               {tableFilters.length > 0 && (
                 <div className="row wrap" style={{ gap: 5, marginTop: 7 }}>
                   {tableFilters.map((f, i) => (
-                    <span key={i} className="chip muted">
+                    <span key={i} className="chip team-table-filter-chip" style={accentVars(f.member)}>
                       {activePlan.members[f.member] ? nameOf(activePlan.members[f.member].unitId, activePlan.members[f.member].master) : `第 ${f.member + 1} 隻`}
                       {" · "}
                       {TABLE_STAT_LABEL[f.stat]}
@@ -3288,8 +3318,23 @@ export default function TeamOptimizerPage() {
                 </div>
               </div>
 
+              <div className="row wrap team-table-legend" style={{ gap: 6, marginTop: 8 }}>
+                <span className="tiny dim">顏色對照</span>
+                {activePlan.members.map((m, mi) => (
+                  <span
+                    key={mi}
+                    className="team-table-legend-item"
+                    style={accentVars(mi)}
+                    title={`${nameOf(m.unitId, m.master)}：表格中這個顏色的欄位都屬於牠`}
+                  >
+                    <i />
+                    {mi + 1}. {nameOf(m.unitId, m.master)}
+                  </span>
+                ))}
+              </div>
+
               <div className="table-scroll" style={{ marginTop: 6 }}>
-                <table className="table" style={{ minWidth: 150 + activePlan.members.length * 650 }}>
+                <table className="table team-table" style={{ minWidth: 150 + activePlan.members.length * 650 }}>
                   <thead>
                     <tr>
                       <th rowSpan={2}>#</th>
@@ -3308,19 +3353,29 @@ export default function TeamOptimizerPage() {
                         分數{tableSort.member == null ? (tableSort.dir === "asc" ? " ↑" : " ↓") : ""}
                       </th>
                       {activePlan.members.map((m, mi) => (
-                        <th key={mi} colSpan={TABLE_STATS.length} style={{ textAlign: "center" }}>
-                          {nameOf(m.unitId, m.master)}
+                        <th
+                          key={mi}
+                          colSpan={TABLE_STATS.length}
+                          className="team-table-group-head"
+                          style={accentVars(mi)}
+                        >
+                          <span className="team-table-group-name">
+                            <MonsterIcon id={m.master} size={18} />
+                            <span className="team-table-group-index">{mi + 1}</span>
+                            {nameOf(m.unitId, m.master)}
+                          </span>
                         </th>
                       ))}
                     </tr>
                     <tr>
                       {activePlan.members.flatMap((m, mi) =>
-                        TABLE_STATS.map((s) => {
+                        TABLE_STATS.map((s, si) => {
                           const active = tableSort.member === mi && tableSort.stat === s.key;
                           return (
                             <th
                               key={`${mi}:${s.key}`}
-                              style={{ cursor: "pointer", whiteSpace: "nowrap" }}
+                              className={`team-table-subhead ${si === 0 ? "team-table-group-start" : ""}`}
+                              style={{ cursor: "pointer", whiteSpace: "nowrap", ...accentVars(mi) }}
                               onClick={() => toggleHeaderSort(mi, s.key)}
                               title="點擊切換排序（再點一次切換高低）"
                             >
@@ -3335,7 +3390,8 @@ export default function TeamOptimizerPage() {
                     {tablePageRows.map(({ p, index }) => (
                       <tr
                         key={index}
-                        style={{ cursor: "pointer", background: altIndex === index ? "rgba(242,198,92,.08)" : undefined }}
+                        className={altIndex === index ? "is-active" : undefined}
+                        style={{ cursor: "pointer" }}
                         onClick={() => setAltIndex(index)}
                       >
                         <td className="num"><b>#{index + 1}</b></td>
@@ -3344,8 +3400,12 @@ export default function TeamOptimizerPage() {
                           <span className="tiny dim"> / {totalWeight}</span>
                         </td>
                         {p.members.flatMap((m, mi) =>
-                          TABLE_STATS.map((s) => (
-                            <td key={`${mi}:${s.key}`} className="num">
+                          TABLE_STATS.map((s, si) => (
+                            <td
+                              key={`${mi}:${s.key}`}
+                              className={`num team-table-cell ${si === 0 ? "team-table-group-start" : ""}`}
+                              style={accentVars(mi)}
+                            >
                               {tableStatText(tableStatValue(m, s.key), s.key)}
                             </td>
                           )),
@@ -3364,6 +3424,7 @@ export default function TeamOptimizerPage() {
               </div>
               <div className="tiny dim" style={{ marginTop: 5 }}>
                 點表格列可切換到該組（再按上方「卡片」看完整符文）；點欄位標題可依該數值排序，再點一次切換高低。
+                每一隻魔靈的欄位都有自己的顏色與色塊邊框，滑過表格列時顏色會加深，方便追蹤數值。
               </div>
             </div>
           )}

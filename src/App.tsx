@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+﻿import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target,
 } from "lucide-react";
@@ -21,6 +21,7 @@ import DecksPage from "./pages/Decks";
 import SpeedTickPage from "./pages/SpeedTick";
 import SiegeSimulatorPage from "./pages/SiegeSimulator";
 import SiegeAdvicePage from "./pages/SiegeAdvice";
+import WorldBossPage from "./pages/WorldBoss";
 import OptimizerPage from "./pages/Optimizer";
 import TeamOptimizerPage from "./pages/TeamOptimizer";
 import AdminPage from "./pages/Admin";
@@ -32,7 +33,7 @@ import { MonsterIcon } from "./components/ui";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "siege" | "siege-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "siege" | "siege-advice" | "worldboss" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -78,6 +79,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   speedtick: SpeedTickPage,
   siege: SiegeSimulatorPage,
   "siege-advice": SiegeAdvicePage,
+  worldboss: WorldBossPage,
   rta: RtaPage,
   optimizer: OptimizerPage,
   "team-opt": TeamOptimizerPage,
@@ -104,6 +106,7 @@ export default function App() {
   const [loginOpen, setLoginOpen] = useState(false);
   /** 手機「更多」面板 */
   const [moreOpen, setMoreOpen] = useState(false);
+  const navRef = useRef<HTMLElement | null>(null);
   /** 自動還原雲端存檔：每個會員只嘗試一次，避免換帳號後不再還原或重複重打 API */
   const cloudTriedFor = useRef<number | null>(null);
 
@@ -198,7 +201,18 @@ export default function App() {
   useEffect(() => {
     window.scrollTo(0, 0);
     setMoreOpen(false);
-  }, [route]);
+
+    // 左側選單比螢幕高時會自己捲動，順便把目前頁面的按鈕捲進可視範圍。
+    const nav = navRef.current;
+    const active = nav?.querySelector<HTMLElement>(".nav-item.active");
+    if (nav && active) {
+      const navBox = nav.getBoundingClientRect();
+      const itemBox = active.getBoundingClientRect();
+      if (itemBox.top < navBox.top) nav.scrollTop -= navBox.top - itemBox.top + 8;
+      else if (itemBox.bottom > navBox.bottom) nav.scrollTop += itemBox.bottom - navBox.bottom + 8;
+    }
+    // 登入狀態確認前只會顯示載入畫面，側邊欄還不存在，所以要等 authReady 後再捲一次。
+  }, [route, authReady]);
 
   // 選單開啟時鎖住背景捲動，並支援 Esc 關閉。
   useEffect(() => {
@@ -216,7 +230,7 @@ export default function App() {
   }, [moreOpen]);
 
   useEffect(() => {
-    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "siege" && route !== "siege-advice" && route !== "admin" && route !== "bestiary") {
+    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "siege" && route !== "siege-advice" && route !== "worldboss" && route !== "admin" && route !== "bestiary") {
       window.location.hash = "#/import";
     }
   }, [ready, account, route]);
@@ -259,7 +273,7 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="nav">
+        <nav className="nav" ref={navRef}>
           <div className="nav-label">工作區</div>
           {ROUTES.slice(0, 1).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
@@ -482,3 +496,5 @@ export default function App() {
     </div>
   );
 }
+
+

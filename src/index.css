@@ -69,9 +69,11 @@ p { margin: 0; }
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
+  overflow: hidden;
   z-index: 20;
 }
 
@@ -86,7 +88,17 @@ p { margin: 0; }
 .brand-title { font-size: 15px; font-weight: 800; letter-spacing: 0.02em; }
 .brand-sub { font-size: 10.5px; color: var(--muted-2); letter-spacing: 0.14em; text-transform: uppercase; }
 
-.nav { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+/* 選單可能超過一個螢幕高度：讓它自己捲動，底部帳號區塊才會固定看得見 */
+.nav {
+  display: flex; flex-direction: column; gap: 3px; margin-top: 4px;
+  flex: 1 1 0; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding-right: 4px; margin-right: -4px;
+  scrollbar-width: thin;
+}
+.nav::-webkit-scrollbar { width: 6px; }
+.nav::-webkit-scrollbar-thumb { background: #2a3b61; border: 0; }
+.nav::-webkit-scrollbar-thumb:hover { background: #3a4f7d; }
 .nav-label { font-size: 10.5px; letter-spacing: 0.14em; color: var(--muted-2); padding: 10px 10px 4px; text-transform: uppercase; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
@@ -105,7 +117,10 @@ p { margin: 0; }
 .nav-item.active svg { color: var(--gold); }
 .nav-item svg { width: 17px; height: 17px; opacity: .9; }
 
-.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.sidebar-foot {
+  margin-top: auto; display: flex; flex-direction: column; gap: 8px;
+  flex: 0 1 auto; min-height: 0; overflow-y: auto;
+}
 
 /* ── 會員 ─────────────────────────────────────────── */
 .account-row {
@@ -362,6 +377,70 @@ p { margin: 0; }
 .table td { padding: 9px 12px; border-bottom: 1px solid rgba(26, 37, 64, .6); }
 .table tbody tr:hover { background: rgba(88, 166, 255, .04); }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* 一鍵配隊表格：每隻魔靈一組代表色，方便追蹤數值屬於哪隻 */
+.team-table thead th.team-table-group-head {
+  background: rgba(var(--mc), .16);
+  color: var(--mc-c);
+  border-top: 2px solid var(--mc-c);
+  border-left: 1px solid rgba(var(--mc), .55);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11.5px;
+  text-align: center;
+}
+.team-table-group-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.team-table-group-index {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: rgba(var(--mc), .22);
+  color: var(--mc-c);
+  font-size: 10px;
+  font-weight: 800;
+}
+.team-table thead th.team-table-subhead {
+  background: rgba(var(--mc), .07);
+  color: rgba(var(--mc), .85);
+}
+.team-table .team-table-group-start { border-left: 1px solid rgba(var(--mc), .55); }
+.team-table td.team-table-cell { background: rgba(var(--mc), .045); }
+.team-table tbody tr:hover td.team-table-cell { background: rgba(var(--mc), .13); }
+.team-table tbody tr.is-active td { background: rgba(242, 198, 92, .08); }
+.team-table tbody tr.is-active td.team-table-cell { background: rgba(var(--mc), .1); }
+.team-table tbody tr.is-active td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
+.team-table-legend { align-items: center; }
+.team-table-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--mc), .45);
+  background: rgba(var(--mc), .08);
+  color: var(--mc-c);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.team-table-legend-item i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--mc-c);
+}
+.team-table-filter-chip {
+  border-color: rgba(var(--mc), .45);
+  background: rgba(var(--mc), .08);
+  color: var(--mc-c);
+}
 
 .scroll-y { overflow: auto; }
 .scroll-y::-webkit-scrollbar { width: 8px; height: 8px; }

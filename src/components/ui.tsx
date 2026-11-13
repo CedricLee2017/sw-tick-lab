@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X, Lock, Unlock, Ban, Droplet, Flame, Wind, Sun, Moon } from "lucide-react";
 import { ELEMENTS, SET_BY_ID, STAT_TYPES, type StatKey } from "../lib/constants";
 import { monsterOf } from "../store";
@@ -597,7 +598,7 @@ export function Modal({ title, onClose, children, width }: { title: string; onCl
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
-  return (
+  return createPortal(
     <div className="modal-back" onClick={onClose}>
       <div className="modal" style={{ width: width ? Math.min(width, 1200) : undefined }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
@@ -606,7 +607,8 @@ export function Modal({ title, onClose, children, width }: { title: string; onCl
         </div>
         <div className="modal-body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
