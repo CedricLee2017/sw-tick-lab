@@ -44,7 +44,7 @@ const {
   deckContext, spdLeaderSkill, spdLeaderApplies,
   tickFor, minSpeedForTick, tickBrackets, calcUnitSpeeds, simulateTickOrder, simulateAdvanced, swiftSetBonus,
   computeFollowPlan, mirrorTimeline, followSpeedAgainstOpponent, opponentAttackBar,
-  panelSpeed, panelExtraFor, battleSpeedForPanelExtra, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost, orderSafeFloorSpeeds,
+  panelSpeed, panelExtraFor, battleSpeedForPanelExtra, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost, orderSafeFloorSpeeds, followFloor,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
   autoAssignRoles, roleSetup, hasAtbBoost,
@@ -2128,6 +2128,40 @@ check("接速：套用下限時保持攻擊順序（後面的下限較高會把�
   ]);
   assert.equal(tied.get(1), 200);
   assert.equal(tied.get(2), 240);
+});
+
+check("接速：保留目前速度的順序安全下限（只調高、不調低）", () => {
+  // 目前面板：提條角 326、Iris 296、Nicki 285、Celestara 291
+  // Nicki 比 Celestara 慢 → 只把 Nicki 補到 292，前面維持原本速度。
+  const speeds = orderSafeFloorSpeeds([
+    { index: 0, order: 1, floor: null, current: 326 },
+    { index: 1, order: 2, floor: 243, current: 296 },
+    { index: 2, order: 3, floor: 244, current: 285 },
+    { index: 3, order: 4, floor: 245, current: 291 },
+  ], true);
+  assert.equal(speeds.get(3), 291);
+  assert.equal(speeds.get(2), 292);
+  assert.equal(speeds.get(1), 296);
+  assert.equal(speeds.get(0), 326);
+});
+
+check("接速：多隻提條的總和會降低後面的最低速度", () => {
+  const single = followFloor({
+    baseSpd: 107, extra: 184, leadPct: 0, targetTick: 6, ratePct: 7,
+    opponentSpeed: 391, boostPct: 30, speedBuff: true, buffStartTick: 4,
+  });
+  assert.equal(single.panelSpd, 291);
+  assert.equal(single.minSpeed, 291);
+  assert.equal(single.minExtra, 184);
+  assert.equal(single.met, true);
+
+  // 兩隻提條合計 50%：同樣的面板速度會更輕鬆達標，最低速度下降
+  const double = followFloor({
+    baseSpd: 107, extra: 184, leadPct: 0, targetTick: 6, ratePct: 7,
+    opponentSpeed: 391, boostPct: 50, speedBuff: true, buffStartTick: 4,
+  });
+  assert.ok(double.minSpeed < single.minSpeed);
+  assert.equal(double.met, true);
 });
 
 check("接速：起手沒有下限，之後每隻都要贏過鏡像對手", () => {

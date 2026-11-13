@@ -209,11 +209,14 @@ export function followSpeedAgainstOpponent(o: {
  * 這裡由後往前推：後一位的速度 + 1 是前一位的底線，再和自己的下限取大，
  * 這樣每隻都達到下限，同時保持「前面的出手順序一定比較快」。
  *
- * current 只用於起手（position 0）：起手本來可能比後面的打手慢，
+ * current 預設只用於起手（position 0）：起手本來可能比後面的打手慢，
  * 但為了讓它真的先出手，必要時也要一起調快。
+ * keepCurrent = true 時，每一隻目前的面板速度都會當成下限（只調高、不調低），
+ * 適合「我已經輸入速度，只想知道還差多少才不會被超車」的計算頁。
  */
 export function orderSafeFloorSpeeds(
   rows: { index: number; order: number; floor: number | null; current: number | null }[],
+  keepCurrent = false,
 ): Map<number, number> {
   const sorted = [...rows].sort((a, b) => a.order - b.order || a.index - b.index);
   const out = new Map<number, number>();
@@ -223,12 +226,71 @@ export function orderSafeFloorSpeeds(
     const floor = Number.isFinite(row.floor) ? Math.max(0, row.floor as number) : 0;
     let target = floor;
     if (later && later.order !== row.order) target = Math.max(target, later.speed + 1);
-    // 起手不要為了順序被調慢；它原本的面板速度是下限
-    if (p === 0 && row.current != null) target = Math.max(target, row.current);
+    if ((p === 0 || keepCurrent) && row.current != null) target = Math.max(target, row.current);
     if (target > 0) out.set(row.index, target);
     later = { order: row.order, speed: target > 0 ? target : (row.current ?? 0) };
   }
   return out;
+}
+
+export interface FollowFloorInput {
+  /** 魔靈基礎速度（不含隊長技與符文） */
+  baseSpd: number;
+  /** 面板額外速度（符文 + 其他） */
+  extra: number;
+  /** 速度隊長技 %（以這隻的基礎速度計算） */
+  leadPct?: number;
+  /** 目標 Tick（起手 Tick + 第幾位） */
+  targetTick: number;
+  /** 每 Tick 攻擊條 %（一般 7、RTA 1.5） */
+  ratePct: number;
+  /** 鏡像對手速度 */
+  opponentSpeed: number;
+  /** 這隻總共收到的提條 %（前面所有提條角加總） */
+  boostPct?: number;
+  /** 是否有速度強化 */
+  speedBuff?: boolean;
+  /** 神器「速度增加效果 +%」 */
+  artifactPct?: number;
+  /** 速度強化從第幾個 Tick 開始生效（通常是起手 Tick） */
+  buffStartTick: number;
+}
+
+export interface FollowFloorResult {
+  /** 目前面板速度（基礎 + 隊長技 + 額外） */
+  panelSpd: number;
+  /** 不被鏡像對手插隊所需的最低面板速度 */
+  minSpeed: number;
+  /** 換算成符文額外速度後的最低值 */
+  minExtra: number;
+  /** 目前面板速度是否達到最低值 */
+  met: boolean;
+}
+
+/**
+ * 單一接速成員的最低速度：把「前面所有提條加總」當成一次收到的提條，
+ * 搭配速度強化與隊長技，算出不被鏡像對手插隊所需的面板 / 額外速度。
+ */
+export function followFloor(o: FollowFloorInput): FollowFloorResult {
+  const base = Math.max(0, finite(o.baseSpd));
+  const leadFlat = leadBonus(base, o.leadPct ?? 0);
+  const panelSpd = base + leadFlat + Math.max(0, finite(o.extra));
+  const buffPct = speedBuffPct(!!o.speedBuff, o.artifactPct ?? 0);
+  const minSpeed = followSpeedAgainstOpponent({
+    targetTick: o.targetTick,
+    ratePct: o.ratePct,
+    opponentSpeed: o.opponentSpeed,
+    boostPct: o.boostPct ?? 0,
+    buffPct,
+    buffStartTick: o.buffStartTick,
+  });
+  const minExtra = Number.isFinite(minSpeed) ? Math.max(0, minSpeed - base - leadFlat) : Infinity;
+  return {
+    panelSpd,
+    minSpeed,
+    minExtra,
+    met: Number.isFinite(minSpeed) && panelSpd >= minSpeed - 1e-9,
+  };
 }
 
 export type SpeedMode = "panel" | "tick";

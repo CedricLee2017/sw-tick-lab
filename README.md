@@ -44,6 +44,7 @@
     - **Turn Order**：每次出手的 Tick 徽章、魔靈、作用中的速度增減、出手時攻擊條與「領先下一名的差距」。
     - **Tick View**：每個 Tick 的攻擊條排序與是否出手。
     - **Saves**：把目前設定（含拉條 / 速度增減 / 額外速度）命名儲存、備註、讀取與刪除；工作狀態也會自動存在瀏覽器。
+  - **接速最低速度（簡單版）**：獨立頁面，選 3～5 隻魔靈，系統自動帶入基礎速度，只需輸入額外速度、每隻提供的提條 % 與是否有速度強化，再設定全隊速度隊長技 %；不用輸入 Tick。後面的成員會把前面所有提條加總（同一隊可以有多隻提條，提條角自己不吃自己的），輸出每隻的「接速最低額外速度」與「順序安全最低額外速度」兩欄，並可一鍵補足不足的額外速度。
   - **神器追傷計算器**：獨立頁面，依 HP / ATK / DEF / SPD、追傷 % 與技能段數計算 `floor(HP×h%) + floor(ATK×a%) + floor(DEF×d%) + floor(SPD×s%)`；可選魔靈帶入目前面板，或直接點選「儲存庫」的魔靈符文組合帶入該組數值；也能從神器排行把追傷效果「套用／加入」，並和技能傷害比較。
 - **據點進攻建議**：獨立頁面（需登入，但不需要匯入存檔），讀取 SWGT 3MDC Battle Logs，分析會友 Nosna44 近 10 季（Season 13–22）的據點戰紀錄（內建快照：2,324 場、2,264 勝、60 敗、勝率 97.4%）。
   - **進攻建議**：選擇一個防守隊，依「直接對戰」與「共用 2 隻的相似防守隊」推薦進攻隊，顯示每隊的勝率、場次與最後對戰日期；例如對上 Sylvia / Daphnis / Wind Qilin Slasher 時，會推薦 8 勝 0 敗的 Moogwang / Bellenus / Eladriel。十季使用率最高的進攻隊是 Mihyang / Adriana / Rigna（111 場 98.2%）。
@@ -174,7 +175,7 @@ npm run dev        # http://localhost:5173
 npm run typecheck  # TypeScript 檢查
 npm run build      # 產出 dist/
 npm run preview    # 預覽 production build
-npm test           # Tick、配符、符文限制、技能傷害、神器、追傷、預設隊／防守隊、Speed Tick、接速、RTA、一鍵配隊、據點戰、精煉素材、圖鑑技能／隊長技與據點進攻建議測試（154 項）
+npm test           # Tick、配符、符文限制、技能傷害、神器、追傷、預設隊／防守隊、Speed Tick、接速、RTA、一鍵配隊、據點戰、精煉素材、圖鑑技能／隊長技與據點進攻建議測試（156 項）
 ```
 
 其他指令：
@@ -303,11 +304,11 @@ src/
   components/SiteQr.tsx  首頁「用手機或平板開啟」的 QR code（qrcode.react）與複製網址
   components/MonsterPicker.tsx 共用的魔靈選擇器（搜尋、元素／胎生星級篩選）
                               預設排序：屬性 水火風光暗 → 原生星級高到低 → 已覺醒 → 名稱
-                              所有會「選擇／新增魔靈」的頁面（Speed Tick、配符、速度實驗室、一鍵配隊、配神器、神器追傷）共用同一套卡片式選單
+                              所有會「選擇／新增魔靈」的頁面（Speed Tick、接速計算、配符、速度實驗室、一鍵配隊、配神器、神器追傷）共用同一套卡片式選單
   components/ArtifactStage.tsx 第二階段神器面板與結果
   components/RuneRestrictions.tsx 排除 / 固定使用符文面板
   components/FocusEditor.tsx 焦點屬性編輯器（最多 5 組，一鍵配隊每隻成員共用）
-  pages/                匯入、總覽、魔靈圖鑑、我的魔靈、速度實驗室、Speed Tick、據點戰模擬、據點進攻建議、RTA、配符、一鍵配隊、配神器、神器追傷、配裝、預設隊、符文、神器、設定
+  pages/                匯入、總覽、魔靈圖鑑、我的魔靈、速度實驗室、Speed Tick、接速計算、據點戰模擬、據點進攻建議、RTA、配符、一鍵配隊、配神器、神器追傷、配裝、預設隊、符文、神器、設定
   store.ts              zustand + IndexedDB 本機儲存
 scripts/                資料產生、PWA 圖示與引擎測試
 public/

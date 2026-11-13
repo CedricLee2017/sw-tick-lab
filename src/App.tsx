@@ -19,6 +19,7 @@ import AdCalculatorPage from "./pages/AdCalculator";
 import DamageComparePage from "./pages/DamageCompare";
 import DecksPage from "./pages/Decks";
 import SpeedTickPage from "./pages/SpeedTick";
+import FollowSpeedPage from "./pages/FollowSpeed";
 import SiegeSimulatorPage from "./pages/SiegeSimulator";
 import SiegeAdvicePage from "./pages/SiegeAdvice";
 import WorldBossPage from "./pages/WorldBoss";
@@ -33,7 +34,7 @@ import { MonsterIcon } from "./components/ui";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "siege" | "siege-advice" | "worldboss" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -41,6 +42,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "bestiary", label: "魔靈圖鑑", icon: <BookOpen size={17} />, title: "魔靈圖鑑", sub: "全魔靈技能、屬性與效果篩選" },
   { key: "speed", label: "速度實驗室", icon: <Gauge size={17} />, title: "速度實驗室", sub: "Tick 反推、速度門檻與出手順序" },
   { key: "speedtick", label: "Speed Tick", icon: <Timer size={17} />, title: "Speed Tick 計算器", sub: "攻擊條、速度、出手順序與 Tick 門檻" },
+  { key: "follow-speed", label: "接速計算", icon: <Gauge size={17} />, title: "接速最低速度", sub: "選魔靈、輸入額外速度，直接算每隻的接速需求" },
   { key: "siege", label: "據點戰模擬", icon: <Castle size={17} />, title: "據點戰錦標賽模擬器", sub: "佔領塔、連線得分與 20,000 分勝利時間" },
   { key: "siege-advice", label: "據點進攻建議", icon: <Target size={17} />, title: "據點進攻建議", sub: "以 SWGT 對戰記錄分析進攻隊與防守核心" },
   { key: "rta", label: "RTA", icon: <Swords size={17} />, title: "RTA 世界競技場", sub: "最愛魔靈的 RTA 獨立配裝與速度排行" },
@@ -77,6 +79,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   bestiary: BestiaryPage,
   speed: SpeedPage,
   speedtick: SpeedTickPage,
+  "follow-speed": FollowSpeedPage,
   siege: SiegeSimulatorPage,
   "siege-advice": SiegeAdvicePage,
   worldboss: WorldBossPage,
@@ -230,7 +233,7 @@ export default function App() {
   }, [moreOpen]);
 
   useEffect(() => {
-    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "siege" && route !== "siege-advice" && route !== "worldboss" && route !== "admin" && route !== "bestiary") {
+    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "follow-speed" && route !== "siege" && route !== "siege-advice" && route !== "worldboss" && route !== "admin" && route !== "bestiary") {
       window.location.hash = "#/import";
     }
   }, [ready, account, route]);
