@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS uploads (
   wizard        TEXT,
   -- 遊戲內玩家 ID（wizard_id）；同一個會員上傳同一個 ID 時取代舊備份
   wizard_id     INTEGER,
+  -- 遊戲內公會名稱（guild.guild_info.name）；舊資料可從後台「補抓公會名稱」補齊
+  guild         TEXT,
   monster_count INTEGER,
   rune_count    INTEGER,
   created_at    INTEGER NOT NULL,

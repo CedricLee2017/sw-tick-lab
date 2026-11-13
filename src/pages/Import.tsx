@@ -137,6 +137,7 @@ export default function ImportPage() {
       void uploadSave(text, name, {
         wizard: acc.wizard,
         wizardId: acc.wizardId,
+        guild: acc.guild,
         monsters: acc.units.length,
         runes: acc.runes.length,
       })

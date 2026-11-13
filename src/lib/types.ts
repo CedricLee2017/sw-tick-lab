@@ -189,6 +189,8 @@ export interface Account {
   wizard: string;
   /** 遊戲內玩家 ID（wizard_id）；舊存檔可能沒有，需重新匯入 */
   wizardId?: number;
+  /** 遊戲內公會名稱（guild.guild_info.name）；沒有公會或舊存檔可能沒有 */
+  guild?: string;
   units: Unit[];
   runes: Rune[];
   artifacts: Artifact[];

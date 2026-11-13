@@ -5,7 +5,7 @@
 export async function uploadSave(
   text: string,
   fileName: string,
-  meta: { wizard?: string; wizardId?: number; monsters?: number; runes?: number },
+  meta: { wizard?: string; wizardId?: number; guild?: string; monsters?: number; runes?: number },
 ): Promise<{ ok: true; key: string; name: string; replaced: number }> {
   const body = new Blob([text], { type: "application/json" });
   const res = await fetch("/api/uploads", {
@@ -16,6 +16,7 @@ export async function uploadSave(
       "x-sw-file-name": encodeURIComponent(fileName),
       "x-sw-wizard": encodeURIComponent(meta.wizard ?? ""),
       "x-sw-wizard-id": String(meta.wizardId ?? ""),
+      "x-sw-guild": encodeURIComponent(meta.guild ?? ""),
       "x-sw-monsters": String(meta.monsters ?? 0),
       "x-sw-runes": String(meta.runes ?? 0),
     },

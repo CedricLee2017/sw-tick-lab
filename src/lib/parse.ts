@@ -509,6 +509,11 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
   const wizard = String(
     body.wizard_info?.wizard_name || body.wizard_name || body.wizard_info?.wizard_id || body.wizard_id || "",
   );
+  // 公會名稱：SWEX / SWOP 的 guild.guild_info.name 最準；舊格式或沒有公會資料時
+  // 退回次元競技場的 guild_name（每個存檔都會帶玩家自己的公會名稱）。
+  const guild = String(
+    body.guild?.guild_info?.name || body.guild_info?.name || body.dimension_arena_user_info?.guild_name || body.guild_name || "",
+  ).trim();
   const version = body.unit_list ? (body.runes?.[0]?.ancient !== undefined ? "SWEX / SWOP" : "SWEX") : "未知";
 
   // RTA（世界競技場）：一般與 RTA 共用符文 / 神器庫，但裝備配置是兩套獨立清單。
@@ -619,6 +624,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       parseVersion: PARSE_VERSION,
       wizard: String(wizard ?? ""),
       wizardId,
+      guild: guild || undefined,
       units,
       runes,
       artifacts,

@@ -22,6 +22,7 @@ interface AdminUpload {
   file_name: string;
   size: number;
   wizard: string | null;
+  guild: string | null;
   monster_count: number | null;
   rune_count: number | null;
   created_at: number;
@@ -66,6 +67,8 @@ export default function AdminPage() {
   const [totalUsers, setTotalUsers] = useState(0);
   const [totalUploads, setTotalUploads] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
+  const [missingGuild, setMissingGuild] = useState(0);
+  const [backfilling, setBackfilling] = useState(false);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,12 +82,13 @@ export default function AdminPage() {
   }, []);
 
   const loadUploads = useCallback(async () => {
-    const data = await adminFetch<{ uploads: AdminUpload[]; total: number; totalBytes: number }>(
+    const data = await adminFetch<{ uploads: AdminUpload[]; total: number; totalBytes: number; missingGuild: number }>(
       "/api/admin/uploads?limit=100",
     );
     setUploads(data.uploads);
     setTotalUploads(data.total);
     setTotalBytes(data.totalBytes);
+    setMissingGuild(data.missingGuild ?? 0);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -137,6 +141,26 @@ export default function AdminPage() {
       await loadUploads();
     } catch (err) {
       notify(err instanceof Error ? err.message : "刪除失敗", "err");
+    }
+  };
+
+  const backfillGuilds = async () => {
+    setBackfilling(true);
+    try {
+      const res = await adminFetch<{ updated: number; remaining: number }>("/api/admin/backfill-guilds", {
+        method: "POST",
+        body: JSON.stringify({ limit: 10 }),
+      });
+      notify(
+        res.remaining > 0
+          ? `已補上 ${res.updated} 筆公會名稱，還有 ${res.remaining} 筆可再按一次`
+          : `已補上 ${res.updated} 筆公會名稱`,
+      );
+      await loadUploads();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "補齊公會名稱失敗", "err");
+    } finally {
+      setBackfilling(false);
     }
   };
 
@@ -193,6 +217,18 @@ export default function AdminPage() {
                 />
               </div>
             </div>
+          )}
+          {tab === "uploads" && missingGuild > 0 && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              title="讀取舊存檔的原始 JSON，補上公會名稱"
+              onClick={() => void backfillGuilds()}
+              disabled={backfilling}
+            >
+              {backfilling ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
+              補抓公會名稱（{missingGuild}）
+            </button>
           )}
         </div>
 
@@ -268,6 +304,7 @@ export default function AdminPage() {
                   <th>時間</th>
                   <th>會員</th>
                   <th>玩家（遊戲 ID）</th>
+                  <th>公會</th>
                   <th>存檔檔名</th>
                   <th className="num">大小</th>
                   <th className="num">魔靈</th>
@@ -283,6 +320,7 @@ export default function AdminPage() {
                     <td style={{ fontWeight: 600 }}>
                       {displayWizard(up.wizard) || <span className="dim">—</span>}
                     </td>
+                    <td>{up.guild?.trim() || <span className="dim">—</span>}</td>
                     <td className="mono tiny dim" style={{ fontSize: 11.5 }}>{up.file_name}</td>
                     <td className="num mono">{sizeText(up.size)}</td>
                     <td className="num mono">{up.monster_count ?? "—"}</td>
@@ -309,7 +347,7 @@ export default function AdminPage() {
                   </tr>
                 ))}
                 {uploads.length === 0 && !loading && (
-                  <tr><td colSpan={8} className="tiny dim" style={{ textAlign: "center", padding: 18 }}>還沒有上傳紀錄</td></tr>
+                  <tr><td colSpan={9} className="tiny dim" style={{ textAlign: "center", padding: 18 }}>還沒有上傳紀錄</td></tr>
                 )}
               </tbody>
             </table>

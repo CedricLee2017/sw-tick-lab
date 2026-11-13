@@ -42,6 +42,7 @@ interface MyUploadRow {
   file_name: string;
   size: number;
   wizard: string | null;
+  guild: string | null;
   monster_count: number | null;
   rune_count: number | null;
   created_at: number;
@@ -63,7 +64,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   try {
     const rows = await env.DB.prepare(
-      `SELECT id, file_name, size, wizard, monster_count, rune_count, created_at
+      `SELECT id, file_name, size, wizard, guild, monster_count, rune_count, created_at
        FROM uploads
        WHERE user_id = ?1 AND deleted_at IS NULL
        ORDER BY created_at DESC, id DESC
@@ -116,6 +117,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   const now = Math.floor(Date.now() / 1000);
   const wizard = decodeHeader(request.headers.get("x-sw-wizard")).trim().slice(0, 80) || null;
+  const guild = decodeHeader(request.headers.get("x-sw-guild")).trim().slice(0, 80) || null;
   const rawWizardId = Number(request.headers.get("x-sw-wizard-id") ?? "");
   const wizardId = Number.isInteger(rawWizardId) && rawWizardId > 0 ? rawWizardId : null;
   const who = wizard ? `${safeSegment(wizard)}-` : "";
@@ -130,11 +132,11 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     });
 
     const inserted = await env.DB.prepare(
-      `INSERT INTO uploads (user_id, file_id, object_key, storage, file_name, size, wizard, wizard_id, monster_count, rune_count, created_at)
-       VALUES (?1, NULL, ?2, 'r2', ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+      `INSERT INTO uploads (user_id, file_id, object_key, storage, file_name, size, wizard, wizard_id, guild, monster_count, rune_count, created_at)
+       VALUES (?1, NULL, ?2, 'r2', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
        RETURNING id`,
     )
-      .bind(user.id, key, name, size, wizard, wizardId, monsters, runes, now)
+      .bind(user.id, key, name, size, wizard, wizardId, guild, monsters, runes, now)
       .first<{ id: number }>();
 
     await env.DB.prepare("UPDATE users SET consent_at = COALESCE(consent_at, ?1) WHERE id = ?2")
