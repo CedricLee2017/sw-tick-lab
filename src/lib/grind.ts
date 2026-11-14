@@ -480,6 +480,28 @@ export function analyzeGrind(runes: Rune[], filter: GrindFilter): GrindTarget[] 
   return out;
 }
 
+/** 排列順序：預設沿用各模式的排序，或改成依「目前遊戲分數」排序 */
+export type GrindSort = "default" | "score-desc" | "score-asc";
+
+export const GRIND_SORTS: { key: GrindSort; label: string; desc: string }[] = [
+  { key: "default", label: "預設排序", desc: "依模式預設（分數模式先列未達標，再依目前分數高→低）" },
+  { key: "score-desc", label: "目前分數 高→低", desc: "依符文目前的遊戲分數由高到低" },
+  { key: "score-asc", label: "目前分數 低→高", desc: "依符文目前的遊戲分數由低到高" },
+];
+
+/** 依指定順序排列分析結果；default 保留 analyzeGrind 原本的排序 */
+export function sortGrindTargets(targets: GrindTarget[], sort: GrindSort): GrindTarget[] {
+  if (sort === "default") return targets;
+  const dir = sort === "score-asc" ? 1 : -1;
+  return [...targets].sort(
+    (a, b) =>
+      (a.gameScore - b.gameScore) * dir ||
+      (a.maxGameScore - b.maxGameScore) * dir ||
+      b.rune.grade - a.rune.grade ||
+      b.effNow - a.effNow,
+  );
+}
+
 /** 目前精煉值距離各等級磨石上限還差多少（給詳細說明用） */
 export function stoneGain(option: GrindOption, ancient = false): { label: string; gain: number }[] {
   return [

@@ -7,6 +7,7 @@ import {
   GRIND_ACCEPT_LEVELS,
   GRIND_GRADE_LABEL,
   GRIND_PROFILES,
+  GRIND_SORTS,
   analyzeGrind,
   grindStatLabel,
   grindStatSuffix,
@@ -14,10 +15,12 @@ import {
   planMaterials,
   planScore,
   planWithStock,
+  sortGrindTargets,
   stoneGain,
   type GrindAccept,
   type GrindOwner,
   type GrindProfile,
+  type GrindSort,
   type GrindTarget,
 } from "../lib/grind";
 import type { Grindstone } from "../lib/types";
@@ -220,6 +223,7 @@ export default function GrindPage() {
   const [onlyHigh, setOnlyHigh] = useState(false);
   const [setId, setSetId] = useState(0);
   const [stat, setStat] = useState(0);
+  const [sort, setSort] = useState<GrindSort>("default");
   const [q, setQ] = useState("");
   const [take, setTake] = useState(40);
 
@@ -231,7 +235,7 @@ export default function GrindPage() {
 
   useEffect(() => {
     setTake(40);
-  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, stat, q]);
+  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, stat, sort, q]);
 
   const owners = useMemo(() => {
     const map = new Map<number, GrindOwner>();
@@ -264,7 +268,7 @@ export default function GrindPage() {
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return candidates.filter((t) => {
+    const list = candidates.filter((t) => {
       if (onlyEquipped && !t.owner) return false;
       if (onlySix && t.rune.grade !== 6) return false;
       if (onlyHigh && t.tier !== "high") return false;
@@ -276,7 +280,8 @@ export default function GrindPage() {
         grindStatLabel(t.best.t).includes(term)
       );
     });
-  }, [candidates, onlyEquipped, onlySix, onlyHigh, setId, q]);
+    return sortGrindTargets(list, sort);
+  }, [candidates, onlyEquipped, onlySix, onlyHigh, setId, sort, q]);
 
   const summary = useMemo(() => {
     const high = candidates.filter((t) => t.tier === "high").length;
@@ -370,7 +375,7 @@ export default function GrindPage() {
           {profile === "speed"
             ? `速度優先：只列出未達接受程度（${accept} 分）的符文，依符文速度（速度副屬性＋精煉）由高到低排序。`
             : profile === "score"
-              ? `分數：只列出精煉後能達到 ${targetScore} 分以上的符文，依目前遊戲分數由高到低。`
+              ? `分數：只列出精煉後能達到 ${targetScore} 分以上的符文；預設先列未達標的，再依目前遊戲分數由高到低。可用「排列」切換成目前分數高→低或低→高。`
               : GRIND_PROFILES.find((p) => p.key === profile)?.desc}
         </div>
 
@@ -455,6 +460,20 @@ export default function GrindPage() {
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </select>
+          <div className="row" style={{ gap: 6 }}>
+            <span className="tiny dim">排列</span>
+            <select
+              className="select"
+              style={{ width: 155 }}
+              value={sort}
+              onChange={(e) => setSort(e.target.value as GrindSort)}
+              title={GRIND_SORTS.find((s) => s.key === sort)?.desc}
+            >
+              {GRIND_SORTS.map((s) => (
+                <option key={s.key} value={s.key}>{s.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="row wrap" style={{ gap: 14, marginTop: 10 }}>
