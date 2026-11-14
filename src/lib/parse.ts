@@ -184,8 +184,8 @@ export interface ParseResult {
   warnings: string[];
 }
 
-/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值、取得時間軸、精煉石素材 */
-export const PARSE_VERSION = 9;
+/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值、取得時間軸、精煉石素材、技能升級次數 */
+export const PARSE_VERSION = 10;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -423,6 +423,12 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       .filter((aid) => artifactMap.has(aid))
       .slice(0, 2);
 
+    // 技能等級：SWEX 的 unit.skills 是 [[skill_id, level], …]；
+    // 升級次數 = 每招 (level - 1) 的總和。舊版存檔 / 自訂格式可能只有 skill_ups。
+    const skillUps = isList(u.skills)
+      ? list(u.skills).reduce((n: number, sk: any) => n + Math.max(0, num(sk?.[1] ?? sk?.level) - 1), 0)
+      : Math.max(0, num(u.skill_ups));
+
     units.push({
       id,
       master,
@@ -431,6 +437,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       runes: unitRunes.slice(0, 6),
       artifacts: unitArtifacts,
       locked: truthy(u.locked),
+      ...(skillUps > 0 || isList(u.skills) ? { skillUps } : {}),
     });
   }
 
@@ -657,6 +664,7 @@ export function exportAccount(account: Account): string {
       source: summonMap.get(u.id)?.source,
       rune_ids: u.runes,
       artifact_ids: u.artifacts,
+      skill_ups: u.skillUps,
     })),
     // 背包 / 保管箱中的魔靈不在 account.units，另外輸出才能保留取得時間軸。
     unit_storage_normal_list: (account.summons ?? [])

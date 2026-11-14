@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target, Crown,
 } from "lucide-react";
 import { accountGameLabel, ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
@@ -23,6 +23,7 @@ import FollowSpeedPage from "./pages/FollowSpeed";
 import SiegeSimulatorPage from "./pages/SiegeSimulator";
 import SiegeAdvicePage from "./pages/SiegeAdvice";
 import WorldBossPage from "./pages/WorldBoss";
+import WorldBossAdvicePage from "./pages/WorldBossAdvice";
 import OptimizerPage from "./pages/Optimizer";
 import TeamOptimizerPage from "./pages/TeamOptimizer";
 import AdminPage from "./pages/Admin";
@@ -36,7 +37,7 @@ import { buildRankIndex } from "./lib/rankings";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "worldboss-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -47,6 +48,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "follow-speed", label: "接速計算", icon: <Gauge size={17} />, title: "接速最低速度", sub: "選魔靈、輸入額外速度，直接算每隻的接速需求" },
   { key: "siege", label: "據點戰模擬", icon: <Castle size={17} />, title: "據點戰錦標賽模擬器", sub: "佔領塔、連線得分與 20,000 分勝利時間" },
   { key: "siege-advice", label: "據點進攻建議", icon: <Target size={17} />, title: "據點進攻建議", sub: "以 SWGT 對戰記錄分析進攻隊與防守核心" },
+  { key: "worldboss-advice", label: "世界王建議", icon: <Crown size={17} />, title: "世界王建議", sub: "60 隻水系魔靈挑選、2+2+2 配符與神器" },
   { key: "rta", label: "RTA", icon: <Swords size={17} />, title: "RTA 世界競技場", sub: "最愛魔靈的 RTA 獨立配裝與速度排行" },
   { key: "optimizer", label: "配符", icon: <Wand2 size={17} />, title: "一鍵配符", sub: "以 Tick 為條件的符文最佳化" },
   { key: "team-opt", label: "一鍵配隊", icon: <Zap size={17} />, title: "配置預設隊", sub: "最多 3 隊、15 隻魔靈一次配好，符文不重複" },
@@ -85,6 +87,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   siege: SiegeSimulatorPage,
   "siege-advice": SiegeAdvicePage,
   worldboss: WorldBossPage,
+  "worldboss-advice": WorldBossAdvicePage,
   rta: RtaPage,
   optimizer: OptimizerPage,
   "team-opt": TeamOptimizerPage,
@@ -235,7 +238,7 @@ export default function App() {
   }, [moreOpen]);
 
   useEffect(() => {
-    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "follow-speed" && route !== "siege" && route !== "siege-advice" && route !== "worldboss" && route !== "admin" && route !== "bestiary") {
+    if (ready && !account && route !== "import" && route !== "settings" && route !== "speedtick" && route !== "follow-speed" && route !== "siege" && route !== "siege-advice" && route !== "worldboss" && route !== "worldboss-advice" && route !== "admin" && route !== "bestiary") {
       window.location.hash = "#/import";
     }
   }, [ready, account, route]);
