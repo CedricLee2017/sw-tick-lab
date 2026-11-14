@@ -291,7 +291,7 @@ export function RuneCard({
   const eff = Math.round(rune.eff);
   const score = runeScore(rune);
   const rank = useRuneRank(rune.id);
-  const poolTitle = `同套裝同號碼（${rune.slot} 號${rune.ancient ? "，遠古分開計" : ""}）共 ${rank?.pool ?? 0} 顆，副屬排名以此為基準`;
+  const poolTitle = `同套裝同號碼（${rune.slot} 號，遠古與一般一起計）共 ${rank?.pool ?? 0} 顆，副屬排名以此為基準`;
   return (
     <div
       className={`rune ${gradeClass} ${detail ? "detail" : ""} ${excluded ? "excluded" : ""} ${locked ? "locked" : ""}`}

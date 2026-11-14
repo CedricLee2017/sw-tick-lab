@@ -156,7 +156,7 @@ export default function RunesPage() {
           <div className="row" style={{ gap: 8 }}>
             <span
               className="chip muted"
-              title="每條副屬性後面的數字是「名次 / 同組有這條副屬的數量」，1 = 最高。分組方式與遊戲一致：同套裝、同號碼（遠古符文分開計）。"
+              title="每條副屬性後面的數字是「名次 / 同組有這條副屬的數量」，1 = 最高。分組方式與遊戲一致：同套裝、同號碼（遠古與一般一起計）。"
             >
               副屬排名＝同套裝同號碼
             </span>
@@ -316,7 +316,7 @@ export default function RunesPage() {
               <div className="kv"><span className="k">精煉（磨石）</span><span className="v">{[...detail.subs].reduce((s, x) => s + x.g, 0)}</span></div>
               <div className="kv"><span className="k">擁有者</span><span className="v">{owner.get(detail.id) ?? "未裝備"}</span></div>
               <div className="kv"><span className="k">古代符文</span><span className="v">{detail.ancient ? "是" : "否"}</span></div>
-              <div className="kv"><span className="k">同組符文</span><span className="v">{ranks?.runes.get(detail.id)?.pool ?? "—"} 顆（同套裝 {detail.slot} 號{detail.ancient ? "、遠古" : ""}）</span></div>
+              <div className="kv"><span className="k">同組符文</span><span className="v">{ranks?.runes.get(detail.id)?.pool ?? "—"} 顆（同套裝 {detail.slot} 號，遠古與一般一起計）</span></div>
             </div>
           </div>
         </Modal>

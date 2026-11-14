@@ -6,8 +6,7 @@
  * 全部都要由玩家自己的符文／神器清單即時計算，所以這裡的排名有兩個重點：
  *
  * 1. 分組（池）：
- *    - 符文：同套裝 + 同號碼（遠古與一般分開計，因為遠古符文的精煉上限不同），
- *      跟遊戲顯示的「意志符文 (1)」一致。
+ *    - 符文：同套裝 + 同號碼（遠古與一般一起計，跟遊戲的「意志符文 (1)」一致）。
  *    - 神器：同類型（屬性 / 類型）+ 同屬性（屬性神器）或同魔靈類型（類型神器）。
  * 2. 比較值：符文用「實際數值 = 原始值 + 精煉值」，神器直接用效果數值；
  *    同分並列同名次（名次 = 1 + 數值比它高的數量）。
@@ -41,9 +40,9 @@ export interface RankIndex {
   artifacts: Map<number, ArtifactRank>;
 }
 
-/** 符文分組：遠古 / 一般分開，再依套裝與號碼 */
-export function runePoolKey(rune: Pick<Rune, "ancient" | "set" | "slot">): string {
-  return `${rune.ancient ? "a" : "n"}:${rune.set}:${rune.slot}`;
+/** 符文分組：同套裝 + 同號碼（遠古與一般一起計，與遊戲相同） */
+export function runePoolKey(rune: Pick<Rune, "set" | "slot">): string {
+  return `${rune.set}:${rune.slot}`;
 }
 
 /** 神器分組：屬性神器看屬性，類型神器看魔靈類型（無形 98 自成一组） */
