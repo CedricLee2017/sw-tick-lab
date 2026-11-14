@@ -10,7 +10,11 @@
  *    - 神器：同類型（屬性 / 類型）+ 同屬性（屬性神器）或同魔靈類型（類型神器）。
  * 2. 比較值：符文用「實際數值 = 原始值 + 精煉值」，神器直接用效果數值；
  *    同分並列同名次（名次 = 1 + 數值比它高的數量）。
+ *
+ * 另外可以選擇「假設英雄精煉滿」：計算排名時，未達英雄磨石上限的副屬
+ * 會當成英雄滿值（例如體力% +6 → +7），已超過英雄上限的傳說精煉則保留原值。
  */
+import { grindStoneMax } from "./grind";
 import type { Artifact, Rune } from "./types";
 
 /** 單一條屬性的排名 */
@@ -38,6 +42,8 @@ export interface ArtifactRank {
 export interface RankIndex {
   runes: Map<number, RuneRank>;
   artifacts: Map<number, ArtifactRank>;
+  /** 建立索引時是否假設英雄精煉滿（只影響符文） */
+  heroGrind: boolean;
 }
 
 /** 符文分組：同套裝 + 同號碼（遠古與一般一起計，與遊戲相同） */
@@ -62,8 +68,29 @@ function countGreater(sortedDesc: readonly number[], value: number): number {
   return lo;
 }
 
-/** 符文的比較值：面板顯示的實際數值（含精煉） */
-export const runeSubValue = (sub: Rune["subs"][number]): number => sub.v + (sub.g ?? 0);
+/** 建立排名時可選的假設 */
+export interface RankOptions {
+  /**
+   * 假設每條可精煉副屬都精煉到「英雄」磨石上限。
+   * 已超過英雄上限的數值（例如傳說磨石 +9）不會被調低。
+   */
+  heroGrind?: boolean;
+}
+
+/**
+ * 符文的比較值：面板顯示的實際數值（含精煉）。
+ * `heroGrind` = true 時，未達英雄上限的副屬一律當成英雄滿值；
+ * 遠古符文會用遠古英雄磨石的上限。
+ */
+export function runeSubValue(
+  sub: Rune["subs"][number],
+  ancient = false,
+  heroGrind = false,
+): number {
+  const current = sub.g ?? 0;
+  const grind = heroGrind ? Math.max(current, grindStoneMax(sub.t, 4, ancient)) : current;
+  return sub.v + grind;
+}
 
 /** 名次佔比：0 = 第一名、1 = 最後一名（用來上色 / 排序） */
 export function rankPercent(rank: StatRank | null | undefined): number {
@@ -122,7 +149,12 @@ export function averageRankPercent(ranks: (StatRank | null)[] | undefined): numb
  * 建立整份存檔的排名索引。符文／神器各自的清單只掃一次，
  * 以 id 作為 key，讓卡片直接 O(1) 取得排名。
  */
-export function buildRankIndex(runes: readonly Rune[], artifacts: readonly Artifact[]): RankIndex {
+export function buildRankIndex(
+  runes: readonly Rune[],
+  artifacts: readonly Artifact[],
+  opts: RankOptions = {},
+): RankIndex {
+  const heroGrind = opts.heroGrind ?? false;
   const runePools = new Map<string, Rune[]>();
   for (const rune of runes) {
     const key = runePoolKey(rune);
@@ -137,9 +169,10 @@ export function buildRankIndex(runes: readonly Rune[], artifacts: readonly Artif
     const values = new Map<number, number[]>();
     for (const rune of pool) {
       for (const sub of rune.subs) {
+        const value = runeSubValue(sub, rune.ancient, heroGrind);
         const list = values.get(sub.t);
-        if (list) list.push(runeSubValue(sub));
-        else values.set(sub.t, [runeSubValue(sub)]);
+        if (list) list.push(value);
+        else values.set(sub.t, [value]);
       }
     }
     for (const list of values.values()) list.sort((a, b) => b - a);
@@ -150,7 +183,7 @@ export function buildRankIndex(runes: readonly Rune[], artifacts: readonly Artif
         subs: rune.subs.map((sub) => {
           const list = values.get(sub.t);
           if (!list || list.length === 0) return null;
-          return { rank: countGreater(list, runeSubValue(sub)) + 1, total: list.length };
+          return { rank: countGreater(list, runeSubValue(sub, rune.ancient, heroGrind)) + 1, total: list.length };
         }),
       });
     }
@@ -188,5 +221,5 @@ export function buildRankIndex(runes: readonly Rune[], artifacts: readonly Artif
     }
   }
 
-  return { runes: runeRanks, artifacts: artifactRanks };
+  return { runes: runeRanks, artifacts: artifactRanks, heroGrind };
 }

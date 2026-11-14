@@ -8,7 +8,7 @@ import { runeScore, type BaseStats } from "../lib/stats";
 import { artifactKindText, artifactMainText, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
 import { rankTone, type StatRank } from "../lib/rankings";
 import { type EquipUsage } from "../lib/usage";
-import { useArtifactRank, useRuneRank } from "./RankProvider";
+import { useArtifactRank, useRankIndex, useRuneRank } from "./RankProvider";
 import { tickInfo } from "../lib/optimizer";
 
 export const fmt = (n: number) => (Number.isFinite(n) ? n.toLocaleString("en-US") : "—");
@@ -295,6 +295,8 @@ export function RuneCard({
   const eff = Math.round(rune.eff);
   const score = runeScore(rune);
   const rank = useRuneRank(rune.id);
+  const rankIndex = useRankIndex();
+  const rankNote = rankIndex?.heroGrind ? "（排名假設英雄精煉滿）" : "";
   const poolTitle = `同套裝同號碼（${rune.slot} 號，遠古與一般一起計）共 ${rank?.pool ?? 0} 顆，副屬排名以此為基準`;
   return (
     <div
@@ -371,7 +373,7 @@ export function RuneCard({
                 <b>+{s.v + s.g}{statSuffix(s.t)}</b>
                 <RankBadge
                   rank={subRank}
-                  title={`${statLabel(s.t).replace(/%$/, "")}：${poolTitle}。其中 ${subRank?.total ?? 0} 顆有這條副屬，這顆排第 ${subRank?.rank ?? 0} 名（數值高至低）。`}
+                  title={`${statLabel(s.t).replace(/%$/, "")}：${poolTitle}。其中 ${subRank?.total ?? 0} 顆有這條副屬，這顆排第 ${subRank?.rank ?? 0} 名（數值高至低）${rankNote}。`}
                 />
                 {s.g > 0 && (
                   <span className="g" title={`實際數值已含精煉 +${s.g}${statSuffix(s.t)}`}>

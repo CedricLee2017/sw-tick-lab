@@ -165,6 +165,8 @@ export interface Settings {
   includedRunes: number[];
   /** 配神器時排除的神器（儲存庫可一鍵把整隻魔靈或整隊的神器排除） */
   excludedArtifacts: number[];
+  /** 符文副屬排名假設每條可精煉副屬都達到英雄磨石上限 */
+  rankHeroGrind: boolean;
 }
 
 export type RuneFlag = "locked" | "excluded" | "included";
@@ -184,6 +186,7 @@ const DEFAULT_SETTINGS = (): Settings => ({
   excludedRunes: [],
   includedRunes: [],
   excludedArtifacts: [],
+  rankHeroGrind: false,
 });
 
 const ACCOUNT_KEY = "swtick:account";
@@ -294,6 +297,8 @@ interface Store {
   setRta: (v: boolean) => void;
   setPool: (v: number) => void;
   setFocus: (focus: FocusEntry[]) => void;
+  /** 符文副屬排名是否假設英雄精煉滿 */
+  setRankHeroGrind: (v: boolean) => void;
   /** 切換單顆符文的鎖定 / 排除 / 固定 */
   toggleRuneFlag: (kind: RuneFlag, id: number) => void;
   /** 一次設定多顆符文的鎖定 / 排除 / 固定 */
@@ -397,6 +402,7 @@ export const useStore = create<Store>((setState, getState) => ({
             excludedRunes: settings.excludedRunes ?? [],
             includedRunes: settings.includedRunes ?? [],
             excludedArtifacts: settings.excludedArtifacts ?? [],
+            rankHeroGrind: settings.rankHeroGrind ?? false,
           }
         : DEFAULT_SETTINGS();
       // 候選符文上限已改為 15 顆，舊設定若存了 18 要在載入時收斂
@@ -634,6 +640,12 @@ export const useStore = create<Store>((setState, getState) => ({
 
   setFocus: (focus) => {
     const settings = { ...getState().settings, focus };
+    setState({ settings });
+    void set(SETTINGS_KEY, settings);
+  },
+
+  setRankHeroGrind: (v) => {
+    const settings = { ...getState().settings, rankHeroGrind: v };
     setState({ settings });
     void set(SETTINGS_KEY, settings);
   },

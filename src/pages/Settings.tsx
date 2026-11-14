@@ -58,6 +58,7 @@ export default function SettingsPage() {
   const patchBonus = useStore((s) => s.patchBonus);
   const setRta = useStore((s) => s.setRta);
   const setPool = useStore((s) => s.setPool);
+  const setRankHeroGrind = useStore((s) => s.setRankHeroGrind);
   const { loadouts } = useLibrary();
   const allLoadouts = useStore((s) => s.loadouts);
   const removeLoadout = useStore((s) => s.removeLoadout);
@@ -316,6 +317,16 @@ export default function SettingsPage() {
                 <span className="tiny dim" style={{ display: "block" }}>副屬性上的精煉數值一併計算</span>
               </span>
               <input type="checkbox" checked={bonus.grind} onChange={(e) => patchBonus({ grind: e.target.checked })} />
+            </label>
+            <div className="divider" />
+            <label className="row between" style={{ gap: 10, cursor: "pointer" }}>
+              <span>
+                <span style={{ fontWeight: 600 }}>符文排名假設英雄精煉滿</span>
+                <span className="tiny dim" style={{ display: "block" }}>
+                  計算副屬排名時，未達英雄磨石上限的副屬當成英雄滿值（例如體力% +6 → +7）；已超過的傳說精煉保留原值。只影響排名。
+                </span>
+              </span>
+              <input type="checkbox" checked={settings.rankHeroGrind} onChange={(e) => setRankHeroGrind(e.target.checked)} />
             </label>
             <div className="divider" />
             <div className="field">

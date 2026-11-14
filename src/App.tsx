@@ -110,6 +110,8 @@ export default function App() {
   /** 已經開過的頁面：切換頁籤時只隱藏、不卸載，設定才不會消失 */
   const [visited, setVisited] = useState<Set<RouteKey>>(() => new Set([currentRoute()]));
   const { hydrate, ready, account, toasts, settings, importText, notify, syncLibrary, saves, currentSaveId, switchSave } = useStore();
+  // 獨立訂閱排名假設，確保切換時 App 會重新建立排名索引
+  const rankHeroGrind = useStore((s) => s.settings.rankHeroGrind);
   const { ready: authReady, user, config, init: initAuth, signOut } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
   /** 手機「更多」面板 */
@@ -252,8 +254,11 @@ export default function App() {
 
   // 符文 / 神器的副屬排名：整份存檔只算一次，卡片直接由 Context 取值
   const ranks = useMemo(
-    () => (account ? buildRankIndex(account.runes, account.artifacts) : null),
-    [account],
+    () =>
+      account
+        ? buildRankIndex(account.runes, account.artifacts, { heroGrind: rankHeroGrind })
+        : null,
+    [account, rankHeroGrind],
   );
 
   const page = !ready ? (

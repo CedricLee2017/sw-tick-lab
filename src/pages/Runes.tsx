@@ -23,6 +23,8 @@ export default function RunesPage() {
   const account = useStore((s) => s.account);
   const lockedRunes = useStore((s) => s.settings.lockedRunes);
   const excludedRunes = useStore((s) => s.settings.excludedRunes);
+  const rankHeroGrind = useStore((s) => s.settings.rankHeroGrind);
+  const setRankHeroGrind = useStore((s) => s.setRankHeroGrind);
   const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
   const lockedSet = useMemo(() => new Set(lockedRunes), [lockedRunes]);
   const excludedSet = useMemo(() => new Set(excludedRunes), [excludedRunes]);
@@ -204,13 +206,23 @@ export default function RunesPage() {
               精煉建議 →
             </a>
           </div>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row wrap" style={{ gap: 8 }}>
             <span
               className="chip muted"
               title="每條副屬性後面的數字是「名次 / 同組有這條副屬的數量」，1 = 最高。分組方式與遊戲一致：同套裝、同號碼（遠古與一般一起計）。"
             >
               副屬排名＝同套裝同號碼
             </span>
+            <button
+              type="button"
+              className={`chip ${rankHeroGrind ? "gold" : "muted"}`}
+              style={{ cursor: "pointer" }}
+              aria-pressed={rankHeroGrind}
+              onClick={() => setRankHeroGrind(!rankHeroGrind)}
+              title="假設每條可精煉副屬都精煉到英雄磨石上限：例如體力% +6 會當成 +7 計算；已超過英雄上限的傳說精煉（例如 +9）保留原值。遠古符文使用遠古英雄上限。只影響排名，不會改變卡片顯示的實際數值。"
+            >
+              {rankHeroGrind ? "✓ " : ""}英雄精煉滿
+            </button>
             <span
               className="chip muted"
               title="存檔匯出當下，遊戲內預設隊 / 防守隊使用中的符文數量"
@@ -420,7 +432,7 @@ export default function RunesPage() {
               </div>
               <div className="kv">
                 <span className="k">排名統計</span>
-                <span className="v" title="百分位 0% = 同組第一、100% = 同組最後；只計同組有 2 顆以上的副屬">
+                <span className="v" title={`百分位 0% = 同組第一、100% = 同組最後；只計同組有 2 顆以上的副屬${rankHeroGrind ? "。目前排名假設英雄精煉滿" : ""}`}>
                   {detailRank && detailRank.count >= 2
                     ? `平均 ${Math.round(detailRank.avg * 100)}% · 最好 ${Math.round(detailRank.best * 100)}% · 最差 ${Math.round(detailRank.worst * 100)}%（${detailRank.count} 條）`
                     : "同組太少，無法比較"}
