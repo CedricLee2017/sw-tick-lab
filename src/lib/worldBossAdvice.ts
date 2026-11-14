@@ -3,16 +3,22 @@
  *
  * 1. 選角：水屬性魔靈，優先順序為「原五 > 二覺 > 原四 > 其他」，
  *    同一層級再以技能升級次數（各技能等級 - 1 的總和）由多至少排序。
- * 2. 配符：盡量三組 2 件套（2+2+2），並依魔靈類型決定要堆的面板：
- *      攻擊型 → 攻擊力、防禦型 → 防禦力、體力 / 支援型 → 體力。
- *    速度、暴擊率、暴擊傷害完全不計分（世界王不需要）。
+ * 2. 配符：
+ *    - 2/4/6 位主屬性依魔靈類型與基本數值決定：
+ *        攻擊型 → 攻擊力% ×3
+ *        體力型 → 體力% ×3
+ *        防禦型 → 防禦力% ×3
+ *        支援型 → 依基本體力／防禦力混搭（例如 2/4 體力%、6 防禦力%）
+ *    - 選符以「配合類型的面板數值」為主，遊戲符文分數（◆）作為次要加分；
+ *      兩顆同分時，攻擊型優先副屬攻擊%、支援型優先體力／防禦%。
+ *    - 盡量三組 2 件套（2+2+2）；速度、暴擊率、暴擊傷害完全不計分。
  * 3. 神器：每隻配一件屬性神器 + 一件類型神器，主效果與追加傷害優先配合該魔靈的主屬性。
  *
  * 這裡只產生「建議」，不會改動存檔；同一顆符文 / 神器最多只會被建議給一隻魔靈。
  */
 import { RUNE_SETS, SET_BY_ID, STAT_TYPES } from "./constants";
 import { ARTIFACT_EFFECTS } from "./artifacts";
-import { baseStats, statsForRunes } from "./stats";
+import { baseStats, runeScore, statsForRunes } from "./stats";
 import type { Account, Artifact, BonusConfig, Monster, Rune, Stats, Unit } from "./types";
 
 export type WbFocus = "hp" | "atk" | "def";
@@ -37,9 +43,11 @@ export interface WbSetCount {
 export interface WbMonsterPlan {
   unit: Unit;
   monster: Monster;
-  /** 這隻魔靈要堆的面板屬性 */
+  /** 這隻魔靈主要堆疊的面板屬性（支援型取體力 / 防禦力較高者） */
   focus: WbFocus;
   focusLabel: string;
+  /** 2/4/6 位建議主屬性 */
+  mainPlan: Record<number, WbFocus>;
   /** 0 原五、1 二覺、2 原四、3 其他 */
   tier: number;
   /** 技能升級總次數；undefined = 舊存檔沒有技能資料 */
@@ -77,15 +85,67 @@ export interface WbPlanOptions {
 const TWO_PIECE_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25).map((s) => s.id);
 
 const ARCH_STYLE: Record<string, number> = { Attack: 1, Defense: 2, HP: 3, Support: 4 };
+const MAIN_SLOTS = [2, 4, 6] as const;
 
-/** 由魔靈類型決定要堆的主屬性 */
-export function focusOf(monster: Monster): WbFocus {
-  if (monster.arch === "Attack") return "atk";
-  if (monster.arch === "Defense") return "def";
-  return "hp";
+/** 體力 / 攻擊 / 防禦三圍的相對權重 */
+interface WbStatWeights {
+  hp: number;
+  atk: number;
+  def: number;
+}
+
+interface WbProfile {
+  focus: WbFocus;
+  /** 副屬 / 固有屬 / 套裝加成用：三圍的相對比重 */
+  weights: WbStatWeights;
+  /** 2/4/6 位建議主屬性 */
+  mainPlan: Record<number, WbFocus>;
 }
 
 export const FOCUS_LABEL: Record<WbFocus, string> = { hp: "體力", atk: "攻擊力", def: "防禦力" };
+
+/**
+ * 依魔靈類型與基本三圍建立配裝方向。
+ * 支援型用「基本體力 vs 基本防禦」決定 2/4/6 要幾多條體力%、幾多條防禦%，
+ * 兩者接近時就會混搭（例如 2/4 體力%、6 防禦%）。
+ */
+function profileFor(monster: Monster, base: { hp: number; atk: number; def: number }): WbProfile {
+  if (monster.arch === "Attack") {
+    return {
+      focus: "atk",
+      weights: { hp: 0.15, atk: 1, def: 0.15 },
+      mainPlan: { 2: "atk", 4: "atk", 6: "atk" },
+    };
+  }
+  if (monster.arch === "Defense") {
+    return {
+      focus: "def",
+      weights: { hp: 0.35, atk: 0.1, def: 1 },
+      mainPlan: { 2: "def", 4: "def", 6: "def" },
+    };
+  }
+  if (monster.arch === "Support") {
+    // 基本體力遠大於基本防禦，用 8 倍把防禦拉近同一尺度再比較。
+    const hpWeight = base.hp / (base.hp + base.def * 8);
+    const defWeight = 1 - hpWeight;
+    const hpSlots = Math.min(3, Math.max(0, Math.round(3 * hpWeight)));
+    const mainPlan: Record<number, WbFocus> = {};
+    MAIN_SLOTS.forEach((slot, i) => {
+      mainPlan[slot] = i < hpSlots ? "hp" : "def";
+    });
+    return {
+      focus: hpWeight >= defWeight ? "hp" : "def",
+      weights: { hp: hpWeight, atk: 0.05, def: defWeight },
+      mainPlan,
+    };
+  }
+  // 體力型 / 素材 / 其他
+  return {
+    focus: "hp",
+    weights: { hp: 1, atk: 0.1, def: 0.35 },
+    mainPlan: { 2: "hp", 4: "hp", 6: "hp" },
+  };
+}
 
 /** 選角優先級：原五 > 二覺 > 原四 > 其他 */
 function tierOf(monster: Monster): number {
@@ -95,42 +155,79 @@ function tierOf(monster: Monster): number {
   return 3;
 }
 
-/** 符文換算成「主屬性面板點數」：速度、暴擊、暴傷、命中、抵抗一律 0 分 */
-function runePoints(rune: Rune, focus: WbFocus, baseValue: number): number {
+/**
+ * 符文的配裝分數：
+ * 1. 主屬性：2/4/6 位只計「該位置建議的主屬性」，其他主屬性不給分；
+ *    1/3/5 位主屬性固定，依三圍權重計分。
+ * 2. 副屬 / 固有屬性：依三圍權重計分，數值會除以該魔靈的基礎值，
+ *    令體力%、攻擊%、防禦% 可以在同一尺度比較。
+ * 3. 遊戲符文分數（◆）：作為次要加分（0–300 分 → 0–0.3）。
+ */
+function runePoints(
+  rune: Rune,
+  profile: WbProfile,
+  base: { hp: number; atk: number; def: number },
+): number {
+  const { weights, mainPlan } = profile;
   let points = 0;
-  const add = (t: number, v: number) => {
+
+  const add = (t: number, v: number, weight?: number) => {
     const meta = STAT_TYPES[t];
-    if (!meta || meta.key !== focus) return;
-    points += meta.pct ? (v / 100) * baseValue : v;
+    if (!meta) return;
+    const key = meta.key;
+    if (key !== "hp" && key !== "atk" && key !== "def") return;
+    const w = weight ?? weights[key];
+    if (w <= 0) return;
+    const baseValue = base[key];
+    const amount = meta.pct ? (v / 100) * baseValue : v;
+    points += (amount / baseValue) * w;
   };
-  add(rune.main.t, rune.main.v);
+
+  if (STAT_TYPES[rune.main.t]) {
+    if (rune.slot === 2 || rune.slot === 4 || rune.slot === 6) {
+      // 2/4/6 位：只有建議的主屬性才有分數；其他主屬性扣分，確保優先攻擊/體力/防禦%
+      if (STAT_TYPES[rune.main.t].key === mainPlan[rune.slot]) add(rune.main.t, rune.main.v, 1);
+      else points -= 0.35;
+    } else {
+      add(rune.main.t, rune.main.v);
+    }
+  }
   if (rune.prefix?.t) add(rune.prefix.t, rune.prefix.v);
   for (const sub of rune.subs) add(sub.t, sub.v + (sub.g ?? 0));
+
+  // 遊戲分數作為次要加分，避免完全忽略符文整體質素
+  points += runeScore(rune) / 1000;
   return points;
 }
 
-/** 一個 2 件套加成換算成面板點數（只計與主屬性相同的套裝） */
-function setBonusPoints(setId: number, focus: WbFocus, baseValue: number): number {
+/** 一個 2 件套加成換算成配裝分數（只計體力 / 攻擊 / 防禦套裝） */
+function setBonusPoints(setId: number, weights: WbStatWeights): number {
   const def = SET_BY_ID[setId];
-  if (!def || def.pieces !== 2 || !def.stat || def.stat !== focus) return 0;
-  return ((def.value ?? 0) / 100) * baseValue;
+  if (!def || def.pieces !== 2 || !def.stat) return 0;
+  const key = def.stat;
+  if (key !== "hp" && key !== "atk" && key !== "def") return 0;
+  return ((def.value ?? 0) / 100) * weights[key];
 }
 
-/** 神器：主效果與追加傷害（依自身體力 / 攻擊 / 防禦）優先配合主屬性 */
-function artifactPoints(artifact: Artifact, focus: WbFocus, baseValue: number): number {
+/** 神器：主效果與追加傷害優先配合該魔靈的三圍權重 */
+function artifactPoints(
+  artifact: Artifact,
+  profile: WbProfile,
+  base: { hp: number; atk: number; def: number },
+): number {
+  const { weights } = profile;
   let points = 0;
+
   const mainKey = artifact.main.t === 100 ? "hp" : artifact.main.t === 101 ? "atk" : artifact.main.t === 102 ? "def" : "";
-  if (mainKey === focus) points += artifact.main.v;
+  if (mainKey) points += (artifact.main.v / base[mainKey]) * weights[mainKey];
+
   for (const sub of artifact.subs) {
     const def = ARTIFACT_EFFECTS[sub.t];
     if (!def) continue;
-    const matchesFocus =
-      (focus === "hp" && sub.t === 218) ||
-      (focus === "atk" && sub.t === 219) ||
-      (focus === "def" && sub.t === 220);
-    if (matchesFocus) points += (sub.v / 100) * baseValue;
+    const key = sub.t === 218 ? "hp" : sub.t === 219 ? "atk" : sub.t === 220 ? "def" : "";
+    if (key) points += (sub.v / 100) * weights[key];
     // 速度在世界王沒有意義，速度追傷（221）直接不計
-    else if (sub.t !== 221 && (def.kind === "dmg" || def.kind === "def")) points += sub.v * 0.2;
+    else if (sub.t !== 221 && (def.kind === "dmg" || def.kind === "def")) points += sub.v / 1000;
   }
   return points;
 }
@@ -172,16 +269,16 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
 
   for (const { unit, monster, tier, skillUps } of pickedUnits) {
     const base = baseStats(monster, unit.stars, unit.level);
-    const focus = focusOf(monster);
-    const baseValue = base[focus];
+    const profile = profileFor(monster, base);
+    const { focus, weights } = profile;
 
-    // 這隻魔靈眼中，每顆未使用符文的價值（只算主屬性）
+    // 這隻魔靈眼中，每顆未使用符文的價值
     const points = new Map<number, number>();
     const bySetSlot = new Map<string, Rune[]>();
     const bySlot = new Map<number, Rune[]>();
     for (const rune of runePool) {
       if (usedRunes.has(rune.id)) continue;
-      points.set(rune.id, runePoints(rune, focus, baseValue));
+      points.set(rune.id, runePoints(rune, profile, base));
       const setKey = `${rune.set}:${rune.slot}`;
       const setList = bySetSlot.get(setKey);
       if (setList) setList.push(rune);
@@ -190,7 +287,10 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       if (slotList) slotList.push(rune);
       else bySlot.set(rune.slot, [rune]);
     }
-    const byPoints = (a: Rune, b: Rune) => (points.get(b.id) ?? 0) - (points.get(a.id) ?? 0);
+    const byPoints = (a: Rune, b: Rune) => {
+      const diff = (points.get(b.id) ?? 0) - (points.get(a.id) ?? 0);
+      return Math.abs(diff) > 1e-9 ? diff : runeScore(b) - runeScore(a);
+    };
     for (const list of bySetSlot.values()) list.sort(byPoints);
     for (const list of bySlot.values()) list.sort(byPoints);
 
@@ -208,7 +308,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       const slots = [...remaining];
       let best: { a: Rune; b: Rune; score: number } | null = null;
       for (const setId of TWO_PIECE_SETS) {
-        const bonus = setBonusPoints(setId, focus, baseValue);
+        const bonus = setBonusPoints(setId, weights);
         for (let i = 0; i < slots.length; i++) {
           const a = bestAt(`${setId}:${slots[i]}`);
           if (!a) continue;
@@ -243,7 +343,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       let bestScore = -Infinity;
       for (const art of account.artifacts) {
         if (usedArtifacts.has(art.id) || !filter(art)) continue;
-        const score = artifactPoints(art, focus, baseValue);
+        const score = artifactPoints(art, profile, base);
         if (score > bestScore) {
           bestScore = score;
           best = art;
@@ -273,6 +373,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       monster,
       focus,
       focusLabel: FOCUS_LABEL[focus],
+      mainPlan: profile.mainPlan,
       tier,
       skillUps,
       runes,

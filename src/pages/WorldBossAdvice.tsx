@@ -9,10 +9,29 @@ import {
   WB_ARCH_LABEL,
   WB_TIER_LABEL,
   buildWorldBossPlan,
+  type WbFocus,
   type WbMonsterPlan,
 } from "../lib/worldBossAdvice";
 
 type SortKey = "priority" | "focus";
+
+/** 把 2/4/6 建議主屬性變成「2/4 體力% · 6 防禦力%」 */
+function mainPlanText(plan: WbMonsterPlan): string {
+  const groups = new Map<WbFocus, number[]>();
+  for (const slot of [2, 4, 6]) {
+    const stat = plan.mainPlan[slot];
+    const slots = groups.get(stat) ?? [];
+    slots.push(slot);
+    groups.set(stat, slots);
+  }
+  if (groups.size === 1) {
+    const [stat] = [...groups.keys()];
+    return `${FOCUS_LABEL[stat]}%`;
+  }
+  return [...groups.entries()]
+    .map(([stat, slots]) => `${slots.join("/")} ${FOCUS_LABEL[stat]}%`)
+    .join(" · ");
+}
 
 function PlanCard({
   plan,
@@ -57,6 +76,12 @@ function PlanCard({
         <div className="row wrap" style={{ gap: 5 }}>
           <span className="chip gold" title="主要堆疊的面板屬性">
             {FOCUS_LABEL[plan.focus]} {fmt(plan.focusValue)}
+          </span>
+          <span
+            className="chip muted"
+            title={`2/4/6 位建議主屬性（依魔靈類型${plan.monster.arch === "Support" ? `與基本體力 ${fmt(plan.base.hp)}／防禦 ${fmt(plan.base.def)}` : ""}決定）`}
+          >
+            2/4/6：{mainPlanText(plan)}
           </span>
           {pairReady && <span className="chip gold" title="6 顆符文剛好是三組 2 件套">2+2+2</span>}
           {plan.sets.map((s) => (
@@ -193,7 +218,8 @@ export default function WorldBossAdvicePage() {
             </div>
             <div className="card-sub">
               依「原五 &gt; 二覺 &gt; 原四，再比技能升級次數」挑選水屬性魔靈，並自動配成 2+2+2 套裝。
-              面板以魔靈類型決定：體力型堆體力、攻擊型堆攻擊、防禦型堆防禦；速度、暴擊率、暴擊傷害不計。
+              2/4/6 位主屬性：攻擊型全攻擊%、體力型全體力%、防禦型全防禦%，支援型依基本體力／防禦力混搭；
+              選符以配合類型的面板為主，遊戲符文分數作為次要加分。速度、暴擊率、暴擊傷害不計。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
