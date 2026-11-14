@@ -7,6 +7,7 @@ import type { Artifact, Monster, Rune, Stats } from "../lib/types";
 import { runeScore, type BaseStats } from "../lib/stats";
 import { artifactKindText, artifactMainText, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
 import { rankTone, type StatRank } from "../lib/rankings";
+import { type EquipUsage } from "../lib/usage";
 import { useArtifactRank, useRuneRank } from "./RankProvider";
 import { tickInfo } from "../lib/optimizer";
 
@@ -266,6 +267,7 @@ export function RuneCard({
   excluded = false,
   onToggleLock,
   onToggleExclude,
+  usage,
   children,
 }: {
   rune: Rune;
@@ -281,6 +283,8 @@ export function RuneCard({
   excluded?: boolean;
   onToggleLock?: () => void;
   onToggleExclude?: () => void;
+  /** 預設隊 / RTA 使用狀況（不傳則不顯示標籤） */
+  usage?: EquipUsage;
   /** 卡片底部的附加內容（例如精煉建議） */
   children?: ReactNode;
 }) {
@@ -308,6 +312,8 @@ export function RuneCard({
           {set?.name ?? `套裝${rune.set}`}
           <span className="rune-pos" title={`符文位置 ${rune.slot}`}>{rune.slot}</span>
           {rune.ancient && <span className="rune-tag">遠古</span>}
+          {usage?.deck && <span className="rune-tag usage deck" title="遊戲內預設隊 / 防守隊使用中">預設隊</span>}
+          {usage?.rta && <span className="rune-tag usage rta" title="世界競技場（RTA）配裝使用中">RTA</span>}
           {rank && rank.pool > 1 && (
             <span className="rune-tag muted" title={poolTitle}>共 {rank.pool} 顆</span>
           )}
@@ -451,11 +457,14 @@ export function ArtifactCard({
   owner,
   onClick,
   detail,
+  usage,
 }: {
   artifact: Artifact;
   owner?: string;
   onClick?: () => void;
   detail?: boolean;
+  /** 預設隊 / RTA 使用狀況（不傳則不顯示標籤） */
+  usage?: EquipUsage;
 }) {
   const rank = artifact.rank;
   const rankClass = rank >= 5 ? "legendary" : rank === 4 ? "hero" : rank === 3 ? "rare" : "";
@@ -473,6 +482,8 @@ export function ArtifactCard({
           <span className="rune-dot" style={{ background: color }} />
           {artifactTypeText(artifact.type)}
           <span className="rune-tag">{artifactKindText(artifact)}</span>
+          {usage?.deck && <span className="rune-tag usage deck" title="遊戲內預設隊 / 防守隊使用中">預設隊</span>}
+          {usage?.rta && <span className="rune-tag usage rta" title="世界競技場（RTA）配裝使用中">RTA</span>}
           {artRank && artRank.pool > 1 && (
             <span className="rune-tag muted" title={poolTitle}>共 {artRank.pool} 件</span>
           )}

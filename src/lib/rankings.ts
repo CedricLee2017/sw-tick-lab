@@ -80,17 +80,42 @@ export function rankTone(rank: StatRank | null | undefined): "top" | "good" | ""
   return "";
 }
 
-/** 平均百分位（給「副屬排名」排序用）；沒有排名資料時回傳 1（最後） */
-export function averageRankPercent(ranks: (StatRank | null)[] | undefined): number {
-  if (!ranks || ranks.length === 0) return 1;
+/** 一顆符文 / 一件神器的排名摘要（只用同組數量 ≥ 2 的屬性） */
+export interface RankSummary {
+  /** 平均百分位（0 = 最好、1 = 最差） */
+  avg: number;
+  /** 最差那條的百分位（最大） */
+  worst: number;
+  /** 最好那條的百分位（最小）；「所有屬性都排得後」就是看這個值 */
+  best: number;
+  /** 有排名資料的屬性條數（同組只有 1 件的屬性不計） */
+  count: number;
+}
+
+const EMPTY_SUMMARY: RankSummary = { avg: 1, worst: 1, best: 1, count: 0 };
+
+/** 把一張卡片的所有副屬排名濃縮成平均 / 最好 / 最差，方便篩選與排序 */
+export function summarizeRanks(ranks: (StatRank | null)[] | undefined): RankSummary {
+  if (!ranks || ranks.length === 0) return EMPTY_SUMMARY;
   let sum = 0;
-  let n = 0;
+  let worst = -1;
+  let best = 2;
+  let count = 0;
   for (const r of ranks) {
     if (!r || r.total < 2) continue;
-    sum += rankPercent(r);
-    n++;
+    const p = rankPercent(r);
+    sum += p;
+    if (p > worst) worst = p;
+    if (p < best) best = p;
+    count++;
   }
-  return n === 0 ? 1 : sum / n;
+  if (count === 0) return EMPTY_SUMMARY;
+  return { avg: sum / count, worst, best, count };
+}
+
+/** 平均百分位（給「副屬排名」排序用）；沒有排名資料時回傳 1（最後） */
+export function averageRankPercent(ranks: (StatRank | null)[] | undefined): number {
+  return summarizeRanks(ranks).avg;
 }
 
 /**

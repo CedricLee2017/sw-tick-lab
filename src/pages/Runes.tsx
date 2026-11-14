@@ -4,7 +4,8 @@ import { unitLabel, useStore } from "../store";
 import { RUNE_SETS, SET_BY_ID, STAT_TYPES } from "../lib/constants";
 import { runeScore } from "../lib/stats";
 import { grindMax, grindStatSuffix } from "../lib/grind";
-import { averageRankPercent } from "../lib/rankings";
+import { averageRankPercent, summarizeRanks } from "../lib/rankings";
+import { buildUsageIndex, usageText } from "../lib/usage";
 import { useRankIndex } from "../components/RankProvider";
 import { Modal, NumberInput, RuneCard, fmt, setColor, statText } from "../components/ui";
 import type { Rune } from "../lib/types";
@@ -15,6 +16,8 @@ const SLOTS = [1, 2, 3, 4, 5, 6];
 
 type AncientFilter = "all" | "only" | "exclude";
 type GrindFilter = "all" | "grinded" | "none" | "headroom" | "max";
+type UsageFilter = "all" | "deck" | "rta" | "any" | "none";
+type LockFilter = "all" | "locked" | "unlocked";
 
 export default function RunesPage() {
   const account = useStore((s) => s.account);
@@ -34,18 +37,32 @@ export default function RunesPage() {
   const [ancient, setAncient] = useState<AncientFilter>("all");
   const [grindState, setGrindState] = useState<GrindFilter>("all");
   const [onlyFree, setOnlyFree] = useState(false);
-  const [onlyLocked, setOnlyLocked] = useState(false);
+  const [lockFilter, setLockFilter] = useState<LockFilter>("all");
   const [onlyExcluded, setOnlyExcluded] = useState(false);
+  const [usage, setUsage] = useState<UsageFilter>("all");
+  const [rankMin, setRankMin] = useState(0);
   const [minEff, setMinEff] = useState(0);
-  const [sort, setSort] = useState<"eff" | "score" | "grade" | "spd" | "slot" | "rank">("eff");
+  const [sort, setSort] = useState<"eff" | "score" | "grade" | "spd" | "slot" | "rank" | "rank-desc">("eff");
   const [take, setTake] = useState(150);
   const [detail, setDetail] = useState<Rune | null>(null);
   const ranks = useRankIndex();
+  const usageIndex = useMemo(() => buildUsageIndex(account), [account]);
 
   // 換篩選條件時回到第一頁，避免停在舊的「載入更多」數量
   useEffect(() => {
     setTake(150);
-  }, [q, setId, slots, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, onlyLocked, onlyExcluded, minEff, sort]);
+  }, [q, setId, slots, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort]);
+
+  // 頁頭統計：有多少符文在預設隊 / RTA 使用中
+  const usageCounts = useMemo(() => {
+    let deck = 0;
+    let rta = 0;
+    for (const u of usageIndex.runes.values()) {
+      if (u.deck) deck++;
+      if (u.rta) rta++;
+    }
+    return { deck, rta };
+  }, [usageIndex]);
 
   const owner = useMemo(() => {
     const m = new Map<number, string>();
@@ -79,8 +96,23 @@ export default function RunesPage() {
         if (grindState === "max" && (!grindable.length || headroom)) return false;
       }
       if (onlyFree && r.occupied > 0) return false;
-      if (onlyLocked && !lockedSet.has(r.id)) return false;
+      if (lockFilter === "locked" && !lockedSet.has(r.id)) return false;
+      if (lockFilter === "unlocked" && lockedSet.has(r.id)) return false;
       if (onlyExcluded && !excludedSet.has(r.id)) return false;
+      if (usage !== "all") {
+        const u = usageIndex.runes.get(r.id);
+        const inDeck = !!u?.deck;
+        const inRta = !!u?.rta;
+        if (usage === "deck" && !inDeck) return false;
+        if (usage === "rta" && !inRta) return false;
+        if (usage === "any" && !inDeck && !inRta) return false;
+        if (usage === "none" && (inDeck || inRta)) return false;
+      }
+      if (rankMin > 0) {
+        // 賣符文用：連最好的一條副屬都要在門檻之後，才算「所有屬性都排得後」
+        const summary = summarizeRanks(ranks?.runes.get(r.id)?.subs);
+        if (summary.count < 2 || summary.best * 100 < rankMin) return false;
+      }
       if (minEff && r.eff < minEff) return false;
       if (q) {
         const text = [
@@ -106,17 +138,24 @@ export default function RunesPage() {
         const rb = averageRankPercent(ranks?.runes.get(b.id)?.subs);
         return ra - rb || b.eff - a.eff;
       }
+      if (sort === "rank-desc") {
+        // 差 → 好：連最好那條都排得後的先列出，適合逐顆檢查是否可以賣
+        const ra = summarizeRanks(ranks?.runes.get(a.id)?.subs);
+        const rb = summarizeRanks(ranks?.runes.get(b.id)?.subs);
+        return rb.best - ra.best || rb.avg - ra.avg || a.eff - b.eff;
+      }
       const sa = a.subs.find((s) => s.t === 8)?.v ?? 0;
       const sb = b.subs.find((s) => s.t === 8)?.v ?? 0;
       return sb - sa || b.eff - a.eff;
     });
     return arr;
-  }, [account, q, setId, slots, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, onlyLocked, onlyExcluded, minEff, sort, owner, lockedSet, excludedSet, ranks]);
+  }, [account, q, setId, slots, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort, owner, lockedSet, excludedSet, ranks, usageIndex]);
 
   const dirty =
     !!q || setId !== 0 || slots.length > 0 || grade !== 0 || mainStat !== 0 ||
     subStat !== 0 || subMin !== 0 || prefixStat !== 0 || ancient !== "all" ||
-    grindState !== "all" || onlyFree || onlyLocked || onlyExcluded || minEff > 0;
+    grindState !== "all" || onlyFree || lockFilter !== "all" || onlyExcluded ||
+    usage !== "all" || rankMin > 0 || minEff > 0;
 
   const clearFilters = () => {
     setQ("");
@@ -130,9 +169,20 @@ export default function RunesPage() {
     setAncient("all");
     setGrindState("all");
     setOnlyFree(false);
-    setOnlyLocked(false);
+    setLockFilter("all");
     setOnlyExcluded(false);
+    setUsage("all");
+    setRankMin(0);
     setMinEff(0);
+  };
+
+  /** 一鍵找出「未在預設隊 / RTA、未鎖定、四條副屬全部排最後 20%」的符文 */
+  const sellCandidates = () => {
+    clearFilters();
+    setUsage("none");
+    setRankMin(80);
+    setLockFilter("unlocked");
+    setSort("rank-desc");
   };
 
   const toggleSlot = (n: number) => {
@@ -142,6 +192,7 @@ export default function RunesPage() {
   if (!account) return <div className="empty"><Gem size={40} /><div>尚未匯入存檔</div></div>;
 
   const shown = runes.slice(0, take);
+  const detailRank = detail ? summarizeRanks(ranks?.runes.get(detail.id)?.subs) : null;
 
   return (
     <>
@@ -159,6 +210,15 @@ export default function RunesPage() {
               title="每條副屬性後面的數字是「名次 / 同組有這條副屬的數量」，1 = 最高。分組方式與遊戲一致：同套裝、同號碼（遠古與一般一起計）。"
             >
               副屬排名＝同套裝同號碼
+            </span>
+            <span
+              className="chip muted"
+              title="存檔匯出當下，遊戲內預設隊 / 防守隊使用中的符文數量"
+            >
+              預設隊 {fmt(usageCounts.deck)}
+            </span>
+            <span className="chip muted" title="存檔匯出當下，世界競技場（RTA）配裝使用中的符文數量">
+              RTA {fmt(usageCounts.rta)}
             </span>
             <span className="chip muted" title="符合篩選 / 全部符文">顯示 {fmt(runes.length)} / {fmt(account.runes.length)} 顆</span>
             {dirty && (
@@ -242,10 +302,37 @@ export default function RunesPage() {
               <option value="headroom">還能再精煉</option>
               <option value="max">已精煉到上限</option>
             </select>
+            <select
+              className="select"
+              style={{ width: 150 }}
+              value={usage}
+              onChange={(e) => setUsage(e.target.value as UsageFilter)}
+              title="存檔匯出當下：是否在遊戲內預設隊 / 防守隊、或世界競技場（RTA）配裝中使用"
+            >
+              <option value="all">全部使用狀況</option>
+              <option value="deck">預設隊使用中</option>
+              <option value="rta">RTA 使用中</option>
+              <option value="any">預設隊或 RTA</option>
+              <option value="none">未在預設隊 / RTA</option>
+            </select>
+            <select
+              className="select"
+              style={{ width: 162 }}
+              value={rankMin}
+              onChange={(e) => setRankMin(Number(e.target.value))}
+              title="只留下每一條副屬都排在該組最後 N% 的符文（連最好那一條都要在門檻之後），適合找可以賣的符文"
+            >
+              <option value={0}>不限副屬排名</option>
+              <option value={50}>副屬全排最後 50%</option>
+              <option value={70}>副屬全排最後 30%</option>
+              <option value={80}>副屬全排最後 20%</option>
+              <option value={90}>副屬全排最後 10%</option>
+            </select>
             <select className="select" style={{ width: 120 }} value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
               <option value="eff">效率排序</option>
               <option value="score">遊戲分數排序</option>
-              <option value="rank">副屬排名</option>
+              <option value="rank">副屬排名（好→差）</option>
+              <option value="rank-desc">副屬排名（差→好）</option>
               <option value="spd">速度排序</option>
               <option value="grade">星級排序</option>
               <option value="slot">位置排序</option>
@@ -256,12 +343,22 @@ export default function RunesPage() {
             <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
               <input type="checkbox" checked={onlyFree} onChange={(e) => setOnlyFree(e.target.checked)} /> 只看未裝備
             </label>
-            <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
-              <input type="checkbox" checked={onlyLocked} onChange={(e) => setOnlyLocked(e.target.checked)} /> 只看鎖定
-            </label>
+            <select className="select" style={{ width: 110 }} value={lockFilter} onChange={(e) => setLockFilter(e.target.value as LockFilter)} title="依鎖定狀態篩選">
+              <option value="all">全部鎖定</option>
+              <option value="locked">只看鎖定</option>
+              <option value="unlocked">只看未鎖定</option>
+            </select>
             <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
               <input type="checkbox" checked={onlyExcluded} onChange={(e) => setOnlyExcluded(e.target.checked)} /> 只看排除
             </label>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={sellCandidates}
+              title="篩選：未在預設隊 / RTA、未鎖定、四條副屬全部排最後 20%，並由差到好排列"
+            >
+              可賣候選
+            </button>
             <div className="row tiny" style={{ gap: 8, flex: 1, maxWidth: 320 }}>
               <span>最低效率 {minEff}%</span>
               <input type="range" min={0} max={120} step={5} value={minEff} onChange={(e) => setMinEff(Number(e.target.value))} style={{ flex: 1 }} />
@@ -275,6 +372,7 @@ export default function RunesPage() {
               key={r.id}
               rune={r}
               owner={owner.get(r.id)}
+              usage={usageIndex.runes.get(r.id)}
               locked={lockedSet.has(r.id)}
               excluded={excludedSet.has(r.id)}
               onToggleLock={() => toggleRuneFlag("locked", r.id)}
@@ -299,6 +397,7 @@ export default function RunesPage() {
               <RuneCard
                 rune={detail}
                 owner={owner.get(detail.id)}
+                usage={usageIndex.runes.get(detail.id)}
                 locked={lockedSet.has(detail.id)}
                 excluded={excludedSet.has(detail.id)}
                 onToggleLock={() => toggleRuneFlag("locked", detail.id)}
@@ -315,6 +414,18 @@ export default function RunesPage() {
               {detail.prefix.t > 0 && <div className="kv"><span className="k">固有屬性</span><span className="v">{statText(detail.prefix.t, detail.prefix.v)}</span></div>}
               <div className="kv"><span className="k">精煉（磨石）</span><span className="v">{[...detail.subs].reduce((s, x) => s + x.g, 0)}</span></div>
               <div className="kv"><span className="k">擁有者</span><span className="v">{owner.get(detail.id) ?? "未裝備"}</span></div>
+              <div className="kv">
+                <span className="k">使用狀況</span>
+                <span className="v" title="以存檔匯出當下的預設隊 / 防守隊與 RTA 配裝判斷">{usageText(usageIndex.runes.get(detail.id))}</span>
+              </div>
+              <div className="kv">
+                <span className="k">排名統計</span>
+                <span className="v" title="百分位 0% = 同組第一、100% = 同組最後；只計同組有 2 顆以上的副屬">
+                  {detailRank && detailRank.count >= 2
+                    ? `平均 ${Math.round(detailRank.avg * 100)}% · 最好 ${Math.round(detailRank.best * 100)}% · 最差 ${Math.round(detailRank.worst * 100)}%（${detailRank.count} 條）`
+                    : "同組太少，無法比較"}
+                </span>
+              </div>
               <div className="kv"><span className="k">古代符文</span><span className="v">{detail.ancient ? "是" : "否"}</span></div>
               <div className="kv"><span className="k">同組符文</span><span className="v">{ranks?.runes.get(detail.id)?.pool ?? "—"} 顆（同套裝 {detail.slot} 號，遠古與一般一起計）</span></div>
             </div>
