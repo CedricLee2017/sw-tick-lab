@@ -6,6 +6,8 @@ import { monsterOf } from "../store";
 import type { Artifact, Monster, Rune, Stats } from "../lib/types";
 import { runeScore, type BaseStats } from "../lib/stats";
 import { artifactKindText, artifactMainText, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
+import { rankTone, type StatRank } from "../lib/rankings";
+import { useArtifactRank, useRuneRank } from "./RankProvider";
 import { tickInfo } from "../lib/optimizer";
 
 export const fmt = (n: number) => (Number.isFinite(n) ? n.toLocaleString("en-US") : "—");
@@ -239,6 +241,20 @@ export function statText(t: number, v: number): string {
   return `${statLabel(t)} +${v}${statSuffix(t)}`;
 }
 
+/**
+ * 排名徽章：顯示「9/67」＝同組 67 顆有這條屬性、這顆排第 9（1 = 最高）。
+ * 前 10% 金色、前 25% 綠色，其餘維持低調色。
+ */
+export function RankBadge({ rank, title }: { rank: StatRank | null | undefined; title: string }) {
+  if (!rank || rank.total < 2) return null;
+  const tone = rankTone(rank);
+  return (
+    <span className={`rank ${tone}`} title={title}>
+      {rank.rank}/{rank.total}
+    </span>
+  );
+}
+
 export function RuneCard({
   rune,
   owner,
@@ -274,6 +290,8 @@ export function RuneCard({
   const showSubs = !compact || detail;
   const eff = Math.round(rune.eff);
   const score = runeScore(rune);
+  const rank = useRuneRank(rune.id);
+  const poolTitle = `同套裝同號碼（${rune.slot} 號${rune.ancient ? "，遠古分開計" : ""}）共 ${rank?.pool ?? 0} 顆，副屬排名以此為基準`;
   return (
     <div
       className={`rune ${gradeClass} ${detail ? "detail" : ""} ${excluded ? "excluded" : ""} ${locked ? "locked" : ""}`}
@@ -290,6 +308,9 @@ export function RuneCard({
           {set?.name ?? `套裝${rune.set}`}
           <span className="rune-pos" title={`符文位置 ${rune.slot}`}>{rune.slot}</span>
           {rune.ancient && <span className="rune-tag">遠古</span>}
+          {rank && rank.pool > 1 && (
+            <span className="rune-tag muted" title={poolTitle}>共 {rank.pool} 顆</span>
+          )}
           {rune.locked && <span className="rune-tag muted" title="遊戲內已鎖定">鎖</span>}
           {locked && <span className="rune-tag gold" title="本機鎖定：不可被其他魔靈配符使用">本機鎖</span>}
           {excluded && <span className="rune-tag red" title="已排除：不會進入配符">排除</span>}
@@ -332,22 +353,29 @@ export function RuneCard({
         </div>
       )}
       {showSubs &&
-        rune.subs.map((s, i) => (
-          <div className="rune-sub" key={i}>
-            <span>
-              {statLabel(s.t)}
-              {s.gem > 0 && <span className="gem" title="寶石（變換）"> ◆</span>}
-            </span>
-            <span>
-              <b>+{s.v + s.g}{statSuffix(s.t)}</b>
-              {s.g > 0 && (
-                <span className="g" title={`實際數值已含精煉 +${s.g}${statSuffix(s.t)}`}>
-                  {" "}(含精煉 +{s.g})
-                </span>
-              )}
-            </span>
-          </div>
-        ))}
+        rune.subs.map((s, i) => {
+          const subRank = rank?.subs[i];
+          return (
+            <div className="rune-sub" key={i}>
+              <span>
+                {statLabel(s.t)}
+                {s.gem > 0 && <span className="gem" title="寶石（變換）"> ◆</span>}
+              </span>
+              <span>
+                <b>+{s.v + s.g}{statSuffix(s.t)}</b>
+                <RankBadge
+                  rank={subRank}
+                  title={`${statLabel(s.t).replace(/%$/, "")}：${poolTitle}。其中 ${subRank?.total ?? 0} 顆有這條副屬，這顆排第 ${subRank?.rank ?? 0} 名（數值高至低）。`}
+                />
+                {s.g > 0 && (
+                  <span className="g" title={`實際數值已含精煉 +${s.g}${statSuffix(s.t)}`}>
+                    {" "}(含精煉 +{s.g})
+                  </span>
+                )}
+              </span>
+            </div>
+          );
+        })}
       <div className="rune-sub" style={{ marginTop: 2 }}>
         <span className="dim tiny">{stars} +{rune.level}</span>
         {!detail && <span className="dim tiny">{owner ? owner : "未裝備"}</span>}
@@ -432,6 +460,8 @@ export function ArtifactCard({
   const rank = artifact.rank;
   const rankClass = rank >= 5 ? "legendary" : rank === 4 ? "hero" : rank === 3 ? "rare" : "";
   const color = artifact.type === 2 ? "#e879f9" : (ARTIFACT_EL_COLOR[artifact.attr] ?? "#8b9cc0");
+  const artRank = useArtifactRank(artifact.id);
+  const poolTitle = `${artifactTypeText(artifact.type)}（${artifactKindText(artifact)}）共 ${artRank?.pool ?? 0} 件，副效果排名以此為基準`;
   return (
     <div
       className={`rune artifact ${rankClass} ${detail ? "detail" : ""}`}
@@ -443,17 +473,29 @@ export function ArtifactCard({
           <span className="rune-dot" style={{ background: color }} />
           {artifactTypeText(artifact.type)}
           <span className="rune-tag">{artifactKindText(artifact)}</span>
+          {artRank && artRank.pool > 1 && (
+            <span className="rune-tag muted" title={poolTitle}>共 {artRank.pool} 件</span>
+          )}
           {artifact.locked && <span className="rune-tag muted" title="已鎖定">鎖</span>}
         </div>
         <span className="rune-slot">+{artifact.level}</span>
       </div>
       <div className="rune-main">{artifactMainText(artifact)}</div>
-      {artifact.subs.map((s, i) => (
-        <div className="rune-sub" key={i}>
-          <span>{artifactSubText(s)}</span>
-          {s.up && s.up > 0 ? <span className="g" title="此副效果被強化（+3/+6/+9/+12）的次數">強化 {s.up} 次</span> : null}
-        </div>
-      ))}
+      {artifact.subs.map((s, i) => {
+        const subRank = artRank?.subs[i];
+        return (
+          <div className="rune-sub" key={i}>
+            <span>{artifactSubText(s)}</span>
+            <span className="row" style={{ gap: 6, alignItems: "baseline" }}>
+              <RankBadge
+                rank={subRank}
+                title={`${artifactSubText(s)}：${poolTitle}。其中 ${subRank?.total ?? 0} 件有這條副效果，這件排第 ${subRank?.rank ?? 0} 名（數值高至低）。`}
+              />
+              {s.up && s.up > 0 ? <span className="g" title="此副效果被強化（+3/+6/+9/+12）的次數">強化 {s.up} 次</span> : null}
+            </span>
+          </div>
+        );
+      })}
       <div className="rune-sub" style={{ marginTop: 2 }}>
         <span className="dim tiny">{ARTIFACT_RANKS[rank] ?? `${rank}★`} · {artifact.stars}★ 原生</span>
         {!detail && <span className="dim tiny">{owner || "未裝備"}</span>}

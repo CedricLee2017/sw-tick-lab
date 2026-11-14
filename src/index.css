@@ -500,7 +500,7 @@ p { margin: 0; }
   padding: 10px 11px; display: flex; flex-direction: column; gap: 5px; min-width: 0;
 }
 .rune-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.rune-set { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12px; }
+.rune-set { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-weight: 700; font-size: 12px; }
 .rune-dot { width: 8px; height: 8px; border-radius: 3px; background: var(--muted); }
 .rune-slot { font-size: 10.5px; color: var(--muted-2); font-weight: 700; letter-spacing: .06em; }
 .rune-main { font-size: 13px; font-weight: 800; color: var(--gold); }
@@ -508,6 +508,15 @@ p { margin: 0; }
 .rune-extra { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 8px; }
 .rune-sub b { color: #cfdcf7; font-weight: 600; }
 .rune-sub .g { color: var(--green); font-size: 10.5px; }
+/* 副屬排名徽章：同組名次 / 同組擁有這條屬性的數量（1 = 最高） */
+.rune-sub .rank {
+  display: inline-block; margin-left: 5px; padding: 0 4px;
+  border-radius: 4px; font-size: 9.5px; font-weight: 700; letter-spacing: .02em;
+  font-variant-numeric: tabular-nums; color: var(--muted-2);
+  background: rgba(255, 255, 255, .045); border: 1px solid transparent;
+}
+.rune-sub .rank.good { color: var(--green); background: rgba(67, 217, 138, .1); }
+.rune-sub .rank.top { color: var(--gold); background: rgba(242, 198, 92, .12); border-color: rgba(242, 198, 92, .3); }
 .rune.legendary { border-color: rgba(255, 200, 90, .28); }
 .rune.hero { border-color: rgba(190, 130, 255, .25); }
 .rune.rare { border-color: rgba(88, 166, 255, .22); }

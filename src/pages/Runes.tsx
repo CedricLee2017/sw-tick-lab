@@ -4,6 +4,8 @@ import { unitLabel, useStore } from "../store";
 import { RUNE_SETS, SET_BY_ID, STAT_TYPES } from "../lib/constants";
 import { runeScore } from "../lib/stats";
 import { grindMax, grindStatSuffix } from "../lib/grind";
+import { averageRankPercent } from "../lib/rankings";
+import { useRankIndex } from "../components/RankProvider";
 import { Modal, NumberInput, RuneCard, fmt, setColor, statText } from "../components/ui";
 import type { Rune } from "../lib/types";
 
@@ -35,9 +37,10 @@ export default function RunesPage() {
   const [onlyLocked, setOnlyLocked] = useState(false);
   const [onlyExcluded, setOnlyExcluded] = useState(false);
   const [minEff, setMinEff] = useState(0);
-  const [sort, setSort] = useState<"eff" | "score" | "grade" | "spd" | "slot">("eff");
+  const [sort, setSort] = useState<"eff" | "score" | "grade" | "spd" | "slot" | "rank">("eff");
   const [take, setTake] = useState(150);
   const [detail, setDetail] = useState<Rune | null>(null);
+  const ranks = useRankIndex();
 
   // 換篩選條件時回到第一頁，避免停在舊的「載入更多」數量
   useEffect(() => {
@@ -97,12 +100,18 @@ export default function RunesPage() {
       if (sort === "score") return runeScore(b) - runeScore(a) || b.eff - a.eff;
       if (sort === "grade") return b.grade - a.grade || b.eff - a.eff;
       if (sort === "slot") return a.slot - b.slot || b.eff - a.eff;
+      if (sort === "rank") {
+        // 副屬排名：四條副屬在同組的百分位平均，越前面（100%）越好
+        const ra = averageRankPercent(ranks?.runes.get(a.id)?.subs);
+        const rb = averageRankPercent(ranks?.runes.get(b.id)?.subs);
+        return ra - rb || b.eff - a.eff;
+      }
       const sa = a.subs.find((s) => s.t === 8)?.v ?? 0;
       const sb = b.subs.find((s) => s.t === 8)?.v ?? 0;
       return sb - sa || b.eff - a.eff;
     });
     return arr;
-  }, [account, q, setId, slots, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, onlyLocked, onlyExcluded, minEff, sort, owner, lockedSet, excludedSet]);
+  }, [account, q, setId, slots, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, onlyLocked, onlyExcluded, minEff, sort, owner, lockedSet, excludedSet, ranks]);
 
   const dirty =
     !!q || setId !== 0 || slots.length > 0 || grade !== 0 || mainStat !== 0 ||
@@ -145,6 +154,12 @@ export default function RunesPage() {
             </a>
           </div>
           <div className="row" style={{ gap: 8 }}>
+            <span
+              className="chip muted"
+              title="每條副屬性後面的數字是「名次 / 同組有這條副屬的數量」，1 = 最高。分組方式與遊戲一致：同套裝、同號碼（遠古符文分開計）。"
+            >
+              副屬排名＝同套裝同號碼
+            </span>
             <span className="chip muted" title="符合篩選 / 全部符文">顯示 {fmt(runes.length)} / {fmt(account.runes.length)} 顆</span>
             {dirty && (
               <button type="button" className="btn btn-sm btn-ghost" onClick={clearFilters}>
@@ -230,6 +245,7 @@ export default function RunesPage() {
             <select className="select" style={{ width: 120 }} value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
               <option value="eff">效率排序</option>
               <option value="score">遊戲分數排序</option>
+              <option value="rank">副屬排名</option>
               <option value="spd">速度排序</option>
               <option value="grade">星級排序</option>
               <option value="slot">位置排序</option>
@@ -300,6 +316,7 @@ export default function RunesPage() {
               <div className="kv"><span className="k">精煉（磨石）</span><span className="v">{[...detail.subs].reduce((s, x) => s + x.g, 0)}</span></div>
               <div className="kv"><span className="k">擁有者</span><span className="v">{owner.get(detail.id) ?? "未裝備"}</span></div>
               <div className="kv"><span className="k">古代符文</span><span className="v">{detail.ancient ? "是" : "否"}</span></div>
+              <div className="kv"><span className="k">同組符文</span><span className="v">{ranks?.runes.get(detail.id)?.pool ?? "—"} 顆（同套裝 {detail.slot} 號{detail.ancient ? "、遠古" : ""}）</span></div>
             </div>
           </div>
         </Modal>

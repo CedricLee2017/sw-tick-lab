@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+﻿import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target,
 } from "lucide-react";
@@ -31,6 +31,8 @@ import GrindPage from "./pages/Grind";
 import ArtifactsPage from "./pages/Artifacts";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
+import { RankProvider } from "./components/RankProvider";
+import { buildRankIndex } from "./lib/rankings";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
@@ -245,6 +247,12 @@ export default function App() {
 
   const meta = ROUTES.find((r) => r.key === route) ?? ROUTES[0];
 
+  // 符文 / 神器的副屬排名：整份存檔只算一次，卡片直接由 Context 取值
+  const ranks = useMemo(
+    () => (account ? buildRankIndex(account.runes, account.artifacts) : null),
+    [account],
+  );
+
   const page = !ready ? (
     <div className="empty">載入中…</div>
   ) : (
@@ -399,7 +407,9 @@ export default function App() {
           </div>
         </header>
 
-        <main className="content">{page}</main>
+        <main className="content">
+          <RankProvider value={ranks}>{page}</RankProvider>
+        </main>
       </div>
 
       <nav className="mobile-nav">

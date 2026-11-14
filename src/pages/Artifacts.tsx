@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import { Search, Sparkles } from "lucide-react";
 import { unitLabel, useStore } from "../store";
 import { ArtifactCard, Modal, fmt } from "../components/ui";
+import { useRankIndex } from "../components/RankProvider";
+import { averageRankPercent } from "../lib/rankings";
 import { artifactMainText, artifactSubText, artifactKindText, artifactTypeText } from "../lib/artifacts";
 import type { Artifact } from "../lib/types";
 
-type SortKey = "main" | "rank" | "type" | "id";
+type SortKey = "main" | "rank" | "subrank" | "type" | "id";
 
 export default function ArtifactsPage() {
   const account = useStore((s) => s.account);
@@ -16,6 +18,7 @@ export default function ArtifactsPage() {
   const [sort, setSort] = useState<SortKey>("main");
   const [take, setTake] = useState(150);
   const [detail, setDetail] = useState<Artifact | null>(null);
+  const ranks = useRankIndex();
 
   const owner = useMemo(() => {
     const m = new Map<number, string>();
@@ -44,12 +47,18 @@ export default function ArtifactsPage() {
     });
     arr = [...arr].sort((a, b) => {
       if (sort === "rank") return b.rank - a.rank || b.main.v - a.main.v;
+      if (sort === "subrank") {
+        // 副效果排名：四條效果在同組的百分位平均，越前面（100%）越好
+        const ra = averageRankPercent(ranks?.artifacts.get(a.id)?.subs);
+        const rb = averageRankPercent(ranks?.artifacts.get(b.id)?.subs);
+        return ra - rb || b.main.v - a.main.v;
+      }
       if (sort === "type") return a.type - b.type || a.attr - b.attr;
       if (sort === "id") return a.id - b.id;
       return b.main.v - a.main.v || b.rank - a.rank;
     });
     return arr;
-  }, [account, q, type, attr, onlyFree, sort, owner]);
+  }, [account, q, type, attr, onlyFree, sort, owner, ranks]);
 
   if (!account) return <div className="empty"><Sparkles size={40} /><div>尚未匯入存檔</div></div>;
 
@@ -92,6 +101,7 @@ export default function ArtifactsPage() {
             <select className="select" style={{ width: 110 }} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
               <option value="main">主效果排序</option>
               <option value="rank">品質排序</option>
+              <option value="subrank">副效果排名</option>
               <option value="type">類型排序</option>
               <option value="id">ID 排序</option>
             </select>
@@ -101,6 +111,12 @@ export default function ArtifactsPage() {
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
             <input type="checkbox" checked={onlyFree} onChange={(e) => setOnlyFree(e.target.checked)} /> 只看未裝備
           </label>
+          <span
+            className="chip muted"
+            title="每條副效果後面的數字是「名次 / 同組有這條效果的數量」，1 = 最高。分組方式：屬性神器看同屬性、類型神器看同魔靈類型。"
+          >
+            副效果排名＝同類型同屬性
+          </span>
           <span className="tiny dim">
             屬性 {[1, 2, 3, 4, 5].map((n) => `${["水", "火", "風", "光", "暗"][n - 1]} ${attrCounts.get(n) ?? 0}`).join(" · ")}
             {"　"}特殊 {attrCounts.get(98) ?? 0} · 類型 {account.artifacts.filter((a) => a.type === 2).length}
@@ -134,6 +150,7 @@ export default function ArtifactsPage() {
               <div className="kv"><span className="k">等級</span><span className="v">+{detail.level}</span></div>
               <div className="kv"><span className="k">主效果</span><span className="v gold">{artifactMainText(detail)}</span></div>
               <div className="kv"><span className="k">擁有者</span><span className="v">{owner.get(detail.id) ?? "未裝備"}</span></div>
+              <div className="kv"><span className="k">同組神器</span><span className="v">{ranks?.artifacts.get(detail.id)?.pool ?? "—"} 件（{artifactTypeText(detail.type)} · {artifactKindText(detail)}）</span></div>
               <div className="kv"><span className="k">神器 ID</span><span className="v mono">{detail.id}</span></div>
               <div style={{ marginTop: 10 }}>
                 {detail.subs.map((s, i) => (
