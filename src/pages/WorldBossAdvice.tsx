@@ -1,116 +1,113 @@
 import { useMemo, useState } from "react";
-import { Crown, Info, ListOrdered, Search, Sparkles } from "lucide-react";
+import { Crown, Info, ListOrdered, Search } from "lucide-react";
 import { MONSTER_MAP, monsterLabel, unitLabel, useStore } from "../store";
-import { MonsterIcon, NumberInput, fmt, statSuffix, statText } from "../components/ui";
-import { SET_BY_ID, STAT_TYPES } from "../lib/constants";
-import { artifactMainText, artifactSubText } from "../lib/artifacts";
+import { ArtifactCard, MonsterIcon, NumberInput, RuneCard, StatGrid, fmt } from "../components/ui";
+import { MonsterDetailModal } from "../components/MonsterDetail";
+import { SET_BY_ID } from "../lib/constants";
 import {
   FOCUS_LABEL,
   WB_ARCH_LABEL,
   WB_TIER_LABEL,
   buildWorldBossPlan,
-  type WbFocus,
   type WbMonsterPlan,
 } from "../lib/worldBossAdvice";
-import type { Rune } from "../lib/types";
 
 type SortKey = "priority" | "focus";
 
-/** 只顯示與這隻魔靈主屬性相關的副屬（速度 / 暴擊 / 暴傷不列） */
-function focusSubs(rune: Rune, focus: WbFocus): string {
-  const parts = rune.subs
-    .filter((s) => STAT_TYPES[s.t]?.key === focus)
-    .map((s) => `${STAT_TYPES[s.t].label} +${s.v + s.g}${statSuffix(s.t)}`);
-  return parts.length > 0 ? parts.join(" · ") : "—";
-}
-
-function StatBox({ label, value, active }: { label: string; value: number; active: boolean }) {
-  return (
-    <div style={{ minWidth: 62, textAlign: "right" }}>
-      <div className="tiny dim">{label}</div>
-      <div className="mono" style={{ fontWeight: 800, color: active ? "var(--gold)" : undefined }}>
-        {fmt(value)}
-      </div>
-    </div>
-  );
-}
-
-function PlanCard({ plan, runeOwner }: { plan: WbMonsterPlan; runeOwner: Map<number, string> }) {
+function PlanCard({
+  plan,
+  runeOwner,
+  artifactOwner,
+}: {
+  plan: WbMonsterPlan;
+  runeOwner: Map<number, string>;
+  artifactOwner: Map<number, string>;
+}) {
+  const [open, setOpen] = useState(false);
   const pairReady = plan.runes.length === 6 && plan.sets.every((s) => s.count % 2 === 0);
+
   return (
-    <div className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-      <div className="row between" style={{ gap: 10, alignItems: "flex-start" }}>
-        <div className="row" style={{ gap: 9, minWidth: 0 }}>
-          <MonsterIcon id={plan.unit.master} size={40} />
-          <div style={{ minWidth: 0 }}>
-            <div className="row wrap" style={{ gap: 6, fontWeight: 800 }}>
-              <span>{monsterLabel(plan.unit.master)}</span>
-              <span className="rune-tag muted">{plan.monster.nat}★原生</span>
-              {plan.tier === 1 && <span className="rune-tag">二覺</span>}
-            </div>
-            <div className="tiny dim">
-              {WB_TIER_LABEL[plan.tier] ?? "其他"} · {WB_ARCH_LABEL[plan.monster.arch ?? ""] ?? plan.monster.arch ?? "?"} ·{" "}
-              {plan.skillUps === undefined ? "技能資料未提供" : `技能 +${plan.skillUps}`}
+    <>
+      <div className="card card-pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="row between wrap" style={{ gap: 10, alignItems: "flex-start" }}>
+          <div className="row" style={{ gap: 10, minWidth: 0 }}>
+            <MonsterIcon id={plan.unit.master} size={46} />
+            <div style={{ minWidth: 0 }}>
+              <div className="row wrap" style={{ gap: 6, fontWeight: 800 }}>
+                <span>{monsterLabel(plan.unit.master)}</span>
+                <span className="rune-tag muted">{plan.monster.nat}★原生</span>
+                {plan.tier === 1 && <span className="rune-tag">二覺</span>}
+              </div>
+              <div className="tiny dim">
+                {WB_TIER_LABEL[plan.tier] ?? "其他"} · {WB_ARCH_LABEL[plan.monster.arch ?? ""] ?? plan.monster.arch ?? "?"} ·{" "}
+                {plan.skillUps === undefined ? "技能資料未提供" : `技能 +${plan.skillUps}`}
+              </div>
             </div>
           </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => setOpen(true)}
+            title="查看完整面板（三圍、符文、神器）"
+          >
+            完整面板
+          </button>
         </div>
-        <div className="row" style={{ gap: 9 }}>
-          <StatBox label="HP" value={plan.stats.hp} active={plan.focus === "hp"} />
-          <StatBox label="攻擊" value={plan.stats.atk} active={plan.focus === "atk"} />
-          <StatBox label="防禦" value={plan.stats.def} active={plan.focus === "def"} />
-        </div>
-      </div>
 
-      <div className="row wrap" style={{ gap: 5 }}>
-        <span className="chip gold" title="主要堆疊的面板屬性">
-          {FOCUS_LABEL[plan.focus]} {fmt(plan.focusValue)}
-        </span>
-        {pairReady && <span className="chip gold" title="6 顆符文剛好是三組 2 件套">2+2+2</span>}
-        {plan.sets.map((s) => (
-          <span key={s.set} className="chip muted" title="每 2 件觸發一次套裝效果">
-            {SET_BY_ID[s.set]?.name ?? `套裝${s.set}`} ×{s.count}
+        <div className="row wrap" style={{ gap: 5 }}>
+          <span className="chip gold" title="主要堆疊的面板屬性">
+            {FOCUS_LABEL[plan.focus]} {fmt(plan.focusValue)}
           </span>
-        ))}
-      </div>
-
-      <div className="col" style={{ gap: 3 }}>
-        {plan.runes.map((rune) => {
-          const owner = runeOwner.get(rune.id);
-          return (
-            <div key={rune.id} className="row between" style={{ gap: 8, fontSize: 11.5 }}>
-              <span style={{ minWidth: 0 }}>
-                <b className="gold">{rune.slot}</b>{" "}
-                <span className="dim">{SET_BY_ID[rune.set]?.name ?? `套裝${rune.set}`}</span>{" "}
-                {statText(rune.main.t, rune.main.v)}
-              </span>
-              <span
-                className="tiny dim"
-                style={{ textAlign: "right" }}
-                title={rune.subs.map((s) => statText(s.t, s.v + s.g)).join(" · ")}
-              >
-                {focusSubs(rune, plan.focus)}
-                {owner ? ` · 現在：${owner}` : ""}
-              </span>
-            </div>
-          );
-        })}
-        {plan.runes.length === 0 && <div className="tiny dim">找不到可用符文</div>}
-      </div>
-
-      <div className="col" style={{ gap: 3 }}>
-        {plan.artifacts.map((art) => (
-          <div key={art.id} className="row between" style={{ gap: 8, fontSize: 11.5 }}>
-            <span>
-              <Sparkles size={11} /> {artifactMainText(art)}
+          {pairReady && <span className="chip gold" title="6 顆符文剛好是三組 2 件套">2+2+2</span>}
+          {plan.sets.map((s) => (
+            <span key={s.set} className="chip muted" title="每 2 件觸發一次套裝效果">
+              {SET_BY_ID[s.set]?.name ?? `套裝${s.set}`} ×{s.count}
             </span>
-            <span className="tiny dim" title={art.subs.map(artifactSubText).join(" · ")}>
-              {art.subs.slice(0, 2).map(artifactSubText).join(" · ") || "—"}
-            </span>
+          ))}
+        </div>
+
+        <StatGrid stats={plan.stats} compact />
+
+        <div className="row between wrap tiny dim" style={{ gap: 6 }}>
+          <span>符文 {plan.runes.length}/6 · 神器 {plan.artifacts.length}/2</span>
+          <span>速度、暴擊率、暴擊傷害不計入配符評分</span>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8 }}>
+          {plan.runes.map((rune) => {
+            const owner = runeOwner.get(rune.id);
+            return <RuneCard key={rune.id} rune={rune} owner={owner ? `現在：${owner}` : "現在：未裝備"} />;
+          })}
+        </div>
+
+        {plan.artifacts.length > 0 ? (
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+            {plan.artifacts.map((art) => {
+              const owner = artifactOwner.get(art.id);
+              return <ArtifactCard key={art.id} artifact={art} owner={owner ? `現在：${owner}` : "現在：未裝備"} />;
+            })}
           </div>
-        ))}
-        {plan.artifacts.length === 0 && <div className="tiny dim">沒有符合屬性 / 類型的神器</div>}
+        ) : (
+          <div className="tiny dim">沒有符合屬性 / 類型的神器</div>
+        )}
       </div>
-    </div>
+
+      {open && (
+        <MonsterDetailModal
+          title={`${monsterLabel(plan.unit.master)} · 世界王建議`}
+          monster={plan.monster}
+          base={plan.base}
+          stats={plan.stats}
+          stars={plan.unit.stars}
+          level={plan.unit.level}
+          runes={plan.runes}
+          artifacts={plan.artifacts}
+          ownerName={unitLabel(plan.unit)}
+          note="數值依世界王建議配裝計算；速度、暴擊率、暴擊傷害不計入配符評分。"
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -142,6 +139,12 @@ export default function WorldBossAdvicePage() {
   const runeOwner = useMemo(() => {
     const m = new Map<number, string>();
     for (const u of account?.units ?? []) for (const rid of u.runes) m.set(rid, unitLabel(u));
+    return m;
+  }, [account]);
+
+  const artifactOwner = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const u of account?.units ?? []) for (const aid of u.artifacts) m.set(aid, unitLabel(u));
     return m;
   }, [account]);
 
@@ -200,6 +203,7 @@ export default function WorldBossAdvicePage() {
         </div>
         <div className="tiny dim" style={{ marginTop: 6 }}>
           <Info size={11} /> 這裡只是建議清單，不會改動你的存檔；同一顆符文 / 神器最多只會出現一次，高等級魔靈會先拿最好的符文。
+          每隻魔靈都可以按「完整面板」查看三圍、6 顆符文與 2 件神器的完整資料。
         </div>
         {!hasSkillData && (
           <div className="chip red" style={{ marginTop: 8 }}>
@@ -244,9 +248,9 @@ export default function WorldBossAdvicePage() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(430px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(680px, 1fr))", gap: 12 }}>
         {shown.map((p) => (
-          <PlanCard key={p.unit.id} plan={p} runeOwner={runeOwner} />
+          <PlanCard key={p.unit.id} plan={p} runeOwner={runeOwner} artifactOwner={artifactOwner} />
         ))}
       </div>
       {shown.length === 0 && <div className="empty">沒有符合條件的魔靈</div>}

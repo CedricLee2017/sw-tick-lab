@@ -50,6 +50,8 @@ export interface WbMonsterPlan {
   artifacts: Artifact[];
   /** 套裝件數，例如 祝福 ×2、鬥志 ×2、意志 ×2 */
   sets: WbSetCount[];
+  /** 魔靈基礎數值（依星級 / 等級換算） */
+  base: ReturnType<typeof baseStats>;
   /** 依建議配裝算出的面板 */
   stats: Stats;
   /** 主屬性面板值（給「依面板排序」用） */
@@ -276,6 +278,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       runes,
       artifacts,
       sets,
+      base,
       stats,
       focusValue: stats[focus],
     });
