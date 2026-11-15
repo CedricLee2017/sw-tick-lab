@@ -210,6 +210,8 @@ export default function WorldBossAdvicePage() {
   const [allocation, setAllocation] = useState<WbAllocation>("balanced");
   const [mode, setMode] = useState<WbMode>("rebuild");
   const [category, setCategory] = useState(0);
+  /** 只補空位時：只列出需要補符文的魔靈 */
+  const [onlyChanged, setOnlyChanged] = useState(false);
   const [freeOnly, setFreeOnly] = useState(false);
   const [arch, setArch] = useState("");
   const [sort, setSort] = useState<SortKey>("runeScore");
@@ -306,8 +308,15 @@ export default function WorldBossAdvicePage() {
     return [...set].sort();
   }, [qualified]);
 
+  /** 只補空位模式：有補到符文的魔靈數量 */
+  const changedCount = useMemo(
+    () => plan.filter((p) => (p.addedRunes?.length ?? 0) > 0).length,
+    [plan],
+  );
+
   const shown = useMemo(() => {
     let arr = qualified;
+    if (mode === "topup" && onlyChanged) arr = arr.filter((p) => (p.addedRunes?.length ?? 0) > 0);
     if (arch) arr = arr.filter((p) => p.monster.arch === arch);
     if (q) {
       const text = q.toLowerCase();
@@ -328,7 +337,7 @@ export default function WorldBossAdvicePage() {
       );
     }
     return arr;
-  }, [qualified, arch, q, sort]);
+  }, [qualified, mode, onlyChanged, arch, q, sort]);
 
   /** 升技需求分析：目前選到的魔靈，依升滿所需次數由高到低 */
   const skillRows = useMemo(
@@ -444,40 +453,8 @@ export default function WorldBossAdvicePage() {
             <div className="tiny dim">挑選數量</div>
             <NumberInput className="input mono" min={1} max={200} value={count} onChange={setCount} />
           </div>
-          <div style={{ width: 150 }} title="只顯示 6 顆符文遊戲分數（◆）總和 ≥ 此值的魔靈；0 = 不限制">
-            <div className="tiny dim">最低符文總和</div>
-            <NumberInput
-              className="input mono"
-              min={0}
-              max={2000}
-              step={10}
-              value={minRuneTotal}
-              onChange={setMinRuneTotal}
-            />
-          </div>
-          <div style={{ alignSelf: "flex-end" }}>
-            <div className="tiny dim" style={{ marginBottom: 6 }}>符文分配</div>
-            <div className="row" style={{ gap: 6 }}>
-              {(["balanced", "concentrated"] as WbAllocation[]).map((alloc) => (
-                <button
-                  key={alloc}
-                  type="button"
-                  className={`chip ${allocation === alloc ? "gold" : "muted"}`}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => setAllocation(alloc)}
-                  title={
-                    alloc === "balanced"
-                      ? "符文總分盡量平均分配給所有魔靈"
-                      : "依角色優先順序，把最高分符文先集中給前面的魔靈"
-                  }
-                >
-                  {WB_ALLOCATION_LABEL[alloc]}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div style={{ minWidth: 190 }}>
-            <div className="tiny dim">魔靈分類</div>
+          <div style={{ minWidth: 210 }}>
+            <div className="tiny dim">魔靈分類（優先挑選）</div>
             <select
               className="select"
               style={{ marginTop: 6 }}
@@ -513,6 +490,38 @@ export default function WorldBossAdvicePage() {
                 </button>
               ))}
             </div>
+          </div>
+          <div style={{ alignSelf: "flex-end" }}>
+            <div className="tiny dim" style={{ marginBottom: 6 }}>符文分配</div>
+            <div className="row" style={{ gap: 6 }}>
+              {(["balanced", "concentrated"] as WbAllocation[]).map((alloc) => (
+                <button
+                  key={alloc}
+                  type="button"
+                  className={`chip ${allocation === alloc ? "gold" : "muted"}`}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setAllocation(alloc)}
+                  title={
+                    alloc === "balanced"
+                      ? "符文總分盡量平均分配給所有魔靈"
+                      : "依角色優先順序，把最高分符文先集中給前面的魔靈"
+                  }
+                >
+                  {WB_ALLOCATION_LABEL[alloc]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ width: 150 }} title="只顯示 6 顆符文遊戲分數（◆）總和 ≥ 此值的魔靈；0 = 不限制">
+            <div className="tiny dim">最低符文總和</div>
+            <NumberInput
+              className="input mono"
+              min={0}
+              max={2000}
+              step={10}
+              value={minRuneTotal}
+              onChange={setMinRuneTotal}
+            />
           </div>
           <label
             className="row tiny"
@@ -554,6 +563,36 @@ export default function WorldBossAdvicePage() {
             {minRuneTotal > 0 && `（最低總和 ${fmt(minRuneTotal)}）`}
           </span>
         </div>
+
+        {mode === "topup" && (
+          <div
+            className="row wrap"
+            style={{ gap: 8, marginTop: 12, alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 10 }}
+          >
+            <span className="tiny dim">清單顯示</span>
+            <button
+              type="button"
+              className={`chip ${!onlyChanged ? "gold" : "muted"}`}
+              style={{ cursor: "pointer" }}
+              onClick={() => setOnlyChanged(false)}
+              title="顯示全部選到的魔靈"
+            >
+              全部 {plan.length} 隻
+            </button>
+            <button
+              type="button"
+              className={`chip ${onlyChanged ? "gold" : "muted"}`}
+              style={{ cursor: "pointer" }}
+              onClick={() => setOnlyChanged(true)}
+              title="只顯示這次有補到符文（也就是需要改動）的魔靈"
+            >
+              需要補符文 {changedCount} 隻
+            </button>
+            <span className="tiny dim">
+              只補空位模式：已補滿 6 顆的魔靈不會有改動，可切到「需要補符文」只看要動的魔靈。
+            </span>
+          </div>
+        )}
       </div>
 
       <details className="card card-pad" style={{ marginBottom: 14 }}>
@@ -629,6 +668,11 @@ export default function WorldBossAdvicePage() {
       {shown.length === 0 && (
         <div className="empty">
           沒有符合條件的魔靈
+          {mode === "topup" && onlyChanged && changedCount === 0 && (
+            <div className="tiny dim" style={{ marginTop: 6 }}>
+              這 {plan.length} 隻都已經有 6 顆符文，沒有需要補的空位。
+            </div>
+          )}
           {category > 0 && (
             <div className="tiny dim" style={{ marginTop: 6 }}>
               {categoryLabel(account.categoryNames, category)} 目前沒有魔靈，請在遊戲內把魔靈加入這個分類，
