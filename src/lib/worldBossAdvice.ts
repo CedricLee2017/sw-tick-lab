@@ -61,6 +61,8 @@ export interface WbMonsterPlan {
   artifacts: Artifact[];
   /** 套裝件數，例如 祝福 ×2、鬥志 ×2、意志 ×2 */
   sets: WbSetCount[];
+  /** 套裝結構：2+2+2、4+2 或混搭 */
+  setLayout: "2+2+2" | "4+2" | "混搭";
   /** 魔靈基礎數值（依星級 / 等級換算） */
   base: ReturnType<typeof baseStats>;
   /** 依建議配裝算出的面板 */
@@ -86,10 +88,14 @@ export interface WbPlanOptions {
 
 /** 2 件套（排除無形 25，因為它只能補 1 件，不適合當 2+2+2 的一組） */
 const TWO_PIECE_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25).map((s) => s.id);
+/** 4 件套：3 迅速、5 憤怒、8 猛攻、10 絕望、11 吸血、13 暴走 */
+const FOUR_PIECE_SETS = RUNE_SETS.filter((s) => s.pieces === 4).map((s) => s.id);
 
 const ARCH_STYLE: Record<string, number> = { Attack: 1, Defense: 2, HP: 3, Support: 4 };
 const MAIN_SLOTS = [2, 4, 6] as const;
 const CR_PENALTY = 0.05;
+/** 4+2 要比 2+2+2 高出這個分數才會採用，避免輕微差距就放棄 2+2+2 */
+const FOUR_TWO_MARGIN = 0.15;
 
 /** 體力 / 攻擊 / 防禦三圍的相對權重 */
 interface WbStatWeights {
@@ -256,6 +262,43 @@ function setBonusPoints(setId: number, weights: WbStatWeights): number {
   return ((def.value ?? 0) / 100) * weights[key];
 }
 
+/**
+ * 4 件套的套裝效果分數（用於比較 2+2+2 與 4+2）。
+ * 猛攻 / 憤怒 / 迅速用套裝數值；暴走 / 吸血 / 絕望用固定效果分。
+ */
+function fourPieceScore(setId: number, profile: WbProfile): number {
+  const def = SET_BY_ID[setId];
+  if (!def) return 0;
+  if (def.stat === "atk") return ((def.value ?? 0) / 100) * profile.weights.atk;
+  if (def.stat === "cd") return 0.2;
+  if (def.stat === "spd") return 0;
+  switch (setId) {
+    case 13: // 暴走：每回合 22% 追加回合
+      return 0.3;
+    case 11: // 吸血
+      return 0.15;
+    case 10: // 絕望
+      return 0.05;
+    default:
+      return 0;
+  }
+}
+
+/** 由實際套裝件數判斷是 2+2+2、4+2 或混搭 */
+function layoutOf(sets: WbSetCount[]): WbMonsterPlan["setLayout"] {
+  // 4 件套（暴走 / 猛攻…）4 件 + 另一組 2 件套
+  const four = sets.find((s) => s.count === 4 && SET_BY_ID[s.set]?.pieces === 4);
+  const two = sets.find((s) => s.count === 2 && SET_BY_ID[s.set]?.pieces === 2);
+  if (four && two && sets.length === 2) return "4+2";
+
+  // 全部由 2 件套組成，而且剛好 3 組（同套裝重複兩次亦算 2+2）
+  const onlyTwoPiece = sets.every((s) => SET_BY_ID[s.set]?.pieces === 2 && s.count % 2 === 0);
+  const pairs = sets.reduce((n, s) => n + s.count / 2, 0);
+  if (onlyTwoPiece && pairs === 3) return "2+2+2";
+
+  return "混搭";
+}
+
 /** 神器：主效果與追加傷害優先配合該魔靈的三圍權重 */
 function artifactPoints(
   artifact: Artifact,
@@ -290,6 +333,13 @@ function actualMainPlan(runes: Rune[], profile: WbProfile): Record<number, WbMai
   return out;
 }
 
+interface PairPick {
+  a: Rune;
+  b: Rune;
+  score: number;
+  cr: number;
+}
+
 interface DraftMonster {
   unit: Unit;
   monster: Monster;
@@ -305,6 +355,12 @@ interface DraftMonster {
   points: Map<number, number>;
   bySetSlot: Map<string, Rune[]>;
   bySlot: Map<number, Rune[]>;
+  /** 已決定的套裝結構 */
+  structure?: "2+2+2" | "4+2";
+  /** 4+2 時使用的 4 件套 */
+  fourSet?: number;
+  /** 4+2 已拿了幾組 4 件套的 2 件 */
+  fourPairs: number;
 }
 
 /**
@@ -384,12 +440,102 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       points,
       bySetSlot,
       bySlot,
+      fourPairs: 0,
     };
   });
 
   const usedRunes = new Set<number>();
 
-  // ── 平衡分配：每次由總分最低的魔靈拿下一組（通常是 2 件套） ──
+  /** 這隻魔靈在某個套裝 / 位置，目前最好的未使用符文 */
+  const bestAt = (draft: DraftMonster, setId: number, slot: number): Rune | undefined => {
+    const list = draft.bySetSlot.get(`${setId}:${slot}`);
+    if (!list) return undefined;
+    for (const rune of list) if (!usedRunes.has(rune.id)) return rune;
+    return undefined;
+  };
+
+  /** 在指定位置中，找一組同套裝 2 件的最強組合 */
+  const findBestPair = (
+    draft: DraftMonster,
+    slots: Set<number>,
+    allowedSets: number[],
+    currentCr: number,
+  ): PairPick | null => {
+    const slotList = [...slots];
+    let best: PairPick | null = null;
+    for (const setId of allowedSets) {
+      const bonus = setBonusPoints(setId, draft.profile.weights);
+      for (let i = 0; i < slotList.length; i++) {
+        const a = bestAt(draft, setId, slotList[i]);
+        if (!a) continue;
+        for (let j = i + 1; j < slotList.length; j++) {
+          const b = bestAt(draft, setId, slotList[j]);
+          if (!b) continue;
+          const cr = (crScores.get(a.id) ?? 0) + (crScores.get(b.id) ?? 0);
+          const over = Math.max(0, draft.base.cr + currentCr + cr - 100);
+          const score =
+            (draft.points.get(a.id) ?? 0) +
+            (draft.points.get(b.id) ?? 0) +
+            bonus -
+            over * CR_PENALTY;
+          if (!best || score > best.score) best = { a, b, score, cr };
+        }
+      }
+    }
+    return best;
+  };
+
+  /** 估計 2+2+2 的總分（用來同 4+2 比較） */
+  const evaluate222 = (draft: DraftMonster): number => {
+    const remaining = new Set(draft.remainingSlots);
+    let cr = draft.cr;
+    let total = 0;
+    for (let i = 0; i < 3 && remaining.size >= 2; i++) {
+      const pair = findBestPair(draft, remaining, TWO_PIECE_SETS, cr);
+      if (!pair) break;
+      total += pair.score;
+      cr += pair.cr;
+      remaining.delete(pair.a.slot);
+      remaining.delete(pair.b.slot);
+    }
+    return total;
+  };
+
+  /** 找最佳「4 件套 + 2 件套」組合（用來同 2+2+2 比較） */
+  const evaluate42 = (draft: DraftMonster): { score: number; setId: number } | null => {
+    const slots = [...draft.remainingSlots];
+    if (slots.length < 6) return null;
+    let best: { score: number; setId: number } | null = null;
+    for (const setId of FOUR_PIECE_SETS) {
+      const setScore = fourPieceScore(setId, draft.profile);
+      for (let a = 0; a < slots.length; a++) {
+        for (let b = a + 1; b < slots.length; b++) {
+          for (let c = b + 1; c < slots.length; c++) {
+            for (let d = c + 1; d < slots.length; d++) {
+              const fourSlots = [slots[a], slots[b], slots[c], slots[d]];
+              const fourRunes: Rune[] = [];
+              for (const slot of fourSlots) {
+                const rune = bestAt(draft, setId, slot);
+                if (!rune) break;
+                fourRunes.push(rune);
+              }
+              if (fourRunes.length < 4) continue;
+              const fourCr = fourRunes.reduce((n, r) => n + (crScores.get(r.id) ?? 0), 0);
+              const rest = new Set(slots.filter((s) => !fourSlots.includes(s)));
+              const pair = findBestPair(draft, rest, TWO_PIECE_SETS, draft.cr + fourCr);
+              if (!pair) continue;
+              const fourPoints = fourRunes.reduce((n, r) => n + (draft.points.get(r.id) ?? 0), 0);
+              const score = fourPoints + setScore + pair.score;
+              if (!best || score > best.score) best = { score, setId };
+            }
+          }
+        }
+      }
+    }
+    return best;
+  };
+
+  // ── 平衡分配：每次由總分最低的魔靈拿下一組 ──
   while (true) {
     let draft: DraftMonster | null = null;
     for (const d of drafts) {
@@ -404,34 +550,31 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     }
     if (!draft) break;
 
-    const slots = [...draft.remainingSlots];
-    const bestAt = (key: string): Rune | undefined => {
-      const list = draft.bySetSlot.get(key);
-      if (!list) return undefined;
-      for (const rune of list) if (!usedRunes.has(rune.id)) return rune;
-      return undefined;
-    };
-
-    let bestPair: { a: Rune; b: Rune; score: number } | null = null;
-    for (const setId of TWO_PIECE_SETS) {
-      const bonus = setBonusPoints(setId, draft.profile.weights);
-      for (let i = 0; i < slots.length; i++) {
-        const a = bestAt(`${setId}:${slots[i]}`);
-        if (!a) continue;
-        for (let j = i + 1; j < slots.length; j++) {
-          const b = bestAt(`${setId}:${slots[j]}`);
-          if (!b) continue;
-          const projectedCr =
-            draft.base.cr + draft.cr + (crScores.get(a.id) ?? 0) + (crScores.get(b.id) ?? 0);
-          const over = Math.max(0, projectedCr - 100);
-          const score =
-            (draft.points.get(a.id) ?? 0) +
-            (draft.points.get(b.id) ?? 0) +
-            bonus -
-            over * CR_PENALTY;
-          if (!bestPair || score > bestPair.score) bestPair = { a, b, score };
-        }
+    // 第一次拿到這隻時，比較 2+2+2 與 4+2，揀分數較高的結構
+    if (!draft.structure) {
+      const score222 = evaluate222(draft);
+      const best42 = evaluate42(draft);
+      if (best42 && best42.score > score222 + FOUR_TWO_MARGIN) {
+        draft.structure = "4+2";
+        draft.fourSet = best42.setId;
+      } else {
+        draft.structure = "2+2+2";
       }
+    }
+
+    const forcedFour =
+      draft.structure === "4+2" &&
+      draft.fourSet !== undefined &&
+      draft.fourPairs < 2 &&
+      draft.remainingSlots.size >= 4;
+    const allowedSets = forcedFour && draft.fourSet !== undefined ? [draft.fourSet] : TWO_PIECE_SETS;
+    let bestPair = findBestPair(draft, draft.remainingSlots, allowedSets, draft.cr);
+
+    if (!bestPair && forcedFour) {
+      // 4 件套的符文不足，退回 2+2+2
+      draft.structure = "2+2+2";
+      draft.fourSet = undefined;
+      bestPair = findBestPair(draft, draft.remainingSlots, TWO_PIECE_SETS, draft.cr);
     }
 
     if (bestPair) {
@@ -443,12 +586,13 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       usedRunes.add(b.id);
       draft.totalScore += (gameScores.get(a.id) ?? 0) + (gameScores.get(b.id) ?? 0);
       draft.cr += (crScores.get(a.id) ?? 0) + (crScores.get(b.id) ?? 0);
+      if (forcedFour) draft.fourPairs++;
       continue;
     }
 
-    // 真的湊不到 2 件套時，補該位置最好的單顆符文
+    // 真的湊不到套裝時，補該位置最好的單顆符文
     let bestSingle: { rune: Rune; score: number } | null = null;
-    for (const slot of slots) {
+    for (const slot of draft.remainingSlots) {
       for (const rune of draft.bySlot.get(slot) ?? []) {
         if (usedRunes.has(rune.id)) continue;
         const projectedCr = draft.base.cr + draft.cr + (crScores.get(rune.id) ?? 0);
@@ -518,6 +662,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       runeScoreTotal: draft.totalScore,
       artifacts,
       sets,
+      setLayout: layoutOf(sets),
       base,
       stats,
       focusValue: stats[profile.focus],

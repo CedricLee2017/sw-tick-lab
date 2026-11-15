@@ -47,7 +47,6 @@ function PlanCard({
   artifactOwner: Map<number, string>;
 }) {
   const [open, setOpen] = useState(false);
-  const pairReady = plan.runes.length === 6 && plan.sets.every((s) => s.count % 2 === 0);
   const runesBySlot = new Map(plan.runes.map((rune) => [rune.slot, rune]));
 
   return (
@@ -91,7 +90,15 @@ function PlanCard({
           >
             2/4/6：{mainPlanText(plan)}
           </span>
-          {pairReady && <span className="chip gold" title="6 顆符文剛好是三組 2 件套">2+2+2</span>}
+          {plan.setLayout === "2+2+2" && (
+            <span className="chip gold" title="三組 2 件套">2+2+2</span>
+          )}
+          {plan.setLayout === "4+2" && (
+            <span className="chip gold" title="四件套 + 二件套">4+2</span>
+          )}
+          {plan.setLayout === "混搭" && (
+            <span className="chip muted" title="未能完整湊成 2+2+2 或 4+2">混搭</span>
+          )}
           {plan.sets.map((s) => (
             <span key={s.set} className="chip muted" title="每 2 件觸發一次套裝效果">
               {SET_BY_ID[s.set]?.name ?? `套裝${s.set}`} ×{s.count}
@@ -248,7 +255,8 @@ export default function WorldBossAdvicePage() {
               <Crown size={16} className="gold" /> 世界王 {count} 隻水系配裝建議
             </div>
             <div className="card-sub">
-              依「原五 &gt; 二覺 &gt; 原四，再比技能升級次數」挑選水屬性魔靈，並自動配成 2+2+2 套裝。
+              依「原五 &gt; 二覺 &gt; 原四，再比技能升級次數」挑選水屬性魔靈。
+              套裝優先 2+2+2；如果 3 組 2 件套的分數較低，會改用 4+2（例如暴走 4 + 意志 2）。
               2/6 位主屬性：攻擊型攻擊%、體力型體力%、防禦型防禦%，支援型依基本體力／防禦力混搭；
               4 號位可用爆傷或爆率（爆率會盡量控制在 100% 以下）。
               選符以配合類型的面板為主，遊戲符文分數（◆）作次要加分。
