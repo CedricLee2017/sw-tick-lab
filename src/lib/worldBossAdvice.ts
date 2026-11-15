@@ -18,6 +18,8 @@
  * 5. 配符方式：
  *    - rebuild（預設）：重新配 6 顆，其他魔靈身上的符文也在候選之內。
  *    - topup：只補空位，保留每隻現有符文，只用未裝備的符文補滿 6 顆，適合不想大改配裝。
+ *      設定目標平均（targetAvg）時，會先補空位，未達標才換掉較弱的符文，
+ *      並由「單隻可加分最多」的魔靈開始處理，令需要改動的魔靈數量最少。
  *
  * 這裡只產生「建議」，不會改動存檔；同一顆符文 / 神器最多只會被建議給一隻魔靈。
  */
@@ -85,8 +87,10 @@ export interface WbMonsterPlan {
   runeScoreTotal: number;
   /** 只補空位模式：這隻魔靈原本 6 顆符文的 ◆ 總和 */
   previousScore?: number;
-  /** 只補空位模式：這次新增的符文（原本空位補上的） */
+  /** 只補空位模式：這次新增的符文（補空位或換上更好的符文） */
   addedRunes?: Rune[];
+  /** 只補空位模式：被換下來的符文（有設定目標平均時才會換符文） */
+  removedRunes?: Rune[];
   /** 這隻魔靈目前裝備的符文（只補空位模式的對照用） */
   currentRunes?: Rune[];
   /** 建議的 0–2 件神器 */
@@ -112,6 +116,15 @@ export interface WbPlanOptions {
   category?: number;
   /** 配符方式；預設 rebuild（重新配 6 顆） */
   mode?: WbMode;
+  /**
+   * 目標平均符文總分（每隻 6 顆 ◆ 總分的平均）。
+   * 只在 topup（只補空位）模式生效：
+   *   1. 先用未裝備的符文補空位；
+   *   2. 空位補完仍未達標時，才把該魔靈較弱的符文換成更好的未裝備符文（原符文可再給別隻）；
+   *   3. 由「單隻可加分最多」的魔靈開始處理，達到目標就停，令改動的魔靈數量盡量少。
+   * 符文不足時就是目前可達到的最高平均值。
+   */
+  targetAvg?: number;
   /** 應用程式內排除的符文 id（不會被建議使用） */
   excludedRunes?: readonly number[];
   /** 建築 / 公會等加成設定 */
@@ -646,8 +659,108 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     return best;
   };
 
-  // ── 分配：平均 = 每次由總分最低的魔靈拿下一組；集中 = 依優先順序把前面魔靈先補滿 ──
+  // ── 目標平均（只補空位）：用最少的改動魔靈數達到目標 ──
   const allocation = opts.allocation ?? "balanced";
+  const targetAvg = Math.max(0, Math.floor(opts.targetAvg ?? 0));
+  if (mode === "topup" && targetAvg > 0 && drafts.length > 0) {
+    const targetTotal = targetAvg * drafts.length;
+    let plannedTotal = drafts.reduce((n, d) => n + d.totalScore, 0);
+
+    if (plannedTotal < targetTotal) {
+      // 換下來的符文先留著，其他魔靈（尤其是 6 號位）可能還用得到
+      const spareRunes = new Map<number, Rune>();
+
+      /** 這隻魔靈某個位置最值得換上的未使用符文（先比配裝分數，同分再比 ◆） */
+      const bestForSlot = (draft: DraftMonster, slot: number): Rune | undefined => {
+        let best: Rune | undefined;
+        let bestPoints = -Infinity;
+        const consider = (rune: Rune) => {
+          if (rune.slot !== slot || usedRunes.has(rune.id) || excluded.has(rune.id)) return;
+          const game = gameScores.get(rune.id) ?? 0;
+          const points =
+            draft.points.get(rune.id) ?? runePoints(rune, draft.profile, draft.base, game);
+          if (
+            points > bestPoints + 1e-9 ||
+            (Math.abs(points - bestPoints) <= 1e-9 &&
+              game > (best ? gameScores.get(best.id) ?? 0 : -1))
+          ) {
+            bestPoints = points;
+            best = rune;
+          }
+        };
+        for (const rune of draft.bySlot.get(slot) ?? []) consider(rune);
+        for (const rune of spareRunes.values()) consider(rune);
+        return best;
+      };
+
+      /** 換上某個位置的符文；回傳實際加了多少分 */
+      const applySlot = (draft: DraftMonster, slot: number): number => {
+        const current = draft.runes.find((r) => r.slot === slot);
+        const candidate = bestForSlot(draft, slot);
+        if (!candidate) return 0;
+        const now = current ? gameScores.get(current.id) ?? 0 : 0;
+        const next = gameScores.get(candidate.id) ?? 0;
+        if (next <= now) return 0;
+        if (current) {
+          draft.runes.splice(draft.runes.indexOf(current), 1);
+          spareRunes.set(current.id, current);
+          draft.cr -= crScores.get(current.id) ?? 0;
+        }
+        draft.runes.push(candidate);
+        usedRunes.add(candidate.id);
+        draft.remainingSlots.delete(slot);
+        draft.totalScore += next - now;
+        draft.cr += crScores.get(candidate.id) ?? 0;
+        return next - now;
+      };
+
+      /** 依照「單隻可加分」高→低排序；fills = 只計空位、swaps = 只計換符文 */
+      const ranked = (fills: boolean, swaps: boolean) =>
+        drafts
+          .map((draft) => {
+            let gain = 0;
+            for (const slot of [1, 2, 3, 4, 5, 6]) {
+              const current = draft.runes.find((r) => r.slot === slot);
+              if (!current && !fills) continue;
+              if (current && !swaps) continue;
+              const candidate = bestForSlot(draft, slot);
+              if (!candidate) continue;
+              const now = current ? gameScores.get(current.id) ?? 0 : 0;
+              const next = gameScores.get(candidate.id) ?? 0;
+              if (next > now) gain += next - now;
+            }
+            return { draft, gain };
+          })
+          .filter((x) => x.gain > 0)
+          .sort((a, b) => b.gain - a.gain || a.draft.priority - b.draft.priority);
+
+      // 1. 先補空位（不動任何現有符文）
+      for (const { draft } of ranked(true, false)) {
+        if (plannedTotal >= targetTotal) break;
+        for (const slot of [1, 2, 3, 4, 5, 6]) {
+          if (plannedTotal >= targetTotal) break;
+          if (draft.runes.some((r) => r.slot === slot)) continue;
+          plannedTotal += applySlot(draft, slot);
+        }
+      }
+
+      // 2. 空位補完仍未達標，才換掉較弱的符文（原符文留給其他魔靈）
+      if (plannedTotal < targetTotal) {
+        for (const { draft } of ranked(false, true)) {
+          if (plannedTotal >= targetTotal) break;
+          for (const slot of [1, 2, 3, 4, 5, 6]) {
+            if (plannedTotal >= targetTotal) break;
+            if (!draft.runes.some((r) => r.slot === slot)) continue;
+            plannedTotal += applySlot(draft, slot);
+          }
+        }
+      }
+    }
+    // 目標模式自己決定要動哪些；沒動到的空位保持原樣（下方的分配迴圈會直接結束）
+    for (const draft of drafts) draft.remainingSlots.clear();
+  }
+
+  // ── 分配：平均 = 每次由總分最低的魔靈拿下一組；集中 = 依優先順序把前面魔靈先補滿 ──
   while (true) {
     let draft: DraftMonster | null = null;
     if (allocation === "concentrated") {
@@ -793,6 +906,10 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
             previousScore: draft.baseScore,
             currentRunes: runes.filter((r) => draft.baseRuneIds.has(r.id)),
             addedRunes: runes.filter((r) => !draft.baseRuneIds.has(r.id)),
+            removedRunes: [...draft.baseRuneIds]
+              .filter((id) => !runes.some((r) => r.id === id))
+              .map((id) => runeById.get(id))
+              .filter((r): r is Rune => !!r),
           }
         : {}),
       artifacts,

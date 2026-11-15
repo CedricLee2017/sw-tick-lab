@@ -53,10 +53,13 @@ function PlanCard({
   plan,
   runeOwner,
   artifactOwner,
+  targetMode,
 }: {
   plan: WbMonsterPlan;
   runeOwner: Map<number, string>;
   artifactOwner: Map<number, string>;
+  /** 設定了目標平均：未安排的魔靈會保留空位 */
+  targetMode?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const runesBySlot = new Map(plan.runes.map((rune) => [rune.slot, rune]));
@@ -100,7 +103,7 @@ function PlanCard({
           {plan.previousScore !== undefined ? (
             <span
               className={`chip ${plan.runeScoreTotal > plan.previousScore ? "gold" : "muted"}`}
-              title="只補空位：保留現有符文，只用未裝備的符文補滿 6 顆後的 ◆ 總和"
+              title="只補空位：保留現有符文，補上／換上未裝備的符文後的 ◆ 總和"
             >
               ◆ {fmt(plan.previousScore)} → {fmt(plan.runeScoreTotal)}
               {plan.runeScoreTotal > plan.previousScore &&
@@ -111,11 +114,24 @@ function PlanCard({
               ◆ 總分 {fmt(plan.runeScoreTotal)}
             </span>
           )}
-          {plan.addedRunes && plan.addedRunes.length > 0 && (
-            <span className="chip muted" title="這次新增的符文（原本是空位）">
-              補上 {plan.addedRunes.length} 顆
-            </span>
-          )}
+          {plan.addedRunes && plan.addedRunes.length > 0 && (() => {
+            const swapped = plan.removedRunes?.length ?? 0;
+            const filled = plan.addedRunes.length - swapped;
+            return (
+              <>
+                {filled > 0 && (
+                  <span className="chip muted" title="這次補上原本空位的符文">
+                    補上 {filled} 顆
+                  </span>
+                )}
+                {swapped > 0 && (
+                  <span className="chip muted" title="這次換掉較弱的符文">
+                    換上 {swapped} 顆
+                  </span>
+                )}
+              </>
+            );
+          })()}
           <span
             className="chip muted"
             title={`2/4/6 位實際主屬性（依魔靈類型${plan.monster.arch === "Support" ? `與基本體力 ${fmt(plan.base.hp)}／防禦 ${fmt(plan.base.def)}` : ""}決定；4 號位可用爆傷／爆率）`}
@@ -156,15 +172,20 @@ function PlanCard({
                   style={{ minHeight: 120, alignItems: "center", justifyContent: "center", opacity: 0.55 }}
                 >
                   <span className="rune-slot">位置 {slot}</span>
-                  <span className="tiny dim">沒有可用符文</span>
+                  <span className="tiny dim">
+                    {targetMode ? "未安排符文" : "沒有可用符文"}
+                  </span>
                 </div>
               );
             }
             const owner = runeOwner.get(rune.id);
             const isNew = plan.addedRunes?.some((r) => r.id === rune.id);
+            const replaced = (plan.removedRunes?.length ?? 0) > 0;
             return (
               <RuneCard key={rune.id} rune={rune} owner={owner ? `現在：${owner}` : "現在：未裝備"}>
-                {isNew && <span className="rune-tag gold">新增（補空位）</span>}
+                {isNew && (
+                  <span className="rune-tag gold">{replaced ? "換上" : "新增（補空位）"}</span>
+                )}
               </RuneCard>
             );
           })}
@@ -210,6 +231,8 @@ export default function WorldBossAdvicePage() {
   const [allocation, setAllocation] = useState<WbAllocation>("balanced");
   const [mode, setMode] = useState<WbMode>("rebuild");
   const [category, setCategory] = useState(0);
+  /** 只補空位模式：目標平均符文總分（0 = 不設定） */
+  const [targetAvg, setTargetAvg] = useState(0);
   /** 只補空位時：只列出需要補符文的魔靈 */
   const [onlyChanged, setOnlyChanged] = useState(false);
   const [freeOnly, setFreeOnly] = useState(false);
@@ -256,6 +279,7 @@ export default function WorldBossAdvicePage() {
             waterOnly: category === 0,
             category,
             mode,
+            targetAvg: mode === "topup" ? targetAvg : 0,
             excludedRunes,
             freeOnly,
             bonus,
@@ -264,7 +288,7 @@ export default function WorldBossAdvicePage() {
             monsterOf: (id) => MONSTER_MAP.get(id),
           })
         : [],
-    [account, count, category, mode, excludedRunes, freeOnly, bonus, allocation, skillReqOf],
+    [account, count, category, mode, targetAvg, excludedRunes, freeOnly, bonus, allocation, skillReqOf],
   );
 
   /** 最低符文總和只影響下方清單，不會改動平衡配符的結果 */
@@ -308,11 +332,33 @@ export default function WorldBossAdvicePage() {
     return [...set].sort();
   }, [qualified]);
 
-  /** 只補空位模式：有補到符文的魔靈數量 */
+  /** 只補空位模式：有補到／換到符文的魔靈數量 */
   const changedCount = useMemo(
     () => plan.filter((p) => (p.addedRunes?.length ?? 0) > 0).length,
     [plan],
   );
+
+  /** 目標平均的結果：是否達標、要改幾隻、補了幾顆、換了幾顆 */
+  const targetResult = useMemo(() => {
+    if (mode !== "topup" || targetAvg <= 0 || plan.length === 0) return null;
+    const scoreOf = (p: (typeof plan)[number]) => p.runeScoreTotal;
+    const total = plan.reduce((n, p) => n + scoreOf(p), 0);
+    const before = plan.reduce((n, p) => n + (p.previousScore ?? 0), 0);
+    const need = targetAvg * plan.length;
+    const added = plan.reduce((n, p) => n + (p.addedRunes?.length ?? 0), 0);
+    const removed = plan.reduce((n, p) => n + (p.removedRunes?.length ?? 0), 0);
+    return {
+      total,
+      before,
+      need,
+      avg: total / plan.length,
+      beforeAvg: before / plan.length,
+      achieved: total >= need,
+      changed: plan.filter((p) => (p.addedRunes?.length ?? 0) > 0).length,
+      added,
+      removed,
+    };
+  }, [plan, mode, targetAvg]);
 
   const shown = useMemo(() => {
     let arr = qualified;
@@ -404,7 +450,11 @@ export default function WorldBossAdvicePage() {
             {mode === "topup" && (
               <span
                 className="chip"
-                title="只補空位：保留每隻現有符文，只用未裝備的符文補滿 6 顆"
+                title={
+                  targetAvg > 0
+                    ? "目標平均模式：補空位＋必要時換符文後的總加分"
+                    : "只補空位：保留每隻現有符文，只用未裝備的符文補滿 6 顆"
+                }
               >
                 加分 +{fmt(plan.reduce((n, p) => n + (p.runeScoreTotal - (p.previousScore ?? 0)), 0))}
               </span>
@@ -427,7 +477,9 @@ export default function WorldBossAdvicePage() {
         <div className="tiny dim" style={{ marginTop: 6 }}>
           <Info size={11} /> 這裡只是建議清單，不會改動你的存檔；同一顆符文 / 神器最多只會出現一次。
           {mode === "topup"
-            ? " 只補空位：保留每隻現有符文，只用目前未裝備的符文補滿空位，不會拆掉任何魔靈身上的配裝。"
+            ? targetAvg > 0
+              ? ` 目標平均 ${fmt(targetAvg)}：先補空位，未達標才把較弱的符文換成更好的未裝備符文；由單隻可加分最多的魔靈開始，達到目標就停。換符文以 ◆ 分數為主，可能會拆散原本的套裝。`
+              : " 只補空位：保留每隻現有符文，只用目前未裝備的符文補滿空位，不會拆掉任何魔靈身上的配裝。"
             : allocation === "concentrated"
               ? " 集中分配：前面的魔靈會先拿最好的符文（依原五 > 二覺 > 原四，同級比技能升滿所需次數），後面的魔靈使用剩餘符文。"
               : ` 符文以「總分最低的魔靈優先拿下一組」平衡分配，令 ${plan.length} 隻的 ◆ 總分盡量接近。`}
@@ -565,32 +617,92 @@ export default function WorldBossAdvicePage() {
         </div>
 
         {mode === "topup" && (
-          <div
-            className="row wrap"
-            style={{ gap: 8, marginTop: 12, alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 10 }}
-          >
-            <span className="tiny dim">清單顯示</span>
-            <button
-              type="button"
-              className={`chip ${!onlyChanged ? "gold" : "muted"}`}
-              style={{ cursor: "pointer" }}
-              onClick={() => setOnlyChanged(false)}
-              title="顯示全部選到的魔靈"
-            >
-              全部 {plan.length} 隻
-            </button>
-            <button
-              type="button"
-              className={`chip ${onlyChanged ? "gold" : "muted"}`}
-              style={{ cursor: "pointer" }}
-              onClick={() => setOnlyChanged(true)}
-              title="只顯示這次有補到符文（也就是需要改動）的魔靈"
-            >
-              需要補符文 {changedCount} 隻
-            </button>
-            <span className="tiny dim">
-              只補空位模式：已補滿 6 顆的魔靈不會有改動，可切到「需要補符文」只看要動的魔靈。
-            </span>
+          <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+            <div className="row wrap" style={{ gap: 10, alignItems: "flex-end" }}>
+              <div style={{ width: 170 }}>
+                <div
+                  className="tiny dim"
+                  title="每隻魔靈 6 顆符文的 ◆ 總分平均；0 = 不設定"
+                >
+                  目標平均符文總分（選填）
+                </div>
+                <NumberInput
+                  className="input mono"
+                  min={0}
+                  max={3000}
+                  step={10}
+                  value={targetAvg}
+                  onChange={setTargetAvg}
+                />
+              </div>
+              {targetResult ? (
+                <>
+                  <span
+                    className={`chip ${targetResult.achieved ? "gold" : "red"}`}
+                    title={
+                      targetResult.achieved
+                        ? "目前可用的未裝備符文足以達到這個平均"
+                        : "未裝備符文不足：以下是補空位＋換符文後能達到的最高平均"
+                    }
+                  >
+                    {targetResult.achieved
+                      ? targetResult.changed > 0
+                        ? `可達成：最少改動 ${targetResult.changed} 隻`
+                        : "已達標：不需要改動"
+                      : `無法達成：最高平均 ${fmt(Math.round(targetResult.avg))}`}
+                  </span>
+                  <span className="chip muted" title="目前 60 隻的 ◆ 平均">
+                    目前平均 {fmt(Math.round(targetResult.beforeAvg))}
+                  </span>
+                  <span className="chip muted" title="套用建議後 60 隻的 ◆ 平均">
+                    最終平均 {fmt(Math.round(targetResult.avg))}
+                  </span>
+                  {targetResult.achieved && (
+                    <span className="chip muted" title="補空位與換符文各用了幾顆未裝備符文">
+                      補 {fmt(Math.max(0, targetResult.added - targetResult.removed))} 顆
+                      {targetResult.removed > 0 && ` · 換 ${fmt(targetResult.removed)} 顆`}
+                    </span>
+                  )}
+                  {!targetResult.achieved && (
+                    <span className="chip muted">
+                      還差 {fmt(Math.round(targetResult.need - targetResult.total))} 分
+                    </span>
+                  )}
+                  <span className="tiny dim" style={{ paddingBottom: 8, flex: "1 1 240px" }}>
+                    由「單隻可加分最多」的魔靈開始處理，達到目標就停，所以是最少的改動隻數。
+                  </span>
+                </>
+              ) : (
+                <span className="tiny dim" style={{ paddingBottom: 8 }}>
+                  輸入目標平均後，會計算能否用這 {plan.length} 隻達成，以及最少需要改動幾隻魔靈。
+                </span>
+              )}
+            </div>
+
+            <div className="row wrap" style={{ gap: 8, marginTop: 10, alignItems: "center" }}>
+              <span className="tiny dim">清單顯示</span>
+              <button
+                type="button"
+                className={`chip ${!onlyChanged ? "gold" : "muted"}`}
+                style={{ cursor: "pointer" }}
+                onClick={() => setOnlyChanged(false)}
+                title="顯示全部選到的魔靈"
+              >
+                全部 {plan.length} 隻
+              </button>
+              <button
+                type="button"
+                className={`chip ${onlyChanged ? "gold" : "muted"}`}
+                style={{ cursor: "pointer" }}
+                onClick={() => setOnlyChanged(true)}
+                title="只顯示這次有補到或換到符文（也就是需要改動）的魔靈"
+              >
+                需要改動 {changedCount} 隻
+              </button>
+              <span className="tiny dim">
+                只補空位模式：已經有 6 顆符文的魔靈不會有改動，可切到「需要改動」只看要動的魔靈。
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -662,7 +774,13 @@ export default function WorldBossAdvicePage() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(680px, 1fr))", gap: 12 }}>
         {shown.map((p) => (
-          <PlanCard key={p.unit.id} plan={p} runeOwner={runeOwner} artifactOwner={artifactOwner} />
+          <PlanCard
+            key={p.unit.id}
+            plan={p}
+            runeOwner={runeOwner}
+            artifactOwner={artifactOwner}
+            targetMode={mode === "topup" && targetAvg > 0}
+          />
         ))}
       </div>
       {shown.length === 0 && (
@@ -670,7 +788,7 @@ export default function WorldBossAdvicePage() {
           沒有符合條件的魔靈
           {mode === "topup" && onlyChanged && changedCount === 0 && (
             <div className="tiny dim" style={{ marginTop: 6 }}>
-              這 {plan.length} 隻都已經有 6 顆符文，沒有需要補的空位。
+              目前沒有需要改動的魔靈（已達標或都已經有 6 顆符文）。
             </div>
           )}
           {category > 0 && (
