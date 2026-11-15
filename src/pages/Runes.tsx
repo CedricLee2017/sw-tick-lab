@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Gem, Search, X } from "lucide-react";
 import { unitLabel, useStore } from "../store";
 import { RUNE_SETS, SET_BY_ID, STAT_TYPES } from "../lib/constants";
-import { runeScore } from "../lib/stats";
+import { runeEfficiency, runeScore } from "../lib/stats";
 import { grindMax, grindStatSuffix } from "../lib/grind";
 import { averageRankPercent, summarizeRanks } from "../lib/rankings";
 import { buildUsageIndex, usageText } from "../lib/usage";
@@ -13,6 +13,8 @@ import type { Rune } from "../lib/types";
 /** 主屬性 / 副屬性的篩選順序：速度、百分比、爆擊、命中抵抗、固定值 */
 const STAT_OPTIONS = [8, 2, 4, 6, 9, 10, 11, 12, 1, 3, 5];
 const SLOTS = [1, 2, 3, 4, 5, 6];
+/** 遊戲內魔靈分類編號（unit_marker_list.lock_type 1–8） */
+const CATEGORIES = [1, 2, 3, 4, 5, 6, 7, 8];
 
 type AncientFilter = "all" | "only" | "exclude";
 type GrindFilter = "all" | "grinded" | "none" | "headroom" | "max";
@@ -31,6 +33,8 @@ export default function RunesPage() {
   const [q, setQ] = useState("");
   const [setId, setSetId] = useState(0);
   const [slots, setSlots] = useState<number[]>([]);
+  const [categories, setCategories] = useState<number[]>([]);
+  const [ignoreFlatAtkDef, setIgnoreFlatAtkDef] = useState(false);
   const [grade, setGrade] = useState(0);
   const [mainStat, setMainStat] = useState(0);
   const [subStat, setSubStat] = useState(0);
@@ -53,7 +57,7 @@ export default function RunesPage() {
   // 換篩選條件時回到第一頁，避免停在舊的「載入更多」數量
   useEffect(() => {
     setTake(150);
-  }, [q, setId, slots, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort]);
+  }, [q, setId, slots, categories, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort]);
 
   // 頁頭統計：有多少符文在預設隊 / RTA 使用中
   const usageCounts = useMemo(() => {
@@ -73,11 +77,39 @@ export default function RunesPage() {
     return m;
   }, [account]);
 
+  /** 符文 → 目前裝備者所屬的魔靈分類（遊戲內 1–8） */
+  const ownerCategory = useMemo(() => {
+    const m = new Map<number, number>();
+    if (!account) return m;
+    for (const u of account.units) {
+      if (!u.category) continue;
+      for (const rid of u.runes) m.set(rid, u.category);
+    }
+    return m;
+  }, [account]);
+
+  /** 開啟「無視固攻防」時的效率（分子、分母都不計固定攻擊 / 固定防禦） */
+  const flatIgnoredEff = useMemo(() => {
+    const m = new Map<number, number>();
+    if (!account || !ignoreFlatAtkDef) return m;
+    for (const r of account.runes) m.set(r.id, runeEfficiency(r, true, { ignoreFlatAtkDef: true }).current);
+    return m;
+  }, [account, ignoreFlatAtkDef]);
+
+  const effOf = useCallback(
+    (r: Rune) => (ignoreFlatAtkDef ? flatIgnoredEff.get(r.id) ?? 0 : r.eff),
+    [ignoreFlatAtkDef, flatIgnoredEff],
+  );
+
   const runes = useMemo(() => {
     if (!account) return [];
     let arr = account.runes.filter((r) => {
       if (setId && r.set !== setId) return false;
       if (slots.length > 0 && !slots.includes(r.slot)) return false;
+      if (categories.length > 0) {
+        const cat = ownerCategory.get(r.id);
+        if (cat === undefined || !categories.includes(cat)) return false;
+      }
       if (grade && r.grade !== grade) return false;
       if (mainStat && r.main.t !== mainStat) return false;
       if (prefixStat === -1 ? !(r.prefix.t > 0) : prefixStat > 0 && r.prefix.t !== prefixStat) return false;
@@ -115,7 +147,7 @@ export default function RunesPage() {
         const summary = summarizeRanks(ranks?.runes.get(r.id)?.subs);
         if (summary.count < 2 || summary.best * 100 < rankMin) return false;
       }
-      if (minEff && r.eff < minEff) return false;
+      if (minEff && effOf(r) < minEff) return false;
       if (q) {
         const text = [
           SET_BY_ID[r.set]?.name ?? "",
@@ -130,7 +162,7 @@ export default function RunesPage() {
       return true;
     });
     arr = arr.sort((a, b) => {
-      if (sort === "eff") return b.eff - a.eff;
+      if (sort === "eff") return effOf(b) - effOf(a);
       if (sort === "score") return runeScore(b) - runeScore(a) || b.eff - a.eff;
       if (sort === "grade") return b.grade - a.grade || b.eff - a.eff;
       if (sort === "slot") return a.slot - b.slot || b.eff - a.eff;
@@ -151,10 +183,10 @@ export default function RunesPage() {
       return sb - sa || b.eff - a.eff;
     });
     return arr;
-  }, [account, q, setId, slots, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort, owner, lockedSet, excludedSet, ranks, usageIndex]);
+  }, [account, q, setId, slots, categories, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort, owner, ownerCategory, effOf, lockedSet, excludedSet, ranks, usageIndex]);
 
   const dirty =
-    !!q || setId !== 0 || slots.length > 0 || grade !== 0 || mainStat !== 0 ||
+    !!q || setId !== 0 || slots.length > 0 || categories.length > 0 || grade !== 0 || mainStat !== 0 ||
     subStat !== 0 || subMin !== 0 || prefixStat !== 0 || ancient !== "all" ||
     grindState !== "all" || onlyFree || lockFilter !== "all" || onlyExcluded ||
     usage !== "all" || rankMin > 0 || minEff > 0;
@@ -163,6 +195,7 @@ export default function RunesPage() {
     setQ("");
     setSetId(0);
     setSlots([]);
+    setCategories([]);
     setGrade(0);
     setMainStat(0);
     setSubStat(0);
@@ -189,6 +222,10 @@ export default function RunesPage() {
 
   const toggleSlot = (n: number) => {
     setSlots((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)));
+  };
+
+  const toggleCategory = (n: number) => {
+    setCategories((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)));
   };
 
   if (!account) return <div className="empty"><Gem size={40} /><div>尚未匯入存檔</div></div>;
@@ -271,6 +308,35 @@ export default function RunesPage() {
               <option value={-1}>有固有屬性</option>
               {STAT_OPTIONS.map((t) => <option key={t} value={t}>{STAT_TYPES[t]?.label}</option>)}
             </select>
+          </div>
+
+          <div className="row wrap" style={{ gap: 8 }}>
+            <span className="tiny dim" title="遊戲內魔靈分類（魔靈管理 → 分類 1–8）；只顯示目前裝備在該分類魔靈身上的符文">類別</span>
+            <button
+              type="button"
+              className={`chip ${categories.length === 0 ? "gold" : "muted"}`}
+              style={{ cursor: "pointer" }}
+              aria-pressed={categories.length === 0}
+              onClick={() => setCategories([])}
+            >
+              全部
+            </button>
+            {CATEGORIES.map((n) => {
+              const custom = account.categoryNames?.[n]?.trim();
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  className={`chip ${categories.includes(n) ? "gold" : "muted"}`}
+                  style={{ cursor: "pointer", minWidth: 34, justifyContent: "center" }}
+                  aria-pressed={categories.includes(n)}
+                  onClick={() => toggleCategory(n)}
+                  title={`${custom ? `分類 ${n}「${custom}」` : `分類 ${n}`}（可多選；依符文目前裝備的魔靈分類）`}
+                >
+                  {custom || n}
+                </button>
+              );
+            })}
           </div>
 
           <div className="row wrap" style={{ gap: 8 }}>
@@ -371,6 +437,16 @@ export default function RunesPage() {
             >
               可賣候選
             </button>
+            <button
+              type="button"
+              className={`chip ${ignoreFlatAtkDef ? "gold" : "muted"}`}
+              style={{ cursor: "pointer" }}
+              aria-pressed={ignoreFlatAtkDef}
+              onClick={() => setIgnoreFlatAtkDef((v) => !v)}
+              title="計算效率時忽略固定攻擊 / 固定防禦（分子與分母都不計入），避免固定值把效率墊高。只影響此頁的效率顯示、效率排序與最低效率篩選。"
+            >
+              {ignoreFlatAtkDef ? "✓ " : ""}無視固攻防
+            </button>
             <div className="row tiny" style={{ gap: 8, flex: 1, maxWidth: 320 }}>
               <span>最低效率 {minEff}%</span>
               <input type="range" min={0} max={120} step={5} value={minEff} onChange={(e) => setMinEff(Number(e.target.value))} style={{ flex: 1 }} />
@@ -421,10 +497,27 @@ export default function RunesPage() {
               <div className="kv"><span className="k">位置</span><span className="v">#{detail.slot}</span></div>
               <div className="kv"><span className="k">星級 / 等級</span><span className="v">{detail.grade}★ +{detail.level}</span></div>
               <div className="kv"><span className="k">遊戲分數</span><span className="v gold">◆ {runeScore(detail)}</span></div>
-              <div className="kv"><span className="k">效率</span><span className="v gold">{detail.eff.toFixed(1)}%</span></div>
+              <div className="kv">
+                <span className="k">效率{ignoreFlatAtkDef ? "（不計固攻防）" : ""}</span>
+                <span className="v gold">
+                  {effOf(detail).toFixed(1)}%
+                  {ignoreFlatAtkDef && <span className="dim tiny">（原 {detail.eff.toFixed(1)}%）</span>}
+                </span>
+              </div>
               <div className="kv"><span className="k">主屬性</span><span className="v">{statText(detail.main.t, detail.main.v)}</span></div>
               {detail.prefix.t > 0 && <div className="kv"><span className="k">固有屬性</span><span className="v">{statText(detail.prefix.t, detail.prefix.v)}</span></div>}
               <div className="kv"><span className="k">精煉（磨石）</span><span className="v">{[...detail.subs].reduce((s, x) => s + x.g, 0)}</span></div>
+              <div className="kv">
+                <span className="k">魔靈分類</span>
+                <span className="v">
+                  {(() => {
+                    const cat = ownerCategory.get(detail.id);
+                    if (cat === undefined) return "—";
+                    const custom = account.categoryNames?.[cat]?.trim();
+                    return custom ? `分類 ${cat}「${custom}」` : `分類 ${cat}`;
+                  })()}
+                </span>
+              </div>
               <div className="kv"><span className="k">擁有者</span><span className="v">{owner.get(detail.id) ?? "未裝備"}</span></div>
               <div className="kv">
                 <span className="k">使用狀況</span>

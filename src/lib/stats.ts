@@ -55,12 +55,26 @@ export function baseStats(m: Monster, stars = 6, level = 40): BaseStats {
   };
 }
 
+/** 忽略固定攻擊（3）與固定防禦（5）：分子分母都不計，用來避開固定值虛高的效率 */
+const IGNORED_FLAT_TYPES = new Set([3, 5]);
+
+export interface EfficiencyOptions {
+  /** 忽略固定攻擊 / 固定防禦（分子與分母都不計入） */
+  ignoreFlatAtkDef?: boolean;
+}
+
 /** 符文效率（0~100+，以該星級每條副屬最大值為基準） */
-export function runeEfficiency(rune: Rune, includeGrind = false): { current: number; max: number } {
+export function runeEfficiency(
+  rune: Rune,
+  includeGrind = false,
+  opts: EfficiencyOptions = {},
+): { current: number; max: number } {
   const g = `g${Math.min(6, Math.max(1, rune.grade || 6))}`;
+  const ignoreFlat = !!opts.ignoreFlatAtkDef;
   let cur = 0;
   let max = 0;
   const add = (t: number, v: number) => {
+    if (ignoreFlat && IGNORED_FLAT_TYPES.has(t)) return;
     const name = MAX_STAT_NAME[t];
     if (!name || !SUB_STAT_MAX[name]) return;
     cur += v;

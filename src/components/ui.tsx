@@ -269,6 +269,8 @@ export function RuneCard({
   onToggleExclude,
   usage,
   children,
+  effOverride,
+  effNote,
 }: {
   rune: Rune;
   owner?: string;
@@ -287,12 +289,16 @@ export function RuneCard({
   usage?: EquipUsage;
   /** 卡片底部的附加內容（例如精煉建議） */
   children?: ReactNode;
+  /** 覆寫顯示的效率 %（例如「無視固攻防」版本） */
+  effOverride?: number;
+  /** 效率的補充說明（顯示在數值旁，例如「不計固攻防」） */
+  effNote?: string;
 }) {
   const set = SET_BY_ID[rune.set];
   const gradeClass = rune.grade >= 5 ? "legendary" : rune.grade === 4 ? "hero" : rune.grade === 3 ? "rare" : "";
   const stars = ["", "★", "★★", "★★★", "★★★★", "★★★★★", "★★★★★★"][rune.grade] ?? "";
   const showSubs = !compact || detail;
-  const eff = Math.round(rune.eff);
+  const eff = Math.round(effOverride ?? rune.eff);
   const score = runeScore(rune);
   const rank = useRuneRank(rune.id);
   const rankIndex = useRankIndex();
@@ -393,7 +399,10 @@ export function RuneCard({
           <div className="rune-meta-row"><span>符文 ID</span><b className="mono">{rune.id}</b></div>
           <div className="rune-meta-row"><span>原裝備</span><b title={owner || "未裝備"}>{owner || "未裝備"}</b></div>
           <div className="rune-meta-row"><span>遊戲分數</span><b className="gold">◆ {score}</b></div>
-          <div className="rune-meta-row"><span>效率</span><b className="gold">{eff}%</b></div>
+          <div className="rune-meta-row">
+            <span>效率{effNote ? <span className="dim tiny"> {effNote}</span> : null}</span>
+            <b className="gold">{eff}%</b>
+          </div>
           <div className="bar" style={{ height: 4 }}><i style={{ width: `${Math.min(100, Math.max(0, eff))}%` }} /></div>
         </div>
       )}
