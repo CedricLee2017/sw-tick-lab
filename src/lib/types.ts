@@ -63,6 +63,31 @@ export interface Rune {
   effMax: number;
 }
 
+/** 自行分類（標籤）的單一屬性條件 */
+export interface RuneTagStat {
+  /** 屬性 type id（見 STAT_TYPES：1–6 三圍、8 速度、9 暴率、10 暴傷、11 抵抗、12 命中） */
+  t: number;
+  /** 最低數值：副屬性＋固有屬性，已含精煉（不計主屬性） */
+  min: number;
+}
+
+/**
+ * 符文自行分類（標籤）規則：符合條件的符文會掛上這個名稱。
+ * 套裝與屬性條件同時成立才算符合；屬性條件可用「至少符合幾條」放寬。
+ */
+export interface RuneTagRule {
+  id: string;
+  name: string;
+  /** 限定套裝 id；空陣列 = 不限套裝 */
+  sets: number[];
+  /** 屬性門檻；空陣列 = 只看套裝 */
+  stats: RuneTagStat[];
+  /** 屬性條件至少要符合幾條（1 ~ stats.length） */
+  minMatch: number;
+  /** 關閉後不再標記，也不出現在篩選 */
+  enabled: boolean;
+}
+
 /** 持有的精煉石（磨石）素材 */
 export interface Grindstone {
   /** 套裝 id；99 = 無形（可用在任何一般符文，不限套裝） */

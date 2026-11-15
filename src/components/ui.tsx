@@ -271,6 +271,7 @@ export function RuneCard({
   children,
   effOverride,
   effNote,
+  tags,
 }: {
   rune: Rune;
   owner?: string;
@@ -293,6 +294,8 @@ export function RuneCard({
   effOverride?: number;
   /** 效率的補充說明（顯示在數值旁，例如「不計固攻防」） */
   effNote?: string;
+  /** 自行分類（標籤）名稱，顯示在卡片上方 */
+  tags?: string[];
 }) {
   const set = SET_BY_ID[rune.set];
   const gradeClass = rune.grade >= 5 ? "legendary" : rune.grade === 4 ? "hero" : rune.grade === 3 ? "rare" : "";
@@ -326,6 +329,9 @@ export function RuneCard({
             <span className="rune-tag muted" title={poolTitle}>共 {rank.pool} 顆</span>
           )}
           {rune.locked && <span className="rune-tag muted" title="遊戲內已鎖定">鎖</span>}
+          {tags?.map((t) => (
+            <span key={t} className="rune-tag tag" title="自行分類">{t}</span>
+          ))}
           {locked && <span className="rune-tag gold" title="本機鎖定：不可被其他魔靈配符使用">本機鎖</span>}
           {excluded && <span className="rune-tag red" title="已排除：不會進入配符">排除</span>}
         </div>

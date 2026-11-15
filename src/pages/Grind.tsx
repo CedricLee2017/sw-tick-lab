@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Hammer, Search } from "lucide-react";
 import { MONSTER_MAP, useStore } from "../store";
 import { SET_BY_ID } from "../lib/constants";
+import { matchesRuneTag } from "../lib/runeTags";
+import type { RuneTagRule } from "../lib/types";
 import { EmptyState, NumberInput, RuneCard } from "../components/ui";
 import {
   GRIND_ACCEPT_LEVELS,
@@ -53,6 +55,7 @@ function TargetCard({
   stock,
   locked,
   excluded,
+  tags,
   onToggleLock,
   onToggleExclude,
 }: {
@@ -65,6 +68,8 @@ function TargetCard({
   stock?: Grindstone[];
   locked: boolean;
   excluded: boolean;
+  /** 這顆符文符合的自行分類名稱 */
+  tags?: string[];
   onToggleLock: () => void;
   onToggleExclude: () => void;
 }) {
@@ -86,6 +91,7 @@ function TargetCard({
       owner={t.owner ?? undefined}
       locked={locked}
       excluded={excluded}
+      tags={tags}
       onToggleLock={onToggleLock}
       onToggleExclude={onToggleExclude}
     >
@@ -211,6 +217,7 @@ export default function GrindPage() {
   const account = useStore((s) => s.account);
   const lockedRunes = useStore((s) => s.settings.lockedRunes);
   const excludedRunes = useStore((s) => s.settings.excludedRunes);
+  const runeTags = useStore((s) => s.settings.runeTags);
   const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
   const lockedSet = useMemo(() => new Set(lockedRunes), [lockedRunes]);
   const excludedSet = useMemo(() => new Set(excludedRunes), [excludedRunes]);
@@ -223,6 +230,7 @@ export default function GrindPage() {
   const [onlyHigh, setOnlyHigh] = useState(false);
   const [setId, setSetId] = useState(0);
   const [stat, setStat] = useState(0);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [sort, setSort] = useState<GrindSort>("default");
   const [q, setQ] = useState("");
   const [take, setTake] = useState(40);
@@ -235,7 +243,7 @@ export default function GrindPage() {
 
   useEffect(() => {
     setTake(40);
-  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, stat, sort, q]);
+  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, stat, sort, q, tagFilter]);
 
   const owners = useMemo(() => {
     const map = new Map<number, GrindOwner>();
@@ -266,6 +274,29 @@ export default function GrindPage() {
       .sort((a, b) => a.name.localeCompare(b.name, "zh-TW"));
   }, [account]);
 
+  /** 啟用中的自行分類（精煉建議頁只用啟用中的規則篩選） */
+  const activeTags = useMemo(() => runeTags.filter((r) => r.enabled), [runeTags]);
+
+  /** 每顆精煉候選符合的自行分類 */
+  const tagHits = useMemo(() => {
+    const map = new Map<number, RuneTagRule[]>();
+    if (activeTags.length === 0) return map;
+    for (const t of candidates) {
+      const hit = activeTags.filter((rule) => matchesRuneTag(rule, t.rune));
+      if (hit.length > 0) map.set(t.rune.id, hit);
+    }
+    return map;
+  }, [candidates, activeTags]);
+
+  /** 每個自行分類在目前候選中有幾顆 */
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const list of tagHits.values()) {
+      for (const rule of list) counts.set(rule.id, (counts.get(rule.id) ?? 0) + 1);
+    }
+    return counts;
+  }, [tagHits]);
+
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     const list = candidates.filter((t) => {
@@ -273,6 +304,10 @@ export default function GrindPage() {
       if (onlySix && t.rune.grade !== 6) return false;
       if (onlyHigh && t.tier !== "high") return false;
       if (setId && t.rune.set !== setId) return false;
+      if (tagFilter.length > 0) {
+        const hit = tagHits.get(t.rune.id);
+        if (!hit || !hit.some((rule) => tagFilter.includes(rule.id))) return false;
+      }
       if (!term) return true;
       return (
         (t.owner ?? "").toLowerCase().includes(term) ||
@@ -281,7 +316,7 @@ export default function GrindPage() {
       );
     });
     return sortGrindTargets(list, sort);
-  }, [candidates, onlyEquipped, onlySix, onlyHigh, setId, sort, q]);
+  }, [candidates, onlyEquipped, onlySix, onlyHigh, setId, sort, q, tagFilter, tagHits]);
 
   const summary = useMemo(() => {
     const high = candidates.filter((t) => t.tier === "high").length;
@@ -476,6 +511,37 @@ export default function GrindPage() {
           </div>
         </div>
 
+        {activeTags.length > 0 && (
+          <div className="row wrap" style={{ gap: 6, marginTop: 10, alignItems: "center" }}>
+            <span className="tiny dim" title="在「符文 → 自行分類」設定的分類，符合條件的符文會自動掛上">
+              自行分類
+            </span>
+            {activeTags.map((rule) => {
+              const on = tagFilter.includes(rule.id);
+              return (
+                <button
+                  key={rule.id}
+                  type="button"
+                  className={`chip ${on ? "gold" : "muted"}`}
+                  style={{ cursor: "pointer" }}
+                  aria-pressed={on}
+                  onClick={() =>
+                    setTagFilter((prev) => (prev.includes(rule.id) ? prev.filter((x) => x !== rule.id) : [...prev, rule.id]))
+                  }
+                  title={`${rule.name}：目前候選中有 ${tagCounts.get(rule.id) ?? 0} 顆`}
+                >
+                  {rule.name} · {tagCounts.get(rule.id) ?? 0}
+                </button>
+              );
+            })}
+            {tagFilter.length > 0 && (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setTagFilter([])}>
+                清除分類
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="row wrap" style={{ gap: 14, marginTop: 10 }}>
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
             <input type="checkbox" checked={onlyEquipped} onChange={(e) => setOnlyEquipped(e.target.checked)} /> 只看已裝備
@@ -487,7 +553,7 @@ export default function GrindPage() {
             <input type="checkbox" checked={onlyHigh} onChange={(e) => setOnlyHigh(e.target.checked)} /> 只看高優先
           </label>
           <span className="tiny dim">顯示 {filtered.length} / {candidates.length} 顆</span>
-          {(onlyEquipped || onlySix || onlyHigh || setId || stat !== 0 || q || useStock) && (
+          {(onlyEquipped || onlySix || onlyHigh || setId || stat !== 0 || q || useStock || tagFilter.length > 0) && (
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -499,6 +565,7 @@ export default function GrindPage() {
                 setStat(0);
                 setQ("");
                 setUseStock(false);
+                setTagFilter([]);
               }}
             >
               清除篩選
@@ -578,6 +645,7 @@ export default function GrindPage() {
                 stock={stockOn ? stock : undefined}
                 locked={lockedSet.has(t.rune.id)}
                 excluded={excludedSet.has(t.rune.id)}
+                tags={tagHits.get(t.rune.id)?.map((rule) => rule.name)}
                 onToggleLock={() => toggleRuneFlag("locked", t.rune.id)}
                 onToggleExclude={() => toggleRuneFlag("excluded", t.rune.id)}
               />

@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Gem, Search, X } from "lucide-react";
+import { Gem, Plus, Search, Trash2, X } from "lucide-react";
 import { unitLabel, useStore } from "../store";
 import { RUNE_SETS, SET_BY_ID, STAT_TYPES } from "../lib/constants";
 import { runeEfficiency, runeScore } from "../lib/stats";
+import { describeRuneTag, matchesRuneTag, newRuneTag } from "../lib/runeTags";
 import { grindMax, grindStatSuffix } from "../lib/grind";
 import { averageRankPercent, summarizeRanks } from "../lib/rankings";
 import { buildUsageIndex, usageText } from "../lib/usage";
 import { useRankIndex } from "../components/RankProvider";
 import { Modal, NumberInput, RuneCard, fmt, setColor, statText } from "../components/ui";
-import type { Rune } from "../lib/types";
+import RuneTagEditor from "../components/RuneTagEditor";
+import type { Rune, RuneTagRule } from "../lib/types";
 
 /** 主屬性 / 副屬性的篩選順序：速度、百分比、爆擊、命中抵抗、固定值 */
 const STAT_OPTIONS = [8, 2, 4, 6, 9, 10, 11, 12, 1, 3, 5];
@@ -27,6 +29,8 @@ export default function RunesPage() {
   const excludedRunes = useStore((s) => s.settings.excludedRunes);
   const rankHeroGrind = useStore((s) => s.settings.rankHeroGrind);
   const setRankHeroGrind = useStore((s) => s.setRankHeroGrind);
+  const runeTags = useStore((s) => s.settings.runeTags);
+  const setRuneTags = useStore((s) => s.setRuneTags);
   const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
   const lockedSet = useMemo(() => new Set(lockedRunes), [lockedRunes]);
   const excludedSet = useMemo(() => new Set(excludedRunes), [excludedRunes]);
@@ -48,6 +52,8 @@ export default function RunesPage() {
   const [usage, setUsage] = useState<UsageFilter>("all");
   const [rankMin, setRankMin] = useState(0);
   const [minEff, setMinEff] = useState(0);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [editingTag, setEditingTag] = useState<RuneTagRule | null>(null);
   const [sort, setSort] = useState<"eff" | "score" | "grade" | "spd" | "slot" | "rank" | "rank-desc">("eff");
   const [take, setTake] = useState(150);
   const [detail, setDetail] = useState<Rune | null>(null);
@@ -57,7 +63,7 @@ export default function RunesPage() {
   // 換篩選條件時回到第一頁，避免停在舊的「載入更多」數量
   useEffect(() => {
     setTake(150);
-  }, [q, setId, slots, categories, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort]);
+  }, [q, setId, slots, categories, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort, tagFilter]);
 
   // 頁頭統計：有多少符文在預設隊 / RTA 使用中
   const usageCounts = useMemo(() => {
@@ -101,6 +107,58 @@ export default function RunesPage() {
     [ignoreFlatAtkDef, flatIgnoredEff],
   );
 
+  /** 每顆符文符合的自行分類（只算啟用中的規則） */
+  const tagsOfRune = useMemo(() => {
+    const map = new Map<number, RuneTagRule[]>();
+    if (!account) return map;
+    const active = runeTags.filter((rule) => rule.enabled);
+    if (active.length === 0) return map;
+    for (const r of account.runes) {
+      const hit = active.filter((rule) => matchesRuneTag(rule, r));
+      if (hit.length > 0) map.set(r.id, hit);
+    }
+    return map;
+  }, [account, runeTags]);
+
+  /** 每個分類目前有幾顆符文 */
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const list of tagsOfRune.values()) {
+      for (const rule of list) counts.set(rule.id, (counts.get(rule.id) ?? 0) + 1);
+    }
+    return counts;
+  }, [tagsOfRune]);
+
+  const tagNamesOf = useCallback(
+    (id: number) => tagsOfRune.get(id)?.map((rule) => rule.name),
+    [tagsOfRune],
+  );
+
+  const saveTagRule = (rule: RuneTagRule) => {
+    setRuneTags(
+      runeTags.some((x) => x.id === rule.id)
+        ? runeTags.map((x) => (x.id === rule.id ? rule : x))
+        : [...runeTags, rule],
+    );
+    setEditingTag(null);
+  };
+
+  const removeTagRule = (rule: RuneTagRule) => {
+    if (!confirm(`要刪除自行分類「${rule.name}」嗎？`)) return;
+    setRuneTags(runeTags.filter((x) => x.id !== rule.id));
+    setTagFilter((prev) => prev.filter((id) => id !== rule.id));
+  };
+
+  const toggleTagEnabled = (rule: RuneTagRule) => {
+    setRuneTags(runeTags.map((x) => (x.id === rule.id ? { ...x, enabled: !x.enabled } : x)));
+    // 停用後就不可能再有符文符合，順便把它從篩選移除
+    if (rule.enabled) setTagFilter((prev) => prev.filter((id) => id !== rule.id));
+  };
+
+  const toggleTagFilter = (id: string) => {
+    setTagFilter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
   const runes = useMemo(() => {
     if (!account) return [];
     let arr = account.runes.filter((r) => {
@@ -109,6 +167,10 @@ export default function RunesPage() {
       if (categories.length > 0) {
         const cat = ownerCategory.get(r.id);
         if (cat === undefined || !categories.includes(cat)) return false;
+      }
+      if (tagFilter.length > 0) {
+        const hit = tagsOfRune.get(r.id);
+        if (!hit || !hit.some((rule) => tagFilter.includes(rule.id))) return false;
       }
       if (grade && r.grade !== grade) return false;
       if (mainStat && r.main.t !== mainStat) return false;
@@ -183,10 +245,10 @@ export default function RunesPage() {
       return sb - sa || b.eff - a.eff;
     });
     return arr;
-  }, [account, q, setId, slots, categories, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort, owner, ownerCategory, effOf, lockedSet, excludedSet, ranks, usageIndex]);
+  }, [account, q, setId, slots, categories, grade, mainStat, subStat, subMin, prefixStat, ancient, grindState, onlyFree, lockFilter, onlyExcluded, usage, rankMin, minEff, sort, tagFilter, tagsOfRune, owner, ownerCategory, effOf, lockedSet, excludedSet, ranks, usageIndex]);
 
   const dirty =
-    !!q || setId !== 0 || slots.length > 0 || categories.length > 0 || grade !== 0 || mainStat !== 0 ||
+    !!q || setId !== 0 || slots.length > 0 || categories.length > 0 || tagFilter.length > 0 || grade !== 0 || mainStat !== 0 ||
     subStat !== 0 || subMin !== 0 || prefixStat !== 0 || ancient !== "all" ||
     grindState !== "all" || onlyFree || lockFilter !== "all" || onlyExcluded ||
     usage !== "all" || rankMin > 0 || minEff > 0;
@@ -196,6 +258,7 @@ export default function RunesPage() {
     setSetId(0);
     setSlots([]);
     setCategories([]);
+    setTagFilter([]);
     setGrade(0);
     setMainStat(0);
     setSubStat(0);
@@ -235,6 +298,75 @@ export default function RunesPage() {
 
   return (
     <>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">
+              自行分類 <span className="dim tiny" style={{ fontWeight: 400 }}>符合條件的符文會自動掛上標籤</span>
+            </div>
+            <div className="card-sub">名稱與條件都可以自己改；精煉建議頁也能用這些分類篩選。</div>
+          </div>
+          <div className="row wrap" style={{ gap: 8 }}>
+            {tagFilter.length > 0 && (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setTagFilter([])}>
+                <X size={13} /> 取消標籤篩選
+              </button>
+            )}
+            <button type="button" className="btn btn-sm" onClick={() => setEditingTag(newRuneTag())}>
+              <Plus size={13} /> 新增分類
+            </button>
+          </div>
+        </div>
+        <div className="card-pad col" style={{ gap: 8 }}>
+          {runeTags.length === 0 && (
+            <div className="empty" style={{ padding: "18px 0" }}>
+              還沒有自行分類，按右上角「新增分類」建立第一個。
+            </div>
+          )}
+          {runeTags.map((rule) => {
+            const count = tagCounts.get(rule.id) ?? 0;
+            const on = tagFilter.includes(rule.id);
+            return (
+              <div className="tag-rule-row" key={rule.id}>
+                <button
+                  type="button"
+                  className={`chip ${on ? "gold" : "muted"}`}
+                  style={{ cursor: "pointer", opacity: rule.enabled ? 1 : 0.55 }}
+                  aria-pressed={on}
+                  onClick={() => toggleTagFilter(rule.id)}
+                  title={on ? "取消用這個分類篩選" : "用這個分類篩選下面的符文"}
+                >
+                  {rule.name} · {count}
+                </button>
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <div className="tag-rule-desc">{describeRuneTag(rule)}</div>
+                </div>
+                <button
+                  type="button"
+                  className={`chip ${rule.enabled ? "muted" : "gold"}`}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => toggleTagEnabled(rule)}
+                  title={rule.enabled ? "停用：不再標記、也不出現在篩選" : "啟用這個分類"}
+                >
+                  {rule.enabled ? "啟用中" : "已停用"}
+                </button>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditingTag(rule)}>
+                  編輯
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost btn-icon"
+                  title="刪除這個分類"
+                  onClick={() => removeTagRule(rule)}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="card">
         <div className="card-head">
           <div className="card-title">
@@ -465,6 +597,7 @@ export default function RunesPage() {
               excluded={excludedSet.has(r.id)}
               onToggleLock={() => toggleRuneFlag("locked", r.id)}
               onToggleExclude={() => toggleRuneFlag("excluded", r.id)}
+              tags={tagNamesOf(r.id)}
               onClick={() => setDetail(r)}
             />
           ))}
@@ -488,6 +621,7 @@ export default function RunesPage() {
                 usage={usageIndex.runes.get(detail.id)}
                 locked={lockedSet.has(detail.id)}
                 excluded={excludedSet.has(detail.id)}
+                tags={tagNamesOf(detail.id)}
                 onToggleLock={() => toggleRuneFlag("locked", detail.id)}
                 onToggleExclude={() => toggleRuneFlag("excluded", detail.id)}
               />
@@ -520,6 +654,10 @@ export default function RunesPage() {
               </div>
               <div className="kv"><span className="k">擁有者</span><span className="v">{owner.get(detail.id) ?? "未裝備"}</span></div>
               <div className="kv">
+                <span className="k">自行分類</span>
+                <span className="v" title="由符文頁的自行分類規則自動判定">{tagNamesOf(detail.id)?.join("、") ?? "—"}</span>
+              </div>
+              <div className="kv">
                 <span className="k">使用狀況</span>
                 <span className="v" title="以存檔匯出當下的預設隊 / 防守隊與 RTA 配裝判斷">{usageText(usageIndex.runes.get(detail.id))}</span>
               </div>
@@ -536,6 +674,14 @@ export default function RunesPage() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {editingTag && (
+        <RuneTagEditor
+          rule={editingTag}
+          onSave={saveTagRule}
+          onClose={() => setEditingTag(null)}
+        />
       )}
     </>
   );

@@ -6,7 +6,8 @@ import { PARSE_VERSION, parseAccountJSON } from "./lib/parse";
 import { defaultBonus } from "./lib/stats";
 import { useAuth } from "./lib/auth";
 import { mergeLibrary, pullLibrary, pushLibrary } from "./lib/librarySync";
-import type { Account, BonusConfig, FocusEntry, Monster, Rune, Stats, Unit } from "./lib/types";
+import { DEFAULT_RUNE_TAGS } from "./lib/runeTags";
+import type { Account, BonusConfig, FocusEntry, Monster, Rune, RuneTagRule, Stats, Unit } from "./lib/types";
 
 export const MONSTERS = monstersJson as unknown as Monster[];
 export const MONSTER_MAP = new Map<number, Monster>(MONSTERS.map((m) => [m.id, m]));
@@ -167,6 +168,8 @@ export interface Settings {
   excludedArtifacts: number[];
   /** 符文副屬排名假設每條可精煉副屬都達到英雄磨石上限 */
   rankHeroGrind: boolean;
+  /** 自行分類（標籤）規則：符合條件的符文會掛上名稱，可用來篩選 */
+  runeTags: RuneTagRule[];
 }
 
 export type RuneFlag = "locked" | "excluded" | "included";
@@ -187,6 +190,7 @@ const DEFAULT_SETTINGS = (): Settings => ({
   includedRunes: [],
   excludedArtifacts: [],
   rankHeroGrind: false,
+  runeTags: DEFAULT_RUNE_TAGS,
 });
 
 const ACCOUNT_KEY = "swtick:account";
@@ -299,6 +303,8 @@ interface Store {
   setFocus: (focus: FocusEntry[]) => void;
   /** 符文副屬排名是否假設英雄精煉滿 */
   setRankHeroGrind: (v: boolean) => void;
+  /** 覆寫自行分類（標籤）規則清單 */
+  setRuneTags: (tags: RuneTagRule[]) => void;
   /** 切換單顆符文的鎖定 / 排除 / 固定 */
   toggleRuneFlag: (kind: RuneFlag, id: number) => void;
   /** 一次設定多顆符文的鎖定 / 排除 / 固定 */
@@ -403,6 +409,7 @@ export const useStore = create<Store>((setState, getState) => ({
             includedRunes: settings.includedRunes ?? [],
             excludedArtifacts: settings.excludedArtifacts ?? [],
             rankHeroGrind: settings.rankHeroGrind ?? false,
+            runeTags: settings.runeTags ?? DEFAULT_RUNE_TAGS,
           }
         : DEFAULT_SETTINGS();
       // 候選符文上限已改為 15 顆，舊設定若存了 18 要在載入時收斂
@@ -646,6 +653,12 @@ export const useStore = create<Store>((setState, getState) => ({
 
   setRankHeroGrind: (v) => {
     const settings = { ...getState().settings, rankHeroGrind: v };
+    setState({ settings });
+    void set(SETTINGS_KEY, settings);
+  },
+
+  setRuneTags: (tags) => {
+    const settings = { ...getState().settings, runeTags: tags };
     setState({ settings });
     void set(SETTINGS_KEY, settings);
   },
