@@ -16,6 +16,9 @@ import {
 
 type SortKey = "runeScore" | "priority" | "focus";
 
+/** 符文盤排列：6 1 2 / 5 4 3 */
+const RUNE_BOARD_ORDER = [6, 1, 2, 5, 4, 3] as const;
+
 /** 把 2/4/6 實際主屬性變成「2/4 體力% · 6 防禦力%」 */
 function mainPlanText(plan: WbMonsterPlan): string {
   const groups = new Map<WbMainStat, number[]>();
@@ -45,6 +48,7 @@ function PlanCard({
 }) {
   const [open, setOpen] = useState(false);
   const pairReady = plan.runes.length === 6 && plan.sets.every((s) => s.count % 2 === 0);
+  const runesBySlot = new Map(plan.runes.map((rune) => [rune.slot, rune]));
 
   return (
     <>
@@ -102,8 +106,21 @@ function PlanCard({
           <span>速度不計；爆率／爆傷主要用於 4 號位及少量分數</span>
         </div>
 
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8 }}>
-          {plan.runes.map((rune) => {
+        <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+          {RUNE_BOARD_ORDER.map((slot) => {
+            const rune = runesBySlot.get(slot);
+            if (!rune) {
+              return (
+                <div
+                  key={`empty-${slot}`}
+                  className="rune"
+                  style={{ minHeight: 120, alignItems: "center", justifyContent: "center", opacity: 0.55 }}
+                >
+                  <span className="rune-slot">位置 {slot}</span>
+                  <span className="tiny dim">沒有可用符文</span>
+                </div>
+              );
+            }
             const owner = runeOwner.get(rune.id);
             return <RuneCard key={rune.id} rune={rune} owner={owner ? `現在：${owner}` : "現在：未裝備"} />;
           })}
