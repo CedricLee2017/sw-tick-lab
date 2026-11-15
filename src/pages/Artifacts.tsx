@@ -125,6 +125,14 @@ export default function ArtifactsPage() {
             神器倉庫 <span className="dim tiny" style={{ fontWeight: 400 }}>
               共 {fmt(account.artifacts.length)} 件（已裝備 {fmt(equipped)} · 預設隊 {fmt(usageCounts.deck)} · RTA {fmt(usageCounts.rta)}）
             </span>
+            <a
+              className="chip gold"
+              href="#/artifact-reduction"
+              style={{ marginLeft: 8, textDecoration: "none" }}
+              title="依屬性減傷的元素組合分組比較，找出數值偏低可以賣掉的神器"
+            >
+              減傷統計 →
+            </a>
           </div>
           <div className="row filter-row" style={{ gap: 8 }}>
             <div style={{ position: "relative" }}>

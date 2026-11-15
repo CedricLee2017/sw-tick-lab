@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target, Crown,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, Shield, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target, Crown,
 } from "lucide-react";
 import { accountGameLabel, ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
@@ -30,6 +30,7 @@ import AdminPage from "./pages/Admin";
 import RunesPage from "./pages/Runes";
 import GrindPage from "./pages/Grind";
 import ArtifactsPage from "./pages/Artifacts";
+import ArtifactReductionPage from "./pages/ArtifactReduction";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 import { RankProvider } from "./components/RankProvider";
@@ -37,7 +38,7 @@ import { buildRankIndex } from "./lib/rankings";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "worldboss-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "worldboss-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "artifact-reduction" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -62,6 +63,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
   { key: "grind", label: "精煉建議", icon: <Hammer size={17} />, title: "精煉建議", sub: "依符文素質、套裝與裝備對象排出精煉順序" },
   { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },
+  { key: "artifact-reduction", label: "減傷統計", icon: <Shield size={17} />, title: "神器減傷統計", sub: "屬性減傷分組比較，找出可以賣掉的神器" },
   { key: "admin", label: "後台", icon: <ShieldCheck size={17} />, title: "管理後台", sub: "會員、上傳紀錄與容量" },
   { key: "settings", label: "設定", icon: <SettingsIcon size={17} />, title: "設定", sub: "建築、隊長技與進階選項" },
 ];
@@ -101,6 +103,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   runes: RunesPage,
   grind: GrindPage,
   artifacts: ArtifactsPage,
+  "artifact-reduction": ArtifactReductionPage,
   admin: AdminPage,
   settings: SettingsPage,
 };
