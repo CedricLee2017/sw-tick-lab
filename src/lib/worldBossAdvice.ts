@@ -2,7 +2,8 @@
  * 世界王配裝建議
  *
  * 1. 選角：水屬性魔靈，優先順序為「原五 > 二覺 > 原四 > 其他」，
- *    同一層級再以技能升級次數（各技能等級 - 1 的總和）由多至少排序。
+ *    同一層級再以技能升滿所需次數（各技能 max - 1 的總和，例如水猴 12）
+ *    由多至少排序；沒有技能資料時改用存檔中目前已升級次數。
  * 2. 配符：
  *    - 2/6 位主屬性依魔靈類型決定：攻擊型攻擊%、體力型體力%、防禦型防禦%；
  *      支援型依基本體力／防禦力混搭。
@@ -10,8 +11,10 @@
  *    - 選符以配合類型的面板數值為主，遊戲符文分數（◆）作為次要加分。
  *    - 盡量三組 2 件套（2+2+2）；速度不計分，爆率／爆傷只作 4 號位與次要加分。
  * 3. 神器：每隻配一件屬性神器 + 一件類型神器，主效果與追加傷害優先配合該魔靈的主屬性。
- * 4. 分配：以「符文分數總和」做平衡分配，每次把下一組符文配給目前總分最低的魔靈，
- *    令 60 隻的符文總分盡量接近，不會集中在少數幾隻。
+ * 4. 分配：
+ *    - 平均（預設）：以「符文分數總和」做平衡分配，每次把下一組符文配給目前總分最低的魔靈，
+ *      令 60 隻的符文總分盡量接近。
+ *    - 集中：依角色優先順序，先把最好的符文補滿前面的魔靈，再換下一隻。
  *
  * 這裡只產生「建議」，不會改動存檔；同一顆符文 / 神器最多只會被建議給一隻魔靈。
  */
@@ -23,6 +26,13 @@ import type { Account, Artifact, BonusConfig, Monster, Rune, Stats, Unit } from 
 export type WbFocus = "hp" | "atk" | "def";
 /** 2/4/6 位可能出現的主屬性（4 號位可以是爆率 / 爆傷） */
 export type WbMainStat = WbFocus | "cr" | "cd";
+
+/** 符文分配方式：平均（原本的總分平衡）或集中（依角色優先順序給最好的符文） */
+export type WbAllocation = "balanced" | "concentrated";
+export const WB_ALLOCATION_LABEL: Record<WbAllocation, string> = {
+  balanced: "平均",
+  concentrated: "集中",
+};
 
 /** 魔靈類型中文 */
 export const WB_ARCH_LABEL: Record<string, string> = {
@@ -53,6 +63,8 @@ export interface WbMonsterPlan {
   tier: number;
   /** 技能升級總次數；undefined = 舊存檔沒有技能資料 */
   skillUps?: number;
+  /** 技能升滿所需次數（各技能 max - 1 的總和，例如水猴 12）；undefined = 沒有技能資料 */
+  skillReq?: number;
   /** 建議的 6 顆符文（依位置排序） */
   runes: Rune[];
   /** 6 顆符文的遊戲分數（◆）總和 */
@@ -82,6 +94,10 @@ export interface WbPlanOptions {
   bonus: BonusConfig;
   /** 只用目前未裝備的符文（避免拆掉現有配裝） */
   freeOnly?: boolean;
+  /** 符文分配方式；預設 balanced（總分平均） */
+  allocation?: WbAllocation;
+  /** 由 unit_master_id 取得技能升滿所需次數（各技能 max - 1 的總和） */
+  skillReqOf?: (master: number) => number | undefined;
   /** 由 unit_master_id 取得魔靈資料 */
   monsterOf: (master: number) => Monster | undefined;
 }
@@ -345,6 +361,7 @@ interface DraftMonster {
   monster: Monster;
   tier: number;
   skillUps?: number;
+  skillReq?: number;
   base: ReturnType<typeof baseStats>;
   profile: WbProfile;
   priority: number;
@@ -378,16 +395,36 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
   const pickedUnits = account.units
     .map((unit) => {
       const monster = opts.monsterOf(unit.master);
-      return monster ? { unit, monster, tier: tierOf(monster), skillUps: unit.skillUps } : null;
+      return monster
+        ? {
+            unit,
+            monster,
+            tier: tierOf(monster),
+            skillUps: unit.skillUps,
+            skillReq: opts.skillReqOf?.(unit.master),
+          }
+        : null;
     })
-    .filter((x): x is { unit: Unit; monster: Monster; tier: number; skillUps: number | undefined } => !!x)
+    .filter(
+      (
+        x,
+      ): x is {
+        unit: Unit;
+        monster: Monster;
+        tier: number;
+        skillUps: number | undefined;
+        skillReq: number | undefined;
+      } => !!x,
+    )
     .filter((x) => !opts.waterOnly || x.monster.el === 1)
     .sort((a, b) => {
-      const aSkill = a.skillUps ?? 0;
-      const bSkill = b.skillUps ?? 0;
+      // 同層級先比技能升滿所需次數（例如水猴 12），再比目前已升級次數
+      const aSkill = a.skillReq ?? a.skillUps ?? 0;
+      const bSkill = b.skillReq ?? b.skillUps ?? 0;
       return (
         a.tier - b.tier ||
         bSkill - aSkill ||
+        (b.skillUps ?? 0) - (a.skillUps ?? 0) ||
         b.monster.nat - a.monster.nat ||
         b.unit.stars - a.unit.stars ||
         b.unit.level - a.unit.level
@@ -403,7 +440,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
   }
 
   // 每隻魔靈先計一次「每顆符文對它值多少分」，之後分配時直接查表
-  const drafts: DraftMonster[] = pickedUnits.map(({ unit, monster, tier, skillUps }, priority) => {
+  const drafts: DraftMonster[] = pickedUnits.map(({ unit, monster, tier, skillUps, skillReq }, priority) => {
     const base = baseStats(monster, unit.stars, unit.level);
     const profile = profileFor(monster, base);
     const points = new Map<number, number>();
@@ -430,6 +467,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       monster,
       tier,
       skillUps,
+      skillReq,
       base,
       profile,
       priority,
@@ -535,17 +573,23 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     return best;
   };
 
-  // ── 平衡分配：每次由總分最低的魔靈拿下一組 ──
+  // ── 分配：平均 = 每次由總分最低的魔靈拿下一組；集中 = 依優先順序把前面魔靈先補滿 ──
+  const allocation = opts.allocation ?? "balanced";
   while (true) {
     let draft: DraftMonster | null = null;
-    for (const d of drafts) {
-      if (d.remainingSlots.size === 0) continue;
-      if (
-        !draft ||
-        d.totalScore < draft.totalScore ||
-        (d.totalScore === draft.totalScore && d.priority < draft.priority)
-      ) {
-        draft = d;
+    if (allocation === "concentrated") {
+      // drafts 已依角色優先級排序，直接補滿目前優先度最高的魔靈
+      draft = drafts.find((d) => d.remainingSlots.size > 0) ?? null;
+    } else {
+      for (const d of drafts) {
+        if (d.remainingSlots.size === 0) continue;
+        if (
+          !draft ||
+          d.totalScore < draft.totalScore ||
+          (d.totalScore === draft.totalScore && d.priority < draft.priority)
+        ) {
+          draft = d;
+        }
       }
     }
     if (!draft) break;
@@ -658,6 +702,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       mainPlan: actualMainPlan(runes, profile),
       tier: draft.tier,
       skillUps: draft.skillUps,
+      skillReq: draft.skillReq,
       runes,
       runeScoreTotal: draft.totalScore,
       artifacts,

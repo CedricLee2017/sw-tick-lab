@@ -1,15 +1,18 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Crown, Info, ListOrdered, Search } from "lucide-react";
 import { MONSTER_MAP, monsterLabel, unitLabel, useStore } from "../store";
 import { ArtifactCard, MonsterIcon, NumberInput, RuneCard, StatGrid, fmt } from "../components/ui";
 import { MonsterDetailModal } from "../components/MonsterDetail";
 import { SET_BY_ID } from "../lib/constants";
+import { allSkillsForMonster, loadSkillData, type SkillData } from "../lib/damage";
 import {
   FOCUS_LABEL,
+  WB_ALLOCATION_LABEL,
   WB_ARCH_LABEL,
   WB_MAIN_LABEL,
   WB_TIER_LABEL,
   buildWorldBossPlan,
+  type WbAllocation,
   type WbMainStat,
   type WbMonsterPlan,
 } from "../lib/worldBossAdvice";
@@ -63,7 +66,11 @@ function PlanCard({
               </div>
               <div className="tiny dim">
                 {WB_TIER_LABEL[plan.tier] ?? "其他"} · {WB_ARCH_LABEL[plan.monster.arch ?? ""] ?? plan.monster.arch ?? "?"} ·{" "}
-                {plan.skillUps === undefined ? "技能資料未提供" : `技能 +${plan.skillUps}`}
+                {plan.skillReq !== undefined
+                  ? `技能需求 +${plan.skillReq}${plan.skillUps !== undefined ? ` · 目前 +${plan.skillUps}` : ""}`
+                  : plan.skillUps === undefined
+                    ? "技能資料未提供"
+                    : `技能 +${plan.skillUps}`}
               </div>
             </div>
           </div>
@@ -170,10 +177,31 @@ export default function WorldBossAdvicePage() {
   const excludedRunes = useStore((s) => s.settings.excludedRunes);
   const [count, setCount] = useState(60);
   const [minRuneTotal, setMinRuneTotal] = useState(0);
+  const [allocation, setAllocation] = useState<WbAllocation>("balanced");
   const [freeOnly, setFreeOnly] = useState(false);
   const [arch, setArch] = useState("");
   const [sort, setSort] = useState<SortKey>("runeScore");
   const [q, setQ] = useState("");
+  const [skillData, setSkillData] = useState<SkillData | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    loadSkillData()
+      .then((data) => { if (alive) setSkillData(data); })
+      .catch(() => { /* 沒有技能資料時沿用存檔中的目前已升級次數 */ });
+    return () => { alive = false; };
+  }, []);
+
+  /** 技能升滿所需次數：各技能 (max - 1) 的總和，例如水猴 12 */
+  const skillReqOf = useCallback(
+    (master: number) => {
+      if (!skillData) return undefined;
+      const skills = allSkillsForMonster(skillData, master);
+      if (!skills.length) return undefined;
+      return skills.reduce((sum, skill) => sum + Math.max(0, (skill.max || 1) - 1), 0);
+    },
+    [skillData],
+  );
 
   const plan = useMemo(
     () =>
@@ -184,10 +212,12 @@ export default function WorldBossAdvicePage() {
             excludedRunes,
             freeOnly,
             bonus,
+            allocation,
+            skillReqOf,
             monsterOf: (id) => MONSTER_MAP.get(id),
           })
         : [],
-    [account, count, excludedRunes, freeOnly, bonus],
+    [account, count, excludedRunes, freeOnly, bonus, allocation, skillReqOf],
   );
 
   /** 最低符文總和只影響下方清單，不會改動平衡配符的結果 */
@@ -262,16 +292,17 @@ export default function WorldBossAdvicePage() {
               <Crown size={16} className="gold" /> 世界王 {count} 隻水系配裝建議
             </div>
             <div className="card-sub">
-              依「原五 &gt; 二覺 &gt; 原四，再比技能升級次數」挑選水屬性魔靈。
+              依「原五 &gt; 二覺 &gt; 原四，再比技能升滿所需次數（例如水猴 12）」挑選水屬性魔靈。
               套裝優先 2+2+2；如果 3 組 2 件套的分數較低，會改用 4+2（例如暴走 4 + 意志 2）。
               2/6 位主屬性：攻擊型攻擊%、體力型體力%、防禦型防禦%，支援型依基本體力／防禦力混搭；
               4 號位可用爆傷或爆率（爆率會盡量控制在 100% 以下）。
-              選符以配合類型的面板為主，遊戲符文分數（◆）作次要加分。
+              符文分配可切換「平均」或「集中」：集中會依角色優先順序，把最高分符文先補滿前面的魔靈。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
             <span className="chip muted">水系魔靈 {fmt(waterCount)}</span>
             <span className="chip gold">已選 {plan.length} 隻</span>
+            <span className="chip muted">分配：{WB_ALLOCATION_LABEL[allocation]}</span>
             {minRuneTotal > 0 && (
               <span
                 className="chip"
@@ -289,9 +320,11 @@ export default function WorldBossAdvicePage() {
         </div>
         <div className="tiny dim" style={{ marginTop: 6 }}>
           <Info size={11} /> 這裡只是建議清單，不會改動你的存檔；同一顆符文 / 神器最多只會出現一次。
-          符文以「總分最低的魔靈優先拿下一組」平衡分配，令 {plan.length} 隻的 ◆ 總分盡量接近。
+          {allocation === "concentrated"
+            ? ` 集中分配：前面的魔靈會先拿最好的符文（依原五 > 二覺 > 原四，同級比技能升滿所需次數），後面的魔靈使用剩餘符文。`
+            : ` 符文以「總分最低的魔靈優先拿下一組」平衡分配，令 ${plan.length} 隻的 ◆ 總分盡量接近。`}
           {minRuneTotal > 0 &&
-            ` 最低符文總和 ${fmt(minRuneTotal)} 分只篩選下方清單（符合 ${qualified.length} 隻，隱藏 ${plan.length - qualified.length} 隻），配符仍以全部 ${plan.length} 隻平衡分配。`}
+            ` 最低符文總和 ${fmt(minRuneTotal)} 分只篩選下方清單（符合 ${qualified.length} 隻，隱藏 ${plan.length - qualified.length} 隻），配符仍以全部 ${plan.length} 隻分配。`}
           每隻魔靈都可以按「完整面板」查看三圍、6 顆符文與 2 件神器的完整資料。
         </div>
         {!hasSkillData && (
@@ -317,6 +350,27 @@ export default function WorldBossAdvicePage() {
               value={minRuneTotal}
               onChange={setMinRuneTotal}
             />
+          </div>
+          <div style={{ alignSelf: "flex-end" }}>
+            <div className="tiny dim" style={{ marginBottom: 6 }}>符文分配</div>
+            <div className="row" style={{ gap: 6 }}>
+              {(["balanced", "concentrated"] as WbAllocation[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`chip ${allocation === mode ? "gold" : "muted"}`}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setAllocation(mode)}
+                  title={
+                    mode === "balanced"
+                      ? "符文總分盡量平均分配給所有魔靈"
+                      : "依角色優先順序，把最高分符文先集中給前面的魔靈"
+                  }
+                >
+                  {WB_ALLOCATION_LABEL[mode]}
+                </button>
+              ))}
+            </div>
           </div>
           <label className="row tiny" style={{ gap: 6, cursor: "pointer", paddingTop: 18 }}>
             <input type="checkbox" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} />
