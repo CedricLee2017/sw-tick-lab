@@ -24,6 +24,7 @@
   - RTA 符文 / 神器來自 `world_arena_rune_equip_list` / `world_arena_artifact_equip_list`，與一般配裝完全獨立；同一顆符文可同時出現在兩邊。
   - 可切換「無速度隊長」/「有速度隊長」，速度隊長 % 可自行輸入；RTA Tick 以 1.5% / Tick 計算。
   - 每隻魔靈可展開查看 RTA 六顆符文、兩件神器、HP / ATK / DEF / EHP 與速度。
+  - **Lucksack 對照（Guardian 3）**：透過 `/api/lucksack` 代理抓取 lucksack.gg 的 RTA 統計（目前賽季、Guardian 3），逐隻比對常用魔靈的套裝組合、2/4/6 主屬性與神器效果使用率。不符合主流的會標紅提醒（例如「套裝『迅速×2 + 意志×2』不是熱門組合，最常見：暴走×4 + 意志×2，99.9%」），並給 0–100 符合度；樣本太少的魔靈標示「資料不足」，不會誤判。點任一列可看熱門套裝 / 主屬 / 神器使用率表格。資料快取 6 小時，可手動重新整理。
 - **一鍵配符**：指定魔靈與 Tick（或面板速度），自動計算符文速度需求，列出所有符合條件的配裝（每頁 30 組）。可設定**數值下限與上限**（體力 / 攻擊 / 防禦 / 暴率 / 抵抗 / 命中）以及**最高面板速度**，例如「速度不要超過 280、體力不要超過 32,000」。
   - **快速預設配符**：一鍵套用常用配置（套裝、主屬性、數值條件、Focus 比重、排序），套用後按「開始配符」即可。內建：
     - **極限輸出風丑**：自動選風丑（Lushen）、憤怒 ×4 + 刀刃 ×2、#2 攻擊% / #4 暴傷 / #6 攻擊%、暴率下限 100%，Focus 攻擊 / 暴率 / 暴傷 各 10 分，並以傷害排序。
@@ -285,6 +286,7 @@ src/
     adCalculator.ts     神器追傷公式與神器排行計算
     stage2.ts           神器最佳化（目前符文 × 25 對神器）
     rta.ts              RTA 獨立配裝與速度計算
+    lucksack.ts         Lucksack（RTA 數據）比對：套裝 / 主屬 / 神器使用率與提醒
     optimizer.ts        分支定界配符引擎、回合模擬
     optimizer.worker.ts Web Worker 入口
     teamOptimizer.ts    一鍵配隊引擎（Top-K 候選、Beam Search、1-opt）
@@ -321,10 +323,12 @@ public/
 ```
 
 前端：Vite + React + TypeScript + zustand，無後端。
+- 唯一的例外是 `/api/lucksack`（Pages Function 代理）：lucksack.gg 的 API 有 Cloudflare WAF，沒有瀏覽器標頭會回 403，前端也受 CORS 限制，因此由伺服器補上 `Origin` / `Referer` / `Sec-Fetch-*` 後轉發，並用邊緣快取（目錄 24 小時、統計 3 小時）降低請求量。本機開發需同時啟動 `npm run dev:api`。
 
 ## 資料來源與聲明
 
 - 魔靈基礎資料來自 [SWARFARM](https://swarfarm.com/) 公開 API，魔靈圖示為 SWARFARM 外部連結。
+- RTA 使用率與勝率來自 [Lucksack](https://lucksack.gg/)（Season 39 / Guardian 3）；本專案僅讀取公開統計並快取，不代表 Lucksack 立場。
 - 據點進攻建議的對戰紀錄來自 [SWGT](https://swgt.io/) 3MDC Battle Logs（Nosna44 / Season 13–22 快照）；頁面可匯入新的 SWGT 報告 HTML 或 JSON 更新，同一位玩家的資料會自動合併。
 - 本專案為玩家自製工具，與 Com2uS 無任何關聯；《魔靈召喚：天空之役》及相關素材版權屬於原權利人。
 - 建議僅上傳自己的存檔，並自行保管 JSON 檔。
