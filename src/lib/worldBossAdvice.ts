@@ -20,6 +20,8 @@
  *    - topup：只補空位，保留每隻現有符文，只用未裝備的符文補滿 6 顆，適合不想大改配裝。
  *      設定目標平均（targetAvg）時，會先補空位，未達標才換掉較弱的符文，
  *      並由「單隻可加分最多」的魔靈開始處理，令需要改動的魔靈數量最少。
+ *    - completeSets：只配完整套裝。4 件套一定要 4 粒（例如暴走 4），2 件套一定要雙數；
+ *      重新配符時不再用單顆符文湊數；只補空位時，現有符文無法補成完整套裝的魔靈會保持原樣。
  *
  * 這裡只產生「建議」，不會改動存檔；同一顆符文 / 神器最多只會被建議給一隻魔靈。
  */
@@ -99,6 +101,8 @@ export interface WbMonsterPlan {
   sets: WbSetCount[];
   /** 套裝結構：2+2+2、4+2 或混搭 */
   setLayout: "2+2+2" | "4+2" | "混搭";
+  /** 完整套裝模式：目前配到的符文是否都是完整套裝（4 件套 4 粒、2 件套雙數） */
+  setsComplete?: boolean;
   /** 魔靈基礎數值（依星級 / 等級換算） */
   base: ReturnType<typeof baseStats>;
   /** 依建議配裝算出的面板 */
@@ -116,6 +120,13 @@ export interface WbPlanOptions {
   category?: number;
   /** 配符方式；預設 rebuild（重新配 6 顆） */
   mode?: WbMode;
+  /**
+   * 只配完整套裝：
+   *   - 4 件套一定要 4 粒（例如暴走 4），不會出現 2 粒；
+   *   - 2 件套一定要雙數（2 / 4 / 6 粒）；
+   *   - 重新配符時不再用單顆符文湊數；只補空位時，現有符文無法補成完整套裝的魔靈會保持原樣。
+   */
+  completeSets?: boolean;
   /**
    * 目標平均符文總分（每隻 6 顆 ◆ 總分的平均）。
    * 只在 topup（只補空位）模式生效：
@@ -352,6 +363,26 @@ function layoutOf(sets: WbSetCount[]): WbMonsterPlan["setLayout"] {
   return "混搭";
 }
 
+/**
+ * 目前的符文是否都是完整套裝：
+ *   4 件套 → 4 粒；2 件套 → 雙數（2 / 4 / 6）；
+ *   遠古（99）不是套裝效果，不計。
+ */
+function setsAreComplete(runes: Rune[]): boolean {
+  const counts = new Map<number, number>();
+  for (const rune of runes) counts.set(rune.set, (counts.get(rune.set) ?? 0) + 1);
+  for (const [set, count] of counts) {
+    if (set === 99) continue;
+    const pieces = SET_BY_ID[set]?.pieces ?? 0;
+    if (pieces === 4) {
+      if (count % 4 !== 0) return false;
+    } else if (pieces === 2) {
+      if (count % 2 !== 0) return false;
+    }
+  }
+  return true;
+}
+
 /** 神器：主效果與追加傷害優先配合該魔靈的三圍權重 */
 function artifactPoints(
   artifact: Artifact,
@@ -429,6 +460,7 @@ interface DraftMonster {
 export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMonsterPlan[] {
   const excluded = new Set(opts.excludedRunes ?? []);
   const mode = opts.mode ?? "rebuild";
+  const completeSets = !!opts.completeSets;
   const category = Math.max(0, Math.floor(opts.category ?? 0));
   const runeById = new Map(account.runes.map((r) => [r.id, r]));
   const artifactById = new Map(account.artifacts.map((a) => [a.id, a]));
@@ -609,6 +641,146 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     return true;
   };
 
+  type SetPick = { rune: Rune; slot: number };
+
+  /**
+   * 只補空位 + 完整套裝：規劃要補的符文（不會改動 draft）。
+   * 先補齊現有套裝（4 件套補到 4 粒、2 件套補到雙數），其餘空位再用 2 件套一對一對補。
+   * 回傳 null = 現有符文本身無法補成完整套裝（例如 4 件套已有 5 粒）。
+   */
+  const planCompleteFills = (draft: DraftMonster): SetPick[] | null => {
+    const empty = [...draft.remainingSlots].sort((a, b) => a - b);
+    if (empty.length === 0) return [];
+
+    const counts = new Map<number, number>();
+    for (const rune of draft.runes) counts.set(rune.set, (counts.get(rune.set) ?? 0) + 1);
+
+    // 現有符文要補幾粒才能變成完整套裝
+    const needs: { set: number; count: number }[] = [];
+    for (const [set, count] of counts) {
+      if (set === 99) continue; // 遠古不是套裝效果
+      const pieces = SET_BY_ID[set]?.pieces ?? 0;
+      if (pieces === 4) {
+        if (count === 4) continue;
+        if (count > 4) return null; // 4 件套已有 5 / 6 粒，無法補救
+        needs.push({ set, count: 4 - count });
+      } else if (pieces === 2) {
+        if (count % 2 === 0) continue;
+        needs.push({ set, count: 1 });
+      }
+    }
+
+    const needSets: number[] = [];
+    for (const need of needs) for (let i = 0; i < need.count; i++) needSets.push(need.set);
+    if (needSets.length > empty.length) return null; // 空位不足，補不完現有套裝
+
+    /** 某個套裝在某個空位中，配裝分數最高的一顆 */
+    const bestRuneAt = (setId: number, slot: number): Rune | undefined => {
+      let best: Rune | undefined;
+      let bestScore = -Infinity;
+      for (const rune of draft.bySlot.get(slot) ?? []) {
+        if (rune.set !== setId || usedRunes.has(rune.id)) continue;
+        const score = draft.points.get(rune.id) ?? 0;
+        if (score > bestScore) {
+          bestScore = score;
+          best = rune;
+        }
+      }
+      return best;
+    };
+
+    // 把「需要補的套裝」分配到不同空位（回溯；最多 6 個，6! = 720）
+    const findAssignment = (): SetPick[] | null => {
+      let best: SetPick[] | null = null;
+      let bestScore = -Infinity;
+      const slotsUsed = new Set<number>();
+      const current: SetPick[] = [];
+      const visit = (index: number, score: number) => {
+        if (index === needSets.length) {
+          if (score > bestScore) {
+            bestScore = score;
+            best = [...current];
+          }
+          return;
+        }
+        const setId = needSets[index];
+        for (const slot of empty) {
+          if (slotsUsed.has(slot)) continue;
+          const rune = bestRuneAt(setId, slot);
+          if (!rune) continue;
+          slotsUsed.add(slot);
+          current.push({ rune, slot });
+          visit(index + 1, score + (draft.points.get(rune.id) ?? 0));
+          current.pop();
+          slotsUsed.delete(slot);
+        }
+      };
+      visit(0, 0);
+      return best;
+    };
+    const assignment = findAssignment();
+    if (!assignment) return null; // 補不齊現有套裝，整隻保持原樣
+
+    const picks: SetPick[] = [...assignment];
+    const usedSlots = new Set<number>(assignment.map((p) => p.slot));
+
+    // 其餘空位：用 2 件套一對一對補，避免留下單顆
+    let remaining = empty.filter((slot) => !usedSlots.has(slot));
+    while (remaining.length >= 2) {
+      let bestPair: { a: SetPick; b: SetPick; score: number } | null = null;
+      for (const setId of TWO_PIECE_SETS) {
+        const candidates: SetPick[] = [];
+        for (const slot of remaining) {
+          let best: SetPick | null = null;
+          let bestScore = -Infinity;
+          for (const rune of draft.bySlot.get(slot) ?? []) {
+            if (rune.set !== setId || usedRunes.has(rune.id)) continue;
+            const score = draft.points.get(rune.id) ?? 0;
+            if (score > bestScore) {
+              bestScore = score;
+              best = { rune, slot };
+            }
+          }
+          if (best) candidates.push(best);
+        }
+        if (candidates.length < 2) continue;
+        candidates.sort(
+          (a, b) => (draft.points.get(b.rune.id) ?? 0) - (draft.points.get(a.rune.id) ?? 0),
+        );
+        const a = candidates[0];
+        const b = candidates[1];
+        const score =
+          (draft.points.get(a.rune.id) ?? 0) +
+          (draft.points.get(b.rune.id) ?? 0) +
+          setBonusPoints(setId, draft.profile.weights);
+        if (!bestPair || score > bestPair.score) bestPair = { a, b, score };
+      }
+      if (!bestPair) break; // 沒有可配的套裝，剩下空位留空
+      picks.push(bestPair.a, bestPair.b);
+      usedSlots.add(bestPair.a.slot);
+      usedSlots.add(bestPair.b.slot);
+      remaining = remaining.filter((slot) => !usedSlots.has(slot));
+    }
+
+    return picks;
+  };
+
+  /** 套用 planCompleteFills 的結果；回傳實際加了多少 ◆ 分 */
+  const applyPicks = (draft: DraftMonster, picks: SetPick[]): number => {
+    let gain = 0;
+    for (const { rune, slot } of picks) {
+      if (usedRunes.has(rune.id)) continue;
+      draft.runes.push(rune);
+      draft.remainingSlots.delete(slot);
+      usedRunes.add(rune.id);
+      const add = gameScores.get(rune.id) ?? 0;
+      draft.totalScore += add;
+      draft.cr += crScores.get(rune.id) ?? 0;
+      gain += add;
+    }
+    return gain;
+  };
+
   /** 估計 2+2+2 的總分（用來同 4+2 比較） */
   const evaluate222 = (draft: DraftMonster): number => {
     const remaining = new Set(draft.remainingSlots);
@@ -666,7 +838,26 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     const targetTotal = targetAvg * drafts.length;
     let plannedTotal = drafts.reduce((n, d) => n + d.totalScore, 0);
 
-    if (plannedTotal < targetTotal) {
+    if (plannedTotal < targetTotal && completeSets) {
+      // 完整套裝：只用「補完整套裝」的方式補空位，不換符文（避免拆散現有套裝）
+      const ranked = drafts
+        .map((draft) => {
+          const picks = planCompleteFills(draft);
+          const gain = picks
+            ? picks.reduce((n, p) => n + (gameScores.get(p.rune.id) ?? 0), 0)
+            : 0;
+          return { draft, gain };
+        })
+        .filter((x) => x.gain > 0)
+        .sort((a, b) => b.gain - a.gain || a.draft.priority - b.draft.priority);
+
+      for (const { draft } of ranked) {
+        if (plannedTotal >= targetTotal) break;
+        const picks = planCompleteFills(draft);
+        if (!picks || picks.length === 0) continue;
+        plannedTotal += applyPicks(draft, picks);
+      }
+    } else if (plannedTotal < targetTotal) {
       // 換下來的符文先留著，其他魔靈（尤其是 6 號位）可能還用得到
       const spareRunes = new Map<number, Rune>();
 
@@ -782,7 +973,14 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
 
     // 只補空位：不看套裝，直接把空位用最高分的未裝備符文補滿
     if (mode === "topup") {
-      if (!fillBestSingle(draft)) draft.remainingSlots.clear();
+      if (completeSets) {
+        // 完整套裝：只補能讓現有套裝變成完整（4 件套 4 粒、2 件套雙數）的符文
+        const picks = planCompleteFills(draft);
+        if (picks) applyPicks(draft, picks);
+        draft.remainingSlots.clear();
+      } else if (!fillBestSingle(draft)) {
+        draft.remainingSlots.clear();
+      }
       continue;
     }
 
@@ -826,8 +1024,10 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       continue;
     }
 
-    // 真的湊不到套裝時，補該位置最好的單顆符文
-    if (!fillBestSingle(draft)) {
+    // 真的湊不到套裝時，補該位置最好的單顆符文；完整套裝模式則留空
+    if (completeSets) {
+      draft.remainingSlots.clear();
+    } else if (!fillBestSingle(draft)) {
       // 沒有可用符文，避免無限迴圈
       draft.remainingSlots.clear();
     }
@@ -915,6 +1115,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       artifacts,
       sets,
       setLayout: layoutOf(sets),
+      ...(completeSets ? { setsComplete: setsAreComplete(runes) } : {}),
       base,
       stats,
       focusValue: stats[profile.focus],

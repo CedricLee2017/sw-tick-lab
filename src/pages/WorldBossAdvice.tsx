@@ -54,12 +54,15 @@ function PlanCard({
   runeOwner,
   artifactOwner,
   targetMode,
+  strictSets,
 }: {
   plan: WbMonsterPlan;
   runeOwner: Map<number, string>;
   artifactOwner: Map<number, string>;
   /** 設定了目標平均：未安排的魔靈會保留空位 */
   targetMode?: boolean;
+  /** 完整套裝模式：不會為了湊數而補單顆 */
+  strictSets?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const runesBySlot = new Map(plan.runes.map((rune) => [rune.slot, rune]));
@@ -145,7 +148,24 @@ function PlanCard({
             <span className="chip gold" title="四件套 + 二件套">4+2</span>
           )}
           {plan.setLayout === "混搭" && (
-            <span className="chip muted" title="未能完整湊成 2+2+2 或 4+2">混搭</span>
+            <span
+              className={`chip ${
+                plan.setsComplete === false ? "red" : plan.setsComplete ? "gold" : "muted"
+              }`}
+              title={
+                plan.setsComplete === undefined
+                  ? "未能完整湊成 2+2+2 或 4+2"
+                  : plan.setsComplete
+                    ? "所有套裝都是完整件數；未滿 6 顆是因為可用符文不足或未安排"
+                    : "套裝不完整：現有符文無法補成完整套裝（4 件套 4 粒、2 件套雙數）"
+              }
+            >
+              {plan.setsComplete === undefined
+                ? "混搭"
+                : plan.setsComplete
+                  ? `完整（${plan.runes.length}/6）`
+                  : "套裝不完整"}
+            </span>
           )}
           {plan.sets.map((s) => (
             <span key={s.set} className="chip muted" title="每 2 件觸發一次套裝效果">
@@ -173,7 +193,11 @@ function PlanCard({
                 >
                   <span className="rune-slot">位置 {slot}</span>
                   <span className="tiny dim">
-                    {targetMode ? "未安排符文" : "沒有可用符文"}
+                    {strictSets && plan.setsComplete === false
+                      ? "無法湊成完整套裝"
+                      : targetMode || strictSets
+                        ? "未安排符文"
+                        : "沒有可用符文"}
                   </span>
                 </div>
               );
@@ -231,6 +255,8 @@ export default function WorldBossAdvicePage() {
   const [allocation, setAllocation] = useState<WbAllocation>("balanced");
   const [mode, setMode] = useState<WbMode>("rebuild");
   const [category, setCategory] = useState(0);
+  /** 只配完整套裝：4 件套一定要 4 粒（例如暴走 4） */
+  const [completeSets, setCompleteSets] = useState(false);
   /** 只補空位模式：目標平均符文總分（0 = 不設定） */
   const [targetAvg, setTargetAvg] = useState(0);
   /** 只補空位時：只列出需要補符文的魔靈 */
@@ -279,6 +305,7 @@ export default function WorldBossAdvicePage() {
             waterOnly: category === 0,
             category,
             mode,
+            completeSets,
             targetAvg: mode === "topup" ? targetAvg : 0,
             excludedRunes,
             freeOnly,
@@ -288,7 +315,7 @@ export default function WorldBossAdvicePage() {
             monsterOf: (id) => MONSTER_MAP.get(id),
           })
         : [],
-    [account, count, category, mode, targetAvg, excludedRunes, freeOnly, bonus, allocation, skillReqOf],
+    [account, count, category, mode, completeSets, targetAvg, excludedRunes, freeOnly, bonus, allocation, skillReqOf],
   );
 
   /** 最低符文總和只影響下方清單，不會改動平衡配符的結果 */
@@ -335,6 +362,12 @@ export default function WorldBossAdvicePage() {
   /** 只補空位模式：有補到／換到符文的魔靈數量 */
   const changedCount = useMemo(
     () => plan.filter((p) => (p.addedRunes?.length ?? 0) > 0).length,
+    [plan],
+  );
+
+  /** 完整套裝模式：套裝不完整的魔靈數量 */
+  const incompleteSetCount = useMemo(
+    () => plan.filter((p) => p.setsComplete === false).length,
     [plan],
   );
 
@@ -447,6 +480,16 @@ export default function WorldBossAdvicePage() {
             <span className="chip gold">已選 {plan.length} 隻</span>
             <span className="chip muted">配符：{WB_MODE_LABEL[mode]}</span>
             <span className="chip muted">分配：{WB_ALLOCATION_LABEL[allocation]}</span>
+            {completeSets && (
+              <span
+                className={`chip ${incompleteSetCount > 0 ? "red" : "gold"}`}
+                title="完整套裝：4 件套一定要 4 粒、2 件套一定要雙數；套裝不完整的魔靈會保持原樣（只補空位無法修正）"
+              >
+                {incompleteSetCount > 0
+                  ? `套裝不完整 ${fmt(incompleteSetCount)} 隻`
+                  : "套裝全部完整"}
+              </span>
+            )}
             {mode === "topup" && (
               <span
                 className="chip"
@@ -478,11 +521,15 @@ export default function WorldBossAdvicePage() {
           <Info size={11} /> 這裡只是建議清單，不會改動你的存檔；同一顆符文 / 神器最多只會出現一次。
           {mode === "topup"
             ? targetAvg > 0
-              ? ` 目標平均 ${fmt(targetAvg)}：先補空位，未達標才把較弱的符文換成更好的未裝備符文；由單隻可加分最多的魔靈開始，達到目標就停。換符文以 ◆ 分數為主，可能會拆散原本的套裝。`
+              ? completeSets
+                ? ` 目標平均 ${fmt(targetAvg)}（完整套裝）：只補能讓現有套裝變成完整的符文，不換現有符文；由單隻可加分最多的魔靈開始，達到目標就停。`
+                : ` 目標平均 ${fmt(targetAvg)}：先補空位，未達標才把較弱的符文換成更好的未裝備符文；由單隻可加分最多的魔靈開始，達到目標就停。換符文以 ◆ 分數為主，可能會拆散原本的套裝。`
               : " 只補空位：保留每隻現有符文，只用目前未裝備的符文補滿空位，不會拆掉任何魔靈身上的配裝。"
             : allocation === "concentrated"
               ? " 集中分配：前面的魔靈會先拿最好的符文（依原五 > 二覺 > 原四，同級比技能升滿所需次數），後面的魔靈使用剩餘符文。"
               : ` 符文以「總分最低的魔靈優先拿下一組」平衡分配，令 ${plan.length} 隻的 ◆ 總分盡量接近。`}
+          {completeSets &&
+            " 完整套裝：4 件套一定要 4 粒（例如暴走 4）、2 件套一定要雙數；重新配符不會用單顆符文湊數，只補空位時現有符文無法補成完整套裝的魔靈會保持原樣。"}
           {minRuneTotal > 0 &&
             ` 最低符文總和 ${fmt(minRuneTotal)} 分只篩選下方清單（符合 ${qualified.length} 隻，隱藏 ${plan.length - qualified.length} 隻），配符仍以全部 ${plan.length} 隻分配。`}
           每隻魔靈都可以按「完整面板」查看三圍、6 顆符文與 2 件神器的完整資料。
@@ -587,6 +634,18 @@ export default function WorldBossAdvicePage() {
               onChange={(e) => setFreeOnly(e.target.checked)}
             />
             只用未裝備符文（避免拆現有配裝）
+          </label>
+          <label
+            className="row tiny"
+            style={{ gap: 6, cursor: "pointer", paddingTop: 18 }}
+            title="只配完整套裝：4 件套一定要 4 粒（例如暴走 4）、2 件套一定要雙數；重新配符本來就會這樣，主要影響只補空位"
+          >
+            <input
+              type="checkbox"
+              checked={completeSets}
+              onChange={(e) => setCompleteSets(e.target.checked)}
+            />
+            完整套裝
           </label>
           <select className="select" style={{ width: 130, marginTop: 18 }} value={arch} onChange={(e) => setArch(e.target.value)}>
             <option value="">全部類型</option>
@@ -780,6 +839,7 @@ export default function WorldBossAdvicePage() {
             runeOwner={runeOwner}
             artifactOwner={artifactOwner}
             targetMode={mode === "topup" && targetAvg > 0}
+            strictSets={completeSets}
           />
         ))}
       </div>
