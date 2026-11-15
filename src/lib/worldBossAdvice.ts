@@ -17,7 +17,8 @@
  *    - 集中：依角色優先順序，先把最好的符文補滿前面的魔靈，再換下一隻。
  * 5. 配符方式：
  *    - rebuild（預設）：重新配 6 顆，其他魔靈身上的符文也在候選之內。
- *    - topup：只補空位，保留每隻現有符文，只用未裝備的符文補滿 6 顆，適合不想大改配裝。
+ *    - topup：只補空位，保留這 60 隻的現有符文，用未裝備或其他魔靈身上（不在這 60 隻內）
+ *      的符文補滿空位，適合不想大改配裝。勾選 freeOnly 時就只用未裝備的符文。
  *      設定目標平均（targetAvg）時，會先補空位，未達標才換掉較弱的符文，
  *      並由「單隻可加分最多」的魔靈開始處理，令需要改動的魔靈數量最少。
  *    - completeSets：只配完整套裝。4 件套一定要 4 粒（例如暴走 4），2 件套一定要雙數；
@@ -44,7 +45,8 @@ export const WB_ALLOCATION_LABEL: Record<WbAllocation, string> = {
 /**
  * 配符方式：
  *   rebuild 重新配 6 顆（會把原本裝在別隻身上的符文也納入）
- *   topup   只補空位（保留每隻現有符文，只用未裝備的符文補齊 6 顆）
+ *   topup   只補空位（保留這 60 隻的現有符文，用未裝備或其他魔靈身上、
+ *           且不屬於這 60 隻的符文補齊空位）
  */
 export type WbMode = "rebuild" | "topup";
 export const WB_MODE_LABEL: Record<WbMode, string> = {
@@ -130,7 +132,7 @@ export interface WbPlanOptions {
   /**
    * 目標平均符文總分（每隻 6 顆 ◆ 總分的平均）。
    * 只在 topup（只補空位）模式生效：
-   *   1. 先用未裝備的符文補空位；
+   *   1. 先用可用符文（未裝備或其他魔靈身上、且不屬於這 60 隻）補空位；
    *   2. 空位補完仍未達標時，才把該魔靈較弱的符文換成更好的未裝備符文（原符文可再給別隻）；
    *   3. 由「單隻可加分最多」的魔靈開始處理，達到目標就停，令改動的魔靈數量盡量少。
    * 符文不足時就是目前可達到的最高平均值。
@@ -464,12 +466,6 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
   const category = Math.max(0, Math.floor(opts.category ?? 0));
   const runeById = new Map(account.runes.map((r) => [r.id, r]));
   const artifactById = new Map(account.artifacts.map((a) => [a.id, a]));
-  const runePool = account.runes.filter(
-    (r) => !excluded.has(r.id) && (!opts.freeOnly || r.occupied === 0),
-  );
-  // 只補空位：只能動未裝備的符文，已裝備的一律保留（不拆其他魔靈的配裝）
-  const assignable =
-    mode === "topup" ? account.runes.filter((r) => r.occupied === 0 && !excluded.has(r.id)) : runePool;
 
   // ── 選角 ───────────────────────────────────────────
   const pickedUnits = account.units
@@ -511,6 +507,24 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       );
     })
     .slice(0, Math.max(0, Math.floor(opts.count)));
+
+  // 這 60 隻身上已有的符文不能被其他魔靈拿走（只補空位模式）
+  const lockedRunes = new Set<number>();
+  for (const { unit } of pickedUnits) for (const id of unit.runes ?? []) lockedRunes.add(id);
+
+  const runePool = account.runes.filter(
+    (r) => !excluded.has(r.id) && (!opts.freeOnly || r.occupied === 0),
+  );
+  // 只補空位：保留這 60 隻的符文；其他魔靈身上的符文也可以使用（除非勾選只用未裝備）
+  const assignable =
+    mode === "topup"
+      ? account.runes.filter(
+          (r) =>
+            !excluded.has(r.id) &&
+            !lockedRunes.has(r.id) &&
+            (!opts.freeOnly || r.occupied === 0),
+        )
+      : runePool;
 
   const gameScores = new Map<number, number>();
   const crScores = new Map<number, number>();

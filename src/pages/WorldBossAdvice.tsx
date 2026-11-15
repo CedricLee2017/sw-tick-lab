@@ -330,6 +330,13 @@ export default function WorldBossAdvicePage() {
     return m;
   }, [account]);
 
+  /** 符文 → 目前裝備的魔靈 unit id（判斷是否在這 60 隻內） */
+  const runeOwnerId = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const u of account?.units ?? []) for (const rid of u.runes) m.set(rid, u.id);
+    return m;
+  }, [account]);
+
   const artifactOwner = useMemo(() => {
     const m = new Map<number, string>();
     for (const u of account?.units ?? []) for (const aid of u.artifacts) m.set(aid, unitLabel(u));
@@ -370,6 +377,20 @@ export default function WorldBossAdvicePage() {
     () => plan.filter((p) => p.setsComplete === false).length,
     [plan],
   );
+
+  /** 只補空位：這次從其他魔靈（不在這 60 隻內）移過來的符文數量 */
+  const outsiderRuneCount = useMemo(() => {
+    if (mode !== "topup") return 0;
+    const picked = new Set(plan.map((p) => p.unit.id));
+    let n = 0;
+    for (const p of plan) {
+      for (const r of p.addedRunes ?? []) {
+        const owner = runeOwnerId.get(r.id);
+        if (owner !== undefined && !picked.has(owner)) n++;
+      }
+    }
+    return n;
+  }, [plan, mode, runeOwnerId]);
 
   /** 目標平均的結果：是否達標、要改幾隻、補了幾顆、換了幾顆 */
   const targetResult = useMemo(() => {
@@ -502,6 +523,14 @@ export default function WorldBossAdvicePage() {
                 加分 +{fmt(plan.reduce((n, p) => n + (p.runeScoreTotal - (p.previousScore ?? 0)), 0))}
               </span>
             )}
+            {mode === "topup" && outsiderRuneCount > 0 && (
+              <span
+                className="chip muted"
+                title="這些符文目前裝在不在這 60 隻內的魔靈身上；套用建議時需要把它們移過來"
+              >
+                從其他魔靈移來 {fmt(outsiderRuneCount)} 顆
+              </span>
+            )}
             {minRuneTotal > 0 && (
               <span
                 className="chip"
@@ -522,9 +551,15 @@ export default function WorldBossAdvicePage() {
           {mode === "topup"
             ? targetAvg > 0
               ? completeSets
-                ? ` 目標平均 ${fmt(targetAvg)}（完整套裝）：只補能讓現有套裝變成完整的符文，不換現有符文；由單隻可加分最多的魔靈開始，達到目標就停。`
-                : ` 目標平均 ${fmt(targetAvg)}：先補空位，未達標才把較弱的符文換成更好的未裝備符文；由單隻可加分最多的魔靈開始，達到目標就停。換符文以 ◆ 分數為主，可能會拆散原本的套裝。`
-              : " 只補空位：保留每隻現有符文，只用目前未裝備的符文補滿空位，不會拆掉任何魔靈身上的配裝。"
+                ? ` 目標平均 ${fmt(targetAvg)}（完整套裝）：只補能讓現有套裝變成完整的符文，不換現有符文；由單隻可加分最多的魔靈開始，達到目標就停。${
+                    freeOnly ? "只用未裝備符文。" : "空位可用未裝備或其他魔靈身上（不在這 60 隻內）的符文。"
+                  }`
+                : ` 目標平均 ${fmt(targetAvg)}：先補空位，未達標才把較弱的符文換成更好的符文；由單隻可加分最多的魔靈開始，達到目標就停。換符文以 ◆ 分數為主，可能會拆散原本的套裝。${
+                    freeOnly ? "只用未裝備符文。" : "空位可用未裝備或其他魔靈身上（不在這 60 隻內）的符文。"
+                  }`
+              : freeOnly
+                ? " 只補空位：保留這 60 隻現有符文，只用未裝備的符文補滿空位。"
+                : " 只補空位：保留這 60 隻現有符文；空位會用未裝備的符文，也可以用其他魔靈身上（不在這 60 隻內）的符文。"
             : allocation === "concentrated"
               ? " 集中分配：前面的魔靈會先拿最好的符文（依原五 > 二覺 > 原四，同級比技能升滿所需次數），後面的魔靈使用剩餘符文。"
               : ` 符文以「總分最低的魔靈優先拿下一組」平衡分配，令 ${plan.length} 隻的 ◆ 總分盡量接近。`}
@@ -582,7 +617,7 @@ export default function WorldBossAdvicePage() {
                   title={
                     m === "rebuild"
                       ? "重新配 6 顆符文（候選包含其他魔靈身上的符文）"
-                      : "只補空位：保留現有符文，只用未裝備的符文補滿 6 顆"
+                      : "只補空位：保留這 60 隻的現有符文，用未裝備或其他魔靈身上（不在這 60 隻內）的符文補滿空位"
                   }
                 >
                   {WB_MODE_LABEL[m]}
@@ -624,16 +659,15 @@ export default function WorldBossAdvicePage() {
           </div>
           <label
             className="row tiny"
-            style={{ gap: 6, cursor: mode === "topup" ? "not-allowed" : "pointer", paddingTop: 18, opacity: mode === "topup" ? 0.5 : 1 }}
-            title={mode === "topup" ? "只補空位模式本身只會使用未裝備的符文" : "只從未裝備的符文挑選"}
+            style={{ gap: 6, cursor: "pointer", paddingTop: 18 }}
+            title="只從未裝備的符文挑選；不勾選時，只補空位可以使用其他魔靈身上（不在這 60 隻內）的符文"
           >
             <input
               type="checkbox"
-              checked={freeOnly || mode === "topup"}
-              disabled={mode === "topup"}
+              checked={freeOnly}
               onChange={(e) => setFreeOnly(e.target.checked)}
             />
-            只用未裝備符文（避免拆現有配裝）
+            只用未裝備符文（不拆其他魔靈）
           </label>
           <label
             className="row tiny"
