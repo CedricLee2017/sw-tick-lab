@@ -169,6 +169,7 @@ export default function WorldBossAdvicePage() {
   const bonus = useStore((s) => s.settings.bonus);
   const excludedRunes = useStore((s) => s.settings.excludedRunes);
   const [count, setCount] = useState(60);
+  const [minRuneTotal, setMinRuneTotal] = useState(0);
   const [freeOnly, setFreeOnly] = useState(false);
   const [arch, setArch] = useState("");
   const [sort, setSort] = useState<SortKey>("runeScore");
@@ -187,6 +188,12 @@ export default function WorldBossAdvicePage() {
           })
         : [],
     [account, count, excludedRunes, freeOnly, bonus],
+  );
+
+  /** 最低符文總和只影響下方清單，不會改動平衡配符的結果 */
+  const qualified = useMemo(
+    () => (minRuneTotal > 0 ? plan.filter((p) => p.runeScoreTotal >= minRuneTotal) : plan),
+    [plan, minRuneTotal],
   );
 
   const runeOwner = useMemo(() => {
@@ -212,12 +219,12 @@ export default function WorldBossAdvicePage() {
 
   const arches = useMemo(() => {
     const set = new Set<string>();
-    for (const p of plan) if (p.monster.arch) set.add(p.monster.arch);
+    for (const p of qualified) if (p.monster.arch) set.add(p.monster.arch);
     return [...set].sort();
-  }, [plan]);
+  }, [qualified]);
 
   const shown = useMemo(() => {
-    let arr = plan;
+    let arr = qualified;
     if (arch) arr = arr.filter((p) => p.monster.arch === arch);
     if (q) {
       const text = q.toLowerCase();
@@ -231,16 +238,16 @@ export default function WorldBossAdvicePage() {
     if (sort === "focus") arr = [...arr].sort((a, b) => b.focusValue - a.focusValue);
     if (sort === "runeScore") arr = [...arr].sort((a, b) => b.runeScoreTotal - a.runeScoreTotal);
     return arr;
-  }, [plan, arch, q, sort]);
+  }, [qualified, arch, q, sort]);
 
   const totalStats = useMemo(() => {
-    if (plan.length === 0) return null;
-    const totals = plan.map((p) => p.runeScoreTotal);
+    if (qualified.length === 0) return null;
+    const totals = qualified.map((p) => p.runeScoreTotal);
     const min = Math.min(...totals);
     const max = Math.max(...totals);
     const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
     return { min, max, avg };
-  }, [plan]);
+  }, [qualified]);
 
   if (!account) {
     return <div className="empty"><Crown size={40} /><div>尚未載入存檔</div></div>;
@@ -265,8 +272,16 @@ export default function WorldBossAdvicePage() {
           <div className="row wrap" style={{ gap: 6 }}>
             <span className="chip muted">水系魔靈 {fmt(waterCount)}</span>
             <span className="chip gold">已選 {plan.length} 隻</span>
+            {minRuneTotal > 0 && (
+              <span
+                className="chip"
+                title={`只顯示 6 顆符文遊戲分數（◆）總和 ≥ ${fmt(minRuneTotal)} 的魔靈`}
+              >
+                最低總和 {fmt(minRuneTotal)}：{qualified.length} 隻
+              </span>
+            )}
             {totalStats && (
-              <span className="chip muted" title="60 隻魔靈每隻 6 顆符文的 ◆ 總分範圍">
+              <span className="chip muted" title={`${minRuneTotal > 0 ? "符合最低符文總和的" : ""}${qualified.length} 隻魔靈每隻 6 顆符文的 ◆ 總分範圍`}>
                 符文總分 {fmt(totalStats.min)}–{fmt(totalStats.max)}（平均 {fmt(Math.round(totalStats.avg))}）
               </span>
             )}
@@ -274,7 +289,9 @@ export default function WorldBossAdvicePage() {
         </div>
         <div className="tiny dim" style={{ marginTop: 6 }}>
           <Info size={11} /> 這裡只是建議清單，不會改動你的存檔；同一顆符文 / 神器最多只會出現一次。
-          符文以「總分最低的魔靈優先拿下一組」平衡分配，令 60 隻的 ◆ 總分盡量接近。
+          符文以「總分最低的魔靈優先拿下一組」平衡分配，令 {plan.length} 隻的 ◆ 總分盡量接近。
+          {minRuneTotal > 0 &&
+            ` 最低符文總和 ${fmt(minRuneTotal)} 分只篩選下方清單（符合 ${qualified.length} 隻，隱藏 ${plan.length - qualified.length} 隻），配符仍以全部 ${plan.length} 隻平衡分配。`}
           每隻魔靈都可以按「完整面板」查看三圍、6 顆符文與 2 件神器的完整資料。
         </div>
         {!hasSkillData && (
@@ -289,6 +306,17 @@ export default function WorldBossAdvicePage() {
           <div style={{ width: 110 }}>
             <div className="tiny dim">挑選數量</div>
             <NumberInput className="input mono" min={1} max={200} value={count} onChange={setCount} />
+          </div>
+          <div style={{ width: 150 }} title="只顯示 6 顆符文遊戲分數（◆）總和 ≥ 此值的魔靈；0 = 不限制">
+            <div className="tiny dim">最低符文總和</div>
+            <NumberInput
+              className="input mono"
+              min={0}
+              max={2000}
+              step={10}
+              value={minRuneTotal}
+              onChange={setMinRuneTotal}
+            />
           </div>
           <label className="row tiny" style={{ gap: 6, cursor: "pointer", paddingTop: 18 }}>
             <input type="checkbox" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} />
@@ -316,7 +344,8 @@ export default function WorldBossAdvicePage() {
             />
           </div>
           <span className="tiny dim" style={{ alignSelf: "end", paddingBottom: 8 }}>
-            <ListOrdered size={12} /> 顯示 {shown.length} / {plan.length} 隻
+            <ListOrdered size={12} /> 顯示 {shown.length} / {qualified.length} 隻
+            {minRuneTotal > 0 && `（最低總和 ${fmt(minRuneTotal)}）`}
           </span>
         </div>
       </div>
@@ -326,7 +355,16 @@ export default function WorldBossAdvicePage() {
           <PlanCard key={p.unit.id} plan={p} runeOwner={runeOwner} artifactOwner={artifactOwner} />
         ))}
       </div>
-      {shown.length === 0 && <div className="empty">沒有符合條件的魔靈</div>}
+      {shown.length === 0 && (
+        <div className="empty">
+          沒有符合條件的魔靈
+          {minRuneTotal > 0 && (
+            <div className="tiny dim" style={{ marginTop: 6 }}>
+              目前最低符文總和為 {fmt(minRuneTotal)} 分，可調低數值或設為 0 取消限制。
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
