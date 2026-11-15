@@ -15,6 +15,9 @@
  *    - 平均（預設）：以「符文分數總和」做平衡分配，每次把下一組符文配給目前總分最低的魔靈，
  *      令 60 隻的符文總分盡量接近。
  *    - 集中：依角色優先順序，先把最好的符文補滿前面的魔靈，再換下一隻。
+ * 5. 配符方式：
+ *    - rebuild（預設）：重新配 6 顆，其他魔靈身上的符文也在候選之內。
+ *    - topup：只補空位，保留每隻現有符文，只用未裝備的符文補滿 6 顆，適合不想大改配裝。
  *
  * 這裡只產生「建議」，不會改動存檔；同一顆符文 / 神器最多只會被建議給一隻魔靈。
  */
@@ -32,6 +35,17 @@ export type WbAllocation = "balanced" | "concentrated";
 export const WB_ALLOCATION_LABEL: Record<WbAllocation, string> = {
   balanced: "平均",
   concentrated: "集中",
+};
+
+/**
+ * 配符方式：
+ *   rebuild 重新配 6 顆（會把原本裝在別隻身上的符文也納入）
+ *   topup   只補空位（保留每隻現有符文，只用未裝備的符文補齊 6 顆）
+ */
+export type WbMode = "rebuild" | "topup";
+export const WB_MODE_LABEL: Record<WbMode, string> = {
+  rebuild: "重新配符",
+  topup: "只補空位",
 };
 
 /** 魔靈類型中文 */
@@ -69,6 +83,12 @@ export interface WbMonsterPlan {
   runes: Rune[];
   /** 6 顆符文的遊戲分數（◆）總和 */
   runeScoreTotal: number;
+  /** 只補空位模式：這隻魔靈原本 6 顆符文的 ◆ 總和 */
+  previousScore?: number;
+  /** 只補空位模式：這次新增的符文（原本空位補上的） */
+  addedRunes?: Rune[];
+  /** 這隻魔靈目前裝備的符文（只補空位模式的對照用） */
+  currentRunes?: Rune[];
   /** 建議的 0–2 件神器 */
   artifacts: Artifact[];
   /** 套裝件數，例如 祝福 ×2、鬥志 ×2、意志 ×2 */
@@ -86,8 +106,12 @@ export interface WbMonsterPlan {
 export interface WbPlanOptions {
   /** 要挑幾隻（預設 60） */
   count: number;
-  /** 只挑水屬性（預設 true） */
+  /** 只挑水屬性（預設 true）；有用 category 指定分類時通常會關掉 */
   waterOnly?: boolean;
+  /** 只挑這個「魔靈分類」的魔靈（遊戲內分類編號，例如 5 = 世界王）；0 / 未設定 = 不限 */
+  category?: number;
+  /** 配符方式；預設 rebuild（重新配 6 顆） */
+  mode?: WbMode;
   /** 應用程式內排除的符文 id（不會被建議使用） */
   excludedRunes?: readonly number[];
   /** 建築 / 公會等加成設定 */
@@ -378,6 +402,10 @@ interface DraftMonster {
   fourSet?: number;
   /** 4+2 已拿了幾組 4 件套的 2 件 */
   fourPairs: number;
+  /** 只補空位模式：原本 6 顆符文的 ◆ 總和 */
+  baseScore: number;
+  /** 只補空位模式：原本已裝備的符文 id */
+  baseRuneIds: Set<number>;
 }
 
 /**
@@ -387,9 +415,16 @@ interface DraftMonster {
  */
 export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMonsterPlan[] {
   const excluded = new Set(opts.excludedRunes ?? []);
+  const mode = opts.mode ?? "rebuild";
+  const category = Math.max(0, Math.floor(opts.category ?? 0));
+  const runeById = new Map(account.runes.map((r) => [r.id, r]));
+  const artifactById = new Map(account.artifacts.map((a) => [a.id, a]));
   const runePool = account.runes.filter(
     (r) => !excluded.has(r.id) && (!opts.freeOnly || r.occupied === 0),
   );
+  // 只補空位：只能動未裝備的符文，已裝備的一律保留（不拆其他魔靈的配裝）
+  const assignable =
+    mode === "topup" ? account.runes.filter((r) => r.occupied === 0 && !excluded.has(r.id)) : runePool;
 
   // ── 選角 ───────────────────────────────────────────
   const pickedUnits = account.units
@@ -416,7 +451,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
         skillReq: number | undefined;
       } => !!x,
     )
-    .filter((x) => !opts.waterOnly || x.monster.el === 1)
+    .filter((x) => (category > 0 ? x.unit.category === category : !opts.waterOnly || x.monster.el === 1))
     .sort((a, b) => {
       // 同層級先比技能升滿所需次數（例如水猴 12），再比目前已升級次數
       const aSkill = a.skillReq ?? a.skillUps ?? 0;
@@ -434,7 +469,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
 
   const gameScores = new Map<number, number>();
   const crScores = new Map<number, number>();
-  for (const rune of runePool) {
+  for (const rune of account.runes) {
     gameScores.set(rune.id, runeScore(rune));
     crScores.set(rune.id, rawCrOf(rune));
   }
@@ -446,7 +481,7 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     const points = new Map<number, number>();
     const bySetSlot = new Map<string, Rune[]>();
     const bySlot = new Map<number, Rune[]>();
-    for (const rune of runePool) {
+    for (const rune of assignable) {
       points.set(rune.id, runePoints(rune, profile, base, gameScores.get(rune.id) ?? 0));
       const setKey = `${rune.set}:${rune.slot}`;
       const setList = bySetSlot.get(setKey);
@@ -462,6 +497,20 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     };
     for (const list of bySetSlot.values()) list.sort(byPoints);
     for (const list of bySlot.values()) list.sort(byPoints);
+
+    // 只補空位：保留這隻魔靈現有的符文，只把空出來的位置補滿
+    const currentRunes =
+      mode === "topup"
+        ? (unit.runes ?? [])
+            .map((rid) => runeById.get(rid))
+            .filter((r): r is Rune => !!r && r.slot >= 1 && r.slot <= 6)
+        : [];
+    const baseRuneIds = new Set(currentRunes.map((r) => r.id));
+    const remainingSlots = new Set(
+      [1, 2, 3, 4, 5, 6].filter((slot) => !currentRunes.some((r) => r.slot === slot)),
+    );
+    const baseScore = currentRunes.reduce((n, r) => n + (gameScores.get(r.id) ?? 0), 0);
+
     return {
       unit,
       monster,
@@ -471,14 +520,16 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       base,
       profile,
       priority,
-      remainingSlots: new Set([1, 2, 3, 4, 5, 6]),
-      runes: [],
-      totalScore: 0,
-      cr: 0,
+      remainingSlots,
+      runes: [...currentRunes],
+      totalScore: baseScore,
+      cr: currentRunes.reduce((n, r) => n + (crScores.get(r.id) ?? 0), 0),
       points,
       bySetSlot,
       bySlot,
       fourPairs: 0,
+      baseScore,
+      baseRuneIds,
     };
   });
 
@@ -521,6 +572,28 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       }
     }
     return best;
+  };
+
+  /** 補該位置最好的一顆未使用符文；沒有可用符文時回傳 false */
+  const fillBestSingle = (draft: DraftMonster): boolean => {
+    let bestSingle: { rune: Rune; score: number } | null = null;
+    for (const slot of draft.remainingSlots) {
+      for (const rune of draft.bySlot.get(slot) ?? []) {
+        if (usedRunes.has(rune.id)) continue;
+        const projectedCr = draft.base.cr + draft.cr + (crScores.get(rune.id) ?? 0);
+        const over = Math.max(0, projectedCr - 100);
+        const score = (draft.points.get(rune.id) ?? 0) - over * CR_PENALTY;
+        if (!bestSingle || score > bestSingle.score) bestSingle = { rune, score };
+      }
+    }
+    if (!bestSingle) return false;
+    const { rune } = bestSingle;
+    draft.runes.push(rune);
+    draft.remainingSlots.delete(rune.slot);
+    usedRunes.add(rune.id);
+    draft.totalScore += gameScores.get(rune.id) ?? 0;
+    draft.cr += crScores.get(rune.id) ?? 0;
+    return true;
   };
 
   /** 估計 2+2+2 的總分（用來同 4+2 比較） */
@@ -594,6 +667,12 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     }
     if (!draft) break;
 
+    // 只補空位：不看套裝，直接把空位用最高分的未裝備符文補滿
+    if (mode === "topup") {
+      if (!fillBestSingle(draft)) draft.remainingSlots.clear();
+      continue;
+    }
+
     // 第一次拿到這隻時，比較 2+2+2 與 4+2，揀分數較高的結構
     if (!draft.structure) {
       const score222 = evaluate222(draft);
@@ -635,26 +714,10 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
     }
 
     // 真的湊不到套裝時，補該位置最好的單顆符文
-    let bestSingle: { rune: Rune; score: number } | null = null;
-    for (const slot of draft.remainingSlots) {
-      for (const rune of draft.bySlot.get(slot) ?? []) {
-        if (usedRunes.has(rune.id)) continue;
-        const projectedCr = draft.base.cr + draft.cr + (crScores.get(rune.id) ?? 0);
-        const over = Math.max(0, projectedCr - 100);
-        const score = (draft.points.get(rune.id) ?? 0) - over * CR_PENALTY;
-        if (!bestSingle || score > bestSingle.score) bestSingle = { rune, score };
-      }
-    }
-    if (!bestSingle) {
+    if (!fillBestSingle(draft)) {
       // 沒有可用符文，避免無限迴圈
       draft.remainingSlots.clear();
-      continue;
     }
-    draft.runes.push(bestSingle.rune);
-    draft.remainingSlots.delete(bestSingle.rune.slot);
-    usedRunes.add(bestSingle.rune.id);
-    draft.totalScore += gameScores.get(bestSingle.rune.id) ?? 0;
-    draft.cr += crScores.get(bestSingle.rune.id) ?? 0;
   }
 
   // ── 神器：一件屬性神器 + 一件類型神器（跟選角優先級分配） ──
@@ -678,12 +741,32 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       return best;
     };
     const artifacts: Artifact[] = [];
-    const attrArtifact = pickArtifact((a) => a.type === 1 && (a.attr === monster.el || a.attr === 98));
-    if (attrArtifact) artifacts.push(attrArtifact);
-    const typeArtifact = pickArtifact(
-      (a) => a.type === 2 && (a.style === styleId || a.style === 98),
-    );
-    if (typeArtifact) artifacts.push(typeArtifact);
+    if (mode === "topup") {
+      // 只補空位：保留現有神器，缺的才用未裝備神器補
+      for (const aid of unit.artifacts ?? []) {
+        const art = artifactById.get(aid);
+        if (!art || usedArtifacts.has(art.id)) continue;
+        artifacts.push(art);
+        usedArtifacts.add(art.id);
+      }
+      const free = (filter: (art: Artifact) => boolean) =>
+        pickArtifact((a) => a.occupied === 0 && filter(a));
+      if (!artifacts.some((a) => a.type === 1)) {
+        const attrFree = free((a) => a.type === 1 && (a.attr === monster.el || a.attr === 98));
+        if (attrFree) artifacts.push(attrFree);
+      }
+      if (!artifacts.some((a) => a.type === 2)) {
+        const typeFree = free((a) => a.type === 2 && (a.style === styleId || a.style === 98));
+        if (typeFree) artifacts.push(typeFree);
+      }
+    } else {
+      const attrArtifact = pickArtifact((a) => a.type === 1 && (a.attr === monster.el || a.attr === 98));
+      if (attrArtifact) artifacts.push(attrArtifact);
+      const typeArtifact = pickArtifact(
+        (a) => a.type === 2 && (a.style === styleId || a.style === 98),
+      );
+      if (typeArtifact) artifacts.push(typeArtifact);
+    }
 
     const runes = [...draft.runes].sort((a, b) => a.slot - b.slot);
     const setCount = new Map<number, number>();
@@ -705,6 +788,13 @@ export function buildWorldBossPlan(account: Account, opts: WbPlanOptions): WbMon
       skillReq: draft.skillReq,
       runes,
       runeScoreTotal: draft.totalScore,
+      ...(mode === "topup"
+        ? {
+            previousScore: draft.baseScore,
+            currentRunes: runes.filter((r) => draft.baseRuneIds.has(r.id)),
+            addedRunes: runes.filter((r) => !draft.baseRuneIds.has(r.id)),
+          }
+        : {}),
       artifacts,
       sets,
       setLayout: layoutOf(sets),

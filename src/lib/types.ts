@@ -126,6 +126,11 @@ export interface Unit {
   /** 技能升級總次數（各技能等級 - 1 的總和）；舊存檔可能沒有 */
   skillUps?: number;
   /**
+   * 遊戲內「魔靈分類」編號（unit_marker_list.lock_type）：
+   * 1–8 對應分類 1–8，其他值（例如 100）保留原值；舊存檔可能沒有。
+   */
+  category?: number;
+  /**
    * 自訂顯示名稱。同一隻魔靈可以練好幾隻，重複時會自動在名稱後面加數字
    * （例如「水仙人2」），也可以在魔靈詳情裡自行改名。
    * 未設定時顯示魔靈圖鑑的名稱。
@@ -208,6 +213,11 @@ export interface Account {
   summons?: SummonRecord[];
   /** 持有的精煉石（磨石）素材（舊存檔可能沒有；需重新匯入） */
   grindstones?: Grindstone[];
+  /**
+   * 魔靈分類名稱（遊戲內 markers type 3，sub_type = 分類編號）。
+   * 只有玩家自行改過名稱的分類才會有值，例如 { 5: "世界王" }。
+   */
+  categoryNames?: Record<number, string>;
 }
 
 export interface BonusConfig {

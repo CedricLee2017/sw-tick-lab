@@ -184,8 +184,8 @@ export interface ParseResult {
   warnings: string[];
 }
 
-/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值、取得時間軸、精煉石素材、技能升級次數 */
-export const PARSE_VERSION = 10;
+/** 解析規則版本：SWEX v1.1.0 的 stat/set ID、裝備符文合併、遠古星級、精煉值、取得時間軸、精煉石素材、技能升級次數、魔靈分類 */
+export const PARSE_VERSION = 11;
 
 export function parseAccountJSON(text: string, fileName = "account.json"): ParseResult {
   const warnings: string[] = [];
@@ -394,6 +394,32 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
     warnings.push(`精煉石素材：${grindstones.length} 種（共 ${total} 個）。`);
   }
 
+  // 魔靈分類（遊戲內「魔靈分類」1–8）：設定值存在 unit_marker_list.lock_type，
+  // 分類名稱存在 markers（type 3、sub_type = 分類編號），只有改過名的分類才有記錄。
+  const categoryOf = new Map<number, number>();
+  for (const m of list(body.unit_marker_list)) {
+    const uid = num(m?.unit_id);
+    const lockType = num(m?.lock_type);
+    if (uid > 0 && lockType > 0) categoryOf.set(uid, lockType);
+  }
+  const categoryNames: Record<number, string> = {};
+  for (const m of list(body.markers)) {
+    if (num(m?.type) !== 3) continue;
+    const sub = num(m?.sub_type);
+    const description = typeof m?.description === "string" ? m.description.trim() : "";
+    if (sub > 0 && description) categoryNames[sub] = description;
+  }
+  if (categoryOf.size > 0) {
+    const used = new Set(categoryOf.values());
+    const named = Object.entries(categoryNames)
+      .map(([cat, name]) => `分類 ${cat}「${name}」`)
+      .join("、");
+    warnings.push(
+      `魔靈分類：${categoryOf.size} 隻（用到分類 ${[...used].sort((a, b) => a - b).join("、")}` +
+        `${named ? `；${named}` : ""}）。`,
+    );
+  }
+
   const units: Unit[] = [];
   let skippedUnits = 0;
   for (const u of rawUnits) {
@@ -429,6 +455,9 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       ? list(u.skills).reduce((n: number, sk: any) => n + Math.max(0, num(sk?.[1] ?? sk?.level) - 1), 0)
       : Math.max(0, num(u.skill_ups));
 
+    // 分類優先用 unit_marker_list，其次接受本工具匯出的 unit.category
+    const category = categoryOf.get(id) ?? (num(u.category) > 0 ? num(u.category) : undefined);
+
     units.push({
       id,
       master,
@@ -438,6 +467,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       artifacts: unitArtifacts,
       locked: truthy(u.locked),
       ...(skillUps > 0 || isList(u.skills) ? { skillUps } : {}),
+      ...(category !== undefined ? { category } : {}),
     });
   }
 
@@ -642,6 +672,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       defenseDecks,
       summons,
       grindstones,
+      ...(Object.keys(categoryNames).length > 0 ? { categoryNames } : {}),
     },
     warnings,
   };
@@ -665,6 +696,16 @@ export function exportAccount(account: Account): string {
       rune_ids: u.runes,
       artifact_ids: u.artifacts,
       skill_ups: u.skillUps,
+      category: u.category,
+    })),
+    // 魔靈分類：指派（lock_type）與分類名稱（markers type 3）都要匯出才能再次匯入
+    unit_marker_list: account.units
+      .filter((u) => u.category !== undefined)
+      .map((u) => ({ unit_id: u.id, lock_type: u.category })),
+    markers: Object.entries(account.categoryNames ?? {}).map(([sub, description]) => ({
+      type: 3,
+      sub_type: Number(sub),
+      description,
     })),
     // 背包 / 保管箱中的魔靈不在 account.units，另外輸出才能保留取得時間軸。
     unit_storage_normal_list: (account.summons ?? [])

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Crown, Info, ListOrdered, Search } from "lucide-react";
+import { Crown, Info, ListOrdered, Search, Sparkles } from "lucide-react";
 import { MONSTER_MAP, monsterLabel, unitLabel, useStore } from "../store";
 import { ArtifactCard, MonsterIcon, NumberInput, RuneCard, StatGrid, fmt } from "../components/ui";
 import { MonsterDetailModal } from "../components/MonsterDetail";
@@ -10,14 +10,23 @@ import {
   WB_ALLOCATION_LABEL,
   WB_ARCH_LABEL,
   WB_MAIN_LABEL,
+  WB_MODE_LABEL,
   WB_TIER_LABEL,
   buildWorldBossPlan,
   type WbAllocation,
   type WbMainStat,
+  type WbMode,
   type WbMonsterPlan,
 } from "../lib/worldBossAdvice";
 
-type SortKey = "runeScore" | "priority" | "focus";
+type SortKey = "runeScore" | "priority" | "focus" | "skill";
+
+/** 遊戲內「魔靈分類」的顯示名稱：有自訂名稱就用，否則用預設分類編號 */
+function categoryLabel(names: Record<number, string> | undefined, category: number): string {
+  const custom = names?.[category]?.trim();
+  if (custom) return `分類 ${category}「${custom}」`;
+  return `分類 ${category}`;
+}
 
 /** 符文盤排列：6 1 2 / 5 4 3 */
 const RUNE_BOARD_ORDER = [6, 1, 2, 5, 4, 3] as const;
@@ -88,9 +97,25 @@ function PlanCard({
           <span className="chip gold" title="主要堆疊的面板屬性">
             {FOCUS_LABEL[plan.focus]} {fmt(plan.focusValue)}
           </span>
-          <span className="chip" title="6 顆符文的遊戲分數（◆）總和">
-            ◆ 總分 {fmt(plan.runeScoreTotal)}
-          </span>
+          {plan.previousScore !== undefined ? (
+            <span
+              className={`chip ${plan.runeScoreTotal > plan.previousScore ? "gold" : "muted"}`}
+              title="只補空位：保留現有符文，只用未裝備的符文補滿 6 顆後的 ◆ 總和"
+            >
+              ◆ {fmt(plan.previousScore)} → {fmt(plan.runeScoreTotal)}
+              {plan.runeScoreTotal > plan.previousScore &&
+                `（+${fmt(plan.runeScoreTotal - plan.previousScore)}）`}
+            </span>
+          ) : (
+            <span className="chip" title="6 顆符文的遊戲分數（◆）總和">
+              ◆ 總分 {fmt(plan.runeScoreTotal)}
+            </span>
+          )}
+          {plan.addedRunes && plan.addedRunes.length > 0 && (
+            <span className="chip muted" title="這次新增的符文（原本是空位）">
+              補上 {plan.addedRunes.length} 顆
+            </span>
+          )}
           <span
             className="chip muted"
             title={`2/4/6 位實際主屬性（依魔靈類型${plan.monster.arch === "Support" ? `與基本體力 ${fmt(plan.base.hp)}／防禦 ${fmt(plan.base.def)}` : ""}決定；4 號位可用爆傷／爆率）`}
@@ -136,7 +161,12 @@ function PlanCard({
               );
             }
             const owner = runeOwner.get(rune.id);
-            return <RuneCard key={rune.id} rune={rune} owner={owner ? `現在：${owner}` : "現在：未裝備"} />;
+            const isNew = plan.addedRunes?.some((r) => r.id === rune.id);
+            return (
+              <RuneCard key={rune.id} rune={rune} owner={owner ? `現在：${owner}` : "現在：未裝備"}>
+                {isNew && <span className="rune-tag gold">新增（補空位）</span>}
+              </RuneCard>
+            );
           })}
         </div>
 
@@ -178,6 +208,8 @@ export default function WorldBossAdvicePage() {
   const [count, setCount] = useState(60);
   const [minRuneTotal, setMinRuneTotal] = useState(0);
   const [allocation, setAllocation] = useState<WbAllocation>("balanced");
+  const [mode, setMode] = useState<WbMode>("rebuild");
+  const [category, setCategory] = useState(0);
   const [freeOnly, setFreeOnly] = useState(false);
   const [arch, setArch] = useState("");
   const [sort, setSort] = useState<SortKey>("runeScore");
@@ -203,12 +235,25 @@ export default function WorldBossAdvicePage() {
     [skillData],
   );
 
+  /** 帳號內實際用到的魔靈分類（含數量），給分類選單用 */
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const u of account?.units ?? []) {
+      if (u.category === undefined) continue;
+      counts.set(u.category, (counts.get(u.category) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => a[0] - b[0]);
+  }, [account]);
+
   const plan = useMemo(
     () =>
       account
         ? buildWorldBossPlan(account, {
             count,
-            waterOnly: true,
+            // 指定分類時以分類為準（你在遊戲內親手挑的魔靈），否則預設只看水系
+            waterOnly: category === 0,
+            category,
+            mode,
             excludedRunes,
             freeOnly,
             bonus,
@@ -217,7 +262,7 @@ export default function WorldBossAdvicePage() {
             monsterOf: (id) => MONSTER_MAP.get(id),
           })
         : [],
-    [account, count, excludedRunes, freeOnly, bonus, allocation, skillReqOf],
+    [account, count, category, mode, excludedRunes, freeOnly, bonus, allocation, skillReqOf],
   );
 
   /** 最低符文總和只影響下方清單，不會改動平衡配符的結果 */
@@ -242,8 +287,16 @@ export default function WorldBossAdvicePage() {
     () => (account?.units ?? []).filter((u) => MONSTER_MAP.get(u.master)?.el === 1).length,
     [account],
   );
+  const categoryCount = useMemo(
+    () => (category > 0 ? (account?.units ?? []).filter((u) => u.category === category).length : 0),
+    [account, category],
+  );
   const hasSkillData = useMemo(
     () => (account?.units ?? []).some((u) => u.skillUps !== undefined),
+    [account],
+  );
+  const hasCategoryData = useMemo(
+    () => (account?.units ?? []).some((u) => u.category !== undefined),
     [account],
   );
 
@@ -267,8 +320,35 @@ export default function WorldBossAdvicePage() {
     }
     if (sort === "focus") arr = [...arr].sort((a, b) => b.focusValue - a.focusValue);
     if (sort === "runeScore") arr = [...arr].sort((a, b) => b.runeScoreTotal - a.runeScoreTotal);
+    if (sort === "skill") {
+      arr = [...arr].sort(
+        (a, b) =>
+          (b.skillReq ?? b.skillUps ?? 0) - (a.skillReq ?? a.skillUps ?? 0) ||
+          b.runeScoreTotal - a.runeScoreTotal,
+      );
+    }
     return arr;
   }, [qualified, arch, q, sort]);
+
+  /** 升技需求分析：目前選到的魔靈，依升滿所需次數由高到低 */
+  const skillRows = useMemo(
+    () =>
+      [...plan].sort(
+        (a, b) =>
+          (b.skillReq ?? b.skillUps ?? 0) - (a.skillReq ?? a.skillUps ?? 0) ||
+          (b.skillUps ?? 0) - (a.skillUps ?? 0),
+      ),
+    [plan],
+  );
+  const skillSummary = useMemo(() => {
+    const req = skillRows.reduce((n, p) => n + (p.skillReq ?? p.skillUps ?? 0), 0);
+    const ups = skillRows.reduce((n, p) => n + (p.skillUps ?? 0), 0);
+    const left = skillRows.reduce((n, p) => {
+      const need = p.skillReq ?? 0;
+      return n + Math.max(0, need - (p.skillUps ?? 0));
+    }, 0);
+    return { req, ups, left, maxed: skillRows.filter((p) => p.skillReq !== undefined && (p.skillUps ?? 0) >= p.skillReq).length };
+  }, [skillRows]);
 
   const totalStats = useMemo(() => {
     if (qualified.length === 0) return null;
@@ -289,20 +369,37 @@ export default function WorldBossAdvicePage() {
         <div className="row between wrap" style={{ gap: 10 }}>
           <div>
             <div className="card-title row" style={{ gap: 8 }}>
-              <Crown size={16} className="gold" /> 世界王 {count} 隻水系配裝建議
+              <Crown size={16} className="gold" /> 世界王 {count} 隻
+              {category > 0 ? `（${categoryLabel(account?.categoryNames, category)}）` : "水系"}配裝建議
             </div>
             <div className="card-sub">
-              依「原五 &gt; 二覺 &gt; 原四，再比技能升滿所需次數（例如水猴 12）」挑選水屬性魔靈。
+              依「原五 &gt; 二覺 &gt; 原四，再比技能升滿所需次數（例如水猴 12）」挑選
+              {category > 0 ? "你在遊戲內標記的分類" : "水屬性"}魔靈。
               套裝優先 2+2+2；如果 3 組 2 件套的分數較低，會改用 4+2（例如暴走 4 + 意志 2）。
               2/6 位主屬性：攻擊型攻擊%、體力型體力%、防禦型防禦%，支援型依基本體力／防禦力混搭；
               4 號位可用爆傷或爆率（爆率會盡量控制在 100% 以下）。
-              符文分配可切換「平均」或「集中」：集中會依角色優先順序，把最高分符文先補滿前面的魔靈。
+              符文分配可切換「平均」或「集中」；配符方式可切換「重新配符」或「只補空位」。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
-            <span className="chip muted">水系魔靈 {fmt(waterCount)}</span>
+            {category > 0 ? (
+              <span className="chip muted" title="遊戲內「魔靈分類」的數量">
+                {categoryLabel(account?.categoryNames, category)} {fmt(categoryCount)} 隻
+              </span>
+            ) : (
+              <span className="chip muted">水系魔靈 {fmt(waterCount)}</span>
+            )}
             <span className="chip gold">已選 {plan.length} 隻</span>
+            <span className="chip muted">配符：{WB_MODE_LABEL[mode]}</span>
             <span className="chip muted">分配：{WB_ALLOCATION_LABEL[allocation]}</span>
+            {mode === "topup" && (
+              <span
+                className="chip"
+                title="只補空位：保留每隻現有符文，只用未裝備的符文補滿 6 顆"
+              >
+                加分 +{fmt(plan.reduce((n, p) => n + (p.runeScoreTotal - (p.previousScore ?? 0)), 0))}
+              </span>
+            )}
             {minRuneTotal > 0 && (
               <span
                 className="chip"
@@ -320,9 +417,11 @@ export default function WorldBossAdvicePage() {
         </div>
         <div className="tiny dim" style={{ marginTop: 6 }}>
           <Info size={11} /> 這裡只是建議清單，不會改動你的存檔；同一顆符文 / 神器最多只會出現一次。
-          {allocation === "concentrated"
-            ? ` 集中分配：前面的魔靈會先拿最好的符文（依原五 > 二覺 > 原四，同級比技能升滿所需次數），後面的魔靈使用剩餘符文。`
-            : ` 符文以「總分最低的魔靈優先拿下一組」平衡分配，令 ${plan.length} 隻的 ◆ 總分盡量接近。`}
+          {mode === "topup"
+            ? " 只補空位：保留每隻現有符文，只用目前未裝備的符文補滿空位，不會拆掉任何魔靈身上的配裝。"
+            : allocation === "concentrated"
+              ? " 集中分配：前面的魔靈會先拿最好的符文（依原五 > 二覺 > 原四，同級比技能升滿所需次數），後面的魔靈使用剩餘符文。"
+              : ` 符文以「總分最低的魔靈優先拿下一組」平衡分配，令 ${plan.length} 隻的 ◆ 總分盡量接近。`}
           {minRuneTotal > 0 &&
             ` 最低符文總和 ${fmt(minRuneTotal)} 分只篩選下方清單（符合 ${qualified.length} 隻，隱藏 ${plan.length - qualified.length} 隻），配符仍以全部 ${plan.length} 隻分配。`}
           每隻魔靈都可以按「完整面板」查看三圍、6 顆符文與 2 件神器的完整資料。
@@ -330,6 +429,11 @@ export default function WorldBossAdvicePage() {
         {!hasSkillData && (
           <div className="chip red" style={{ marginTop: 8 }}>
             此存檔沒有技能等級資料：技能升級次數會當作 0，建議到「匯入」重新上傳 SWEX JSON。
+          </div>
+        )}
+        {!hasCategoryData && (
+          <div className="chip red" style={{ marginTop: 8 }}>
+            此存檔沒有魔靈分類資料（SWOP 舊格式可能沒有）：請用 SWEX 重新匯出 / 匯入，才能按分類挑選。
           </div>
         )}
       </div>
@@ -354,26 +458,73 @@ export default function WorldBossAdvicePage() {
           <div style={{ alignSelf: "flex-end" }}>
             <div className="tiny dim" style={{ marginBottom: 6 }}>符文分配</div>
             <div className="row" style={{ gap: 6 }}>
-              {(["balanced", "concentrated"] as WbAllocation[]).map((mode) => (
+              {(["balanced", "concentrated"] as WbAllocation[]).map((alloc) => (
                 <button
-                  key={mode}
+                  key={alloc}
                   type="button"
-                  className={`chip ${allocation === mode ? "gold" : "muted"}`}
+                  className={`chip ${allocation === alloc ? "gold" : "muted"}`}
                   style={{ cursor: "pointer" }}
-                  onClick={() => setAllocation(mode)}
+                  onClick={() => setAllocation(alloc)}
                   title={
-                    mode === "balanced"
+                    alloc === "balanced"
                       ? "符文總分盡量平均分配給所有魔靈"
                       : "依角色優先順序，把最高分符文先集中給前面的魔靈"
                   }
                 >
-                  {WB_ALLOCATION_LABEL[mode]}
+                  {WB_ALLOCATION_LABEL[alloc]}
                 </button>
               ))}
             </div>
           </div>
-          <label className="row tiny" style={{ gap: 6, cursor: "pointer", paddingTop: 18 }}>
-            <input type="checkbox" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} />
+          <div style={{ minWidth: 190 }}>
+            <div className="tiny dim">魔靈分類</div>
+            <select
+              className="select"
+              style={{ marginTop: 6 }}
+              value={category}
+              onChange={(e) => setCategory(Number(e.target.value))}
+              title="只挑選這個分類的魔靈；分類來自遊戲內「魔靈分類」"
+            >
+              <option value={0}>不限（水系全部）</option>
+              {categoryOptions.map(([cat, n]) => (
+                <option key={cat} value={cat}>
+                  {categoryLabel(account?.categoryNames, cat)}（{n} 隻）
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ alignSelf: "flex-end" }}>
+            <div className="tiny dim" style={{ marginBottom: 6 }}>配符方式</div>
+            <div className="row" style={{ gap: 6 }}>
+              {(["rebuild", "topup"] as WbMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`chip ${mode === m ? "gold" : "muted"}`}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setMode(m)}
+                  title={
+                    m === "rebuild"
+                      ? "重新配 6 顆符文（候選包含其他魔靈身上的符文）"
+                      : "只補空位：保留現有符文，只用未裝備的符文補滿 6 顆"
+                  }
+                >
+                  {WB_MODE_LABEL[m]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label
+            className="row tiny"
+            style={{ gap: 6, cursor: mode === "topup" ? "not-allowed" : "pointer", paddingTop: 18, opacity: mode === "topup" ? 0.5 : 1 }}
+            title={mode === "topup" ? "只補空位模式本身只會使用未裝備的符文" : "只從未裝備的符文挑選"}
+          >
+            <input
+              type="checkbox"
+              checked={freeOnly || mode === "topup"}
+              disabled={mode === "topup"}
+              onChange={(e) => setFreeOnly(e.target.checked)}
+            />
             只用未裝備符文（避免拆現有配裝）
           </label>
           <select className="select" style={{ width: 130, marginTop: 18 }} value={arch} onChange={(e) => setArch(e.target.value)}>
@@ -386,6 +537,7 @@ export default function WorldBossAdvicePage() {
             <option value="runeScore">符文分數總和（高→低）</option>
             <option value="priority">依挑選優先級</option>
             <option value="focus">依主屬性面板</option>
+            <option value="skill">升技需求（高→低）</option>
           </select>
           <div style={{ position: "relative", marginTop: 18 }}>
             <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
@@ -404,6 +556,71 @@ export default function WorldBossAdvicePage() {
         </div>
       </div>
 
+      <details className="card card-pad" style={{ marginBottom: 14 }}>
+        <summary className="card-title row" style={{ gap: 8, cursor: "pointer" }}>
+          <Sparkles size={15} className="gold" /> 升技需求分析（目前選到的 {skillRows.length} 隻，高→低）
+        </summary>
+        <div className="row wrap" style={{ gap: 6, margin: "10px 0 8px" }}>
+          <span className="chip muted" title="各技能 (max - 1) 的總和">
+            合計需要 +{fmt(skillSummary.req)}
+          </span>
+          <span className="chip muted">目前已升 +{fmt(skillSummary.ups)}</span>
+          <span className="chip gold">還差 +{fmt(skillSummary.left)}</span>
+          <span className="chip muted">
+            已滿技 {fmt(skillSummary.maxed)} / {skillRows.length} 隻
+          </span>
+        </div>
+        <div className="tiny dim" style={{ marginBottom: 8 }}>
+          <Info size={11} /> 「升滿需要」＝每招技能 max - 1 的總和，也就是升滿技總共要吃幾隻惡魔怪；
+          「目前」是存檔中已升的次數。同級魔靈會先挑升技需求高的，因為升滿後的世界王傷害提升最多。
+        </div>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>魔靈</th>
+                <th className="num" title="每招技能 max - 1 的總和（= 升滿技需要的惡魔怪數量）">升滿需要</th>
+                <th className="num">目前</th>
+                <th className="num">還差</th>
+                <th>類型</th>
+                <th className="num">◆ 總分</th>
+                <th>升技進度</th>
+              </tr>
+            </thead>
+            <tbody>
+              {skillRows.map((p, i) => {
+                const need = p.skillReq ?? p.skillUps ?? 0;
+                const ups = p.skillUps ?? 0;
+                const left = Math.max(0, need - ups);
+                return (
+                  <tr key={p.unit.id}>
+                    <td className="dim mono">{i + 1}</td>
+                    <td>
+                      <div className="row" style={{ gap: 6 }}>
+                        <MonsterIcon id={p.unit.master} size={24} />
+                        <span>{monsterLabel(p.unit.master)}</span>
+                        <span className="rune-tag muted">{p.monster.nat}★</span>
+                      </div>
+                    </td>
+                    <td className="num mono">{need > 0 ? `+${need}` : "—"}</td>
+                    <td className="num mono">+{ups}</td>
+                    <td className={`num mono ${left > 0 ? "gold" : "dim"}`}>{left > 0 ? `+${left}` : "滿"}</td>
+                    <td className="dim">{WB_ARCH_LABEL[p.monster.arch ?? ""] ?? p.monster.arch ?? "?"}</td>
+                    <td className="num mono">{fmt(p.runeScoreTotal)}</td>
+                    <td>
+                      <div className="bar" style={{ width: 90 }}>
+                        <i style={{ width: `${need > 0 ? Math.min(100, (ups / need) * 100) : 100}%` }} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </details>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(680px, 1fr))", gap: 12 }}>
         {shown.map((p) => (
           <PlanCard key={p.unit.id} plan={p} runeOwner={runeOwner} artifactOwner={artifactOwner} />
@@ -412,6 +629,12 @@ export default function WorldBossAdvicePage() {
       {shown.length === 0 && (
         <div className="empty">
           沒有符合條件的魔靈
+          {category > 0 && (
+            <div className="tiny dim" style={{ marginTop: 6 }}>
+              {categoryLabel(account.categoryNames, category)} 目前沒有魔靈，請在遊戲內把魔靈加入這個分類，
+              或改選其他分類。
+            </div>
+          )}
           {minRuneTotal > 0 && (
             <div className="tiny dim" style={{ marginTop: 6 }}>
               目前最低符文總和為 {fmt(minRuneTotal)} 分，可調低數值或設為 0 取消限制。
