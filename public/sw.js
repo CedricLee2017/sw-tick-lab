@@ -87,5 +87,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Lucksack 統計約兩星期更新一次，優先拿最新版（離線時才用快取）
+  if (url.pathname.endsWith("/data/lucksack.json")) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
   event.respondWith(staleWhileRevalidate(request));
 });

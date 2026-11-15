@@ -1,30 +1,40 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, Search, Swords, Trophy } from "lucide-react";
+import { ExternalLink, RefreshCw, Search, Swords, Trophy } from "lucide-react";
 import { MONSTER_MAP, unitLabel, useStore } from "../store";
 import { ELEMENTS } from "../lib/constants";
 import { rtaView, type RtaView } from "../lib/rta";
 import { effectiveSetCounts, setSummary } from "../lib/stats";
 import {
   GUARDIAN3_LABEL,
-  GUARDIAN3_RANK,
   compareBuild,
-  loadLuckCatalog,
-  loadLuckMonster,
-  loadLuckSeason,
+  entryToData,
+  findLuckEntry,
+  indexLuckDataset,
+  loadLuckDataset,
   luckComboText,
-  resolveLuckSlug,
   slotStatText,
   type BuildCheck,
-  type LuckCatalogEntry,
+  type LuckDataset,
   type LuckMonsterData,
 } from "../lib/lucksack";
 import type { Monster } from "../lib/types";
 import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, NumberInput, RuneBoard, RuneCard, TickBadge, fmt } from "../components/ui";
 
 type RtaRow = RtaView & { monster: Monster };
+type LuckFilter = "all" | "issue" | "set" | "main" | "art" | "none";
 
 /** 單隻魔靈的 Lucksack 對照明細（放在配裝彈窗裡） */
-function LuckDetail({ check, data, season }: { check: BuildCheck; data: LuckMonsterData; season: number | null }) {
+function LuckDetail({
+  check,
+  data,
+  season,
+  effectCut = 0.002,
+}: {
+  check: BuildCheck;
+  data: LuckMonsterData;
+  season: number | null;
+  effectCut?: number;
+}) {
   const sets = [...(data.stats.rune_sets ?? [])].sort((a, b) => b.pickrate - a.pickrate).slice(0, 6);
   const slots = [...(data.stats.slot_stats ?? [])].sort((a, b) => b.pickrate - a.pickrate).slice(0, 5);
   const tone = check.insufficient ? "muted" : check.score >= 70 ? "green" : check.score >= 40 ? "gold" : "red";
@@ -39,6 +49,16 @@ function LuckDetail({ check, data, season }: { check: BuildCheck; data: LuckMons
           </span>
         </div>
         <span className={`chip ${tone}`}>{check.insufficient ? "資料不足" : `符合度 ${check.score}%`}</span>
+        <a
+          className="chip muted"
+          href={`https://lucksack.gg/monster/${data.monster.slug}/stats/runes?rank=16`}
+          target="_blank"
+          rel="noreferrer"
+          style={{ textDecoration: "none" }}
+          title="在 Lucksack 查看這隻魔靈的原始統計"
+        >
+          <ExternalLink size={11} /> Lucksack
+        </a>
       </div>
 
       {check.insufficient && (
@@ -119,7 +139,7 @@ function LuckDetail({ check, data, season }: { check: BuildCheck; data: LuckMons
                   <td className="mono">#{a.artifactId}</td>
                   <td>{a.label}</td>
                   <td className="num" style={a.ok ? undefined : { color: "var(--gold)" }}>
-                    {a.pickrate == null ? "未出現" : `${(a.pickrate * 100).toFixed(1)}%`}
+                    {a.pickrate == null ? `未收錄（<${(effectCut * 100).toFixed(1)}%）` : `${(a.pickrate * 100).toFixed(1)}%`}
                   </td>
                 </tr>
               ))}
@@ -173,11 +193,11 @@ export default function RtaPage() {
   }, [views, el, onlyRta, q]);
 
   // ── Lucksack（Guardian 3）對照 ─────────────────────────
-  const [luckSeason, setLuckSeason] = useState<number | null>(null);
+  const [luckDataset, setLuckDataset] = useState<LuckDataset | null>(null);
   const [luckData, setLuckData] = useState<Record<number, LuckMonsterData | null>>({});
   const [luckError, setLuckError] = useState<string | null>(null);
   const [luckLoading, setLuckLoading] = useState(false);
-  const [onlyIssues, setOnlyIssues] = useState(false);
+  const [luckFilter, setLuckFilter] = useState<LuckFilter>("all");
   const [luckReload, setLuckReload] = useState(0);
   const accountRef = useRef(account);
   accountRef.current = account;
@@ -192,34 +212,23 @@ export default function RtaPage() {
     setLuckError(null);
     void (async () => {
       try {
-        const [season, catalog] = await Promise.all([loadLuckSeason(), loadLuckCatalog()]);
+        // 資料由 scripts/fetch-lucksack.mjs 預先抓好，這裡只讀 static 檔
+        const ds = await loadLuckDataset(luckReload > 0);
         if (cancelled) return;
-        if (season == null) throw new Error("讀不到賽季資料");
-        setLuckSeason(season);
-
-        const queue = [...ids];
-        const worker = async () => {
-          while (queue.length > 0 && !cancelled) {
-            const unitId = queue.shift();
-            if (unitId == null) continue;
-            const unit = acc.units.find((u) => u.id === unitId);
-            const monster = unit ? MONSTER_MAP.get(unit.master) : undefined;
-            let data: LuckMonsterData | null = null;
-            if (unit && monster) {
-              const slug = resolveLuckSlug({ id: monster.id, name: monster.name, el: monster.el }, catalog);
-              if (slug) {
-                try {
-                  data = await loadLuckMonster(slug, season, GUARDIAN3_RANK);
-                } catch {
-                  data = null;
-                }
-              }
-            }
-            if (cancelled) return;
-            setLuckData((prev) => ({ ...prev, [unitId]: data }));
-          }
-        };
-        await Promise.all([worker(), worker(), worker(), worker()]);
+        if (!ds) {
+          setLuckError("找不到 Lucksack 資料檔");
+          return;
+        }
+        setLuckDataset(ds);
+        const index = indexLuckDataset(ds);
+        const map: Record<number, LuckMonsterData | null> = {};
+        for (const unitId of ids) {
+          const unit = acc.units.find((u) => u.id === unitId);
+          const monster = unit ? MONSTER_MAP.get(unit.master) : undefined;
+          const entry = monster ? findLuckEntry(index, monster) : null;
+          map[unitId] = entry ? entryToData(entry) : null;
+        }
+        setLuckData(map);
       } catch (e) {
         if (!cancelled) setLuckError((e as Error)?.message ?? String(e));
       } finally {
@@ -234,20 +243,55 @@ export default function RtaPage() {
   /** 每隻魔靈的 Lucksack 比對結果（沒有資料的就是 null） */
   const checks = useMemo(() => {
     const map = new Map<number, BuildCheck | null>();
-    for (const v of views) map.set(v.unit.id, compareBuild(v.runes, v.artifacts, luckData[v.unit.id] ?? null));
+    const cut = luckDataset?.effectCut ?? 0.002;
+    for (const v of views) map.set(v.unit.id, compareBuild(v.runes, v.artifacts, luckData[v.unit.id] ?? null, cut));
     return map;
-  }, [views, luckData]);
+  }, [views, luckData, luckDataset]);
 
+  /** 各類問題數量（給篩選 chips 用） */
+  const luckCounts = useMemo(() => {
+    let issue = 0;
+    let set = 0;
+    let main = 0;
+    let art = 0;
+    let none = 0;
+    for (const c of checks.values()) {
+      if (!c) {
+        none++;
+        continue;
+      }
+      if (c.warnings.length > 0) issue++;
+      if (!c.insufficient && !c.setOk) set++;
+      if (!c.insufficient && !c.mainOk) main++;
+      if (!c.artifactOk) art++;
+    }
+    return { issue, set, main, art, none };
+  }, [checks]);
+
+  /** 排序：有提醒的優先、其次符合度低到高、沒有資料的放最後 */
   const luckRows = useMemo(() => {
     return views
       .map((v) => ({ view: v, check: checks.get(v.unit.id) ?? null, data: luckData[v.unit.id] ?? null }))
-      .filter((row) => (onlyIssues ? !!row.check && row.check.warnings.length > 0 : true));
-  }, [views, checks, luckData, onlyIssues]);
+      .sort((a, b) => {
+        if (!a.check && !b.check) return 0;
+        if (!a.check) return 1;
+        if (!b.check) return -1;
+        return b.check.warnings.length - a.check.warnings.length || a.check.score - b.check.score;
+      });
+  }, [views, checks, luckData]);
 
-  const issueCount = useMemo(
-    () => [...checks.values()].filter((c) => c && c.warnings.length > 0).length,
-    [checks],
-  );
+  const luckFiltered = useMemo(() => {
+    if (luckFilter === "none") return luckRows.filter((row) => !row.check);
+    return luckRows.filter((row) => {
+      const c = row.check;
+      if (!c) return false;
+      if (luckFilter === "issue") return c.warnings.length > 0;
+      if (luckFilter === "set") return !c.insufficient && !c.setOk;
+      if (luckFilter === "main") return !c.insufficient && !c.mainOk;
+      if (luckFilter === "art") return !c.artifactOk;
+      return true;
+    });
+  }, [luckRows, luckFilter]);
 
   const current = open !== null ? views.find((v) => v.unit.id === open) : undefined;
   const currentCheck = current ? checks.get(current.unit.id) ?? null : null;
@@ -301,23 +345,21 @@ export default function RtaPage() {
               Lucksack 對照{" "}
               <span className="dim tiny" style={{ fontWeight: 400 }}>
                 {GUARDIAN3_LABEL}
-                {luckSeason ? ` · 第 ${luckSeason} 賽季` : ""}
+                {luckDataset ? ` · 第 ${luckDataset.season} 賽季 · 資料 ${new Date(luckDataset.updatedAt).toLocaleDateString("zh-TW")}` : ""}
               </span>
             </div>
             <div className="card-sub">
-              用 Lucksack 的 RTA 數據檢查常用魔靈的套裝、2/4/6 主屬性與神器效果是否符合主流，不符合的會標提醒。
+              用 Lucksack 的 RTA 統計檢查常用魔靈的套裝、2/4/6 主屬性與神器效果是否符合主流；⚠ 標記的就是跟主流不同、可以優先調整的地方。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
-            {issueCount > 0 && <span className="chip red">{issueCount} 隻需要注意</span>}
-            <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
-              <input type="checkbox" checked={onlyIssues} onChange={(e) => setOnlyIssues(e.target.checked)} /> 只看需要注意
-            </label>
+            {luckCounts.issue > 0 && <span className="chip red">{luckCounts.issue} 隻需要注意</span>}
             <button
               type="button"
               className="btn btn-sm btn-ghost"
               onClick={() => setLuckReload((n) => n + 1)}
               disabled={luckLoading}
+              title="重新讀取 Lucksack 資料檔（資料由 scripts/fetch-lucksack.mjs 定期更新）"
             >
               <RefreshCw size={12} /> {luckLoading ? "讀取中…" : "重新整理"}
             </button>
@@ -326,88 +368,138 @@ export default function RtaPage() {
 
         {luckError ? (
           <div className="card-pad tiny" style={{ lineHeight: 1.8 }}>
-            讀不到 Lucksack 資料（{luckError}）。本機開發要先用 <span className="mono">npm run dev:api</span> 啟動 API
-            代理；正式站請確認 Pages Functions 已部署。
+            讀不到 Lucksack 資料（{luckError}）。請確認 <span className="mono">public/data/lucksack.json</span> 存在，
+            或用 <span className="mono">npm run data:lucksack</span> 重新抓取。
           </div>
         ) : (
-          <div className="card-pad col" style={{ gap: 6 }}>
-            {luckRows.map(({ view, check, data }) => {
-              if (!check || !data) {
-                return (
-                  <div key={view.unit.id} className="rta-row" style={{ cursor: "default", opacity: 0.7 }}>
-                    <MonsterIcon id={view.monster.id} size={36} />
-                    <span className="rta-main">
-                      <span className="row" style={{ gap: 6 }}>
-                        <b style={{ fontSize: 13.5 }}>{unitLabel(view.unit)}</b>
-                      </span>
-                      <span className="tiny dim">
-                        {luckLoading ? "讀取 Lucksack 資料…" : "Lucksack 沒有這隻的 Guardian 3 資料"}
-                      </span>
-                    </span>
-                  </div>
-                );
-              }
-              const bad = check.warnings.length > 0;
-              const insufficient = check.insufficient;
-              return (
-                <button key={view.unit.id} type="button" className="rta-row" onClick={() => setOpen(view.unit.id)}>
-                  <MonsterIcon id={view.monster.id} size={38} />
-                  <span className="rta-main">
-                    <span className="row wrap" style={{ gap: 6 }}>
-                      <b style={{ fontSize: 13.5 }}>{unitLabel(view.unit)}</b>
-                      <span className={`chip ${insufficient ? "muted" : bad ? "red" : "green"}`}>
-                        {insufficient ? "資料不足" : bad ? `⚠ ${check.warnings.length}` : "✓ 符合主流"}
-                      </span>
-                      {!insufficient && <span className="tiny dim">符合度 {check.score}%</span>}
-                      {data.summary && (
-                        <span className="tiny dim">
-                          · 選用 {(data.summary.pick_rate * 100).toFixed(1)}% · 勝率 {(data.summary.win_rate * 100).toFixed(1)}%
-                        </span>
-                      )}
-                    </span>
-                    <span
-                      className="tiny dim"
-                      style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    >
-                      {insufficient
-                        ? "Guardian 3 樣本太少，Lucksack 沒有提供套裝 / 主屬性統計"
-                        : bad
-                          ? check.warnings[0]
-                          : `${check.comboLabel} · ${check.mainLabel}`}
-                    </span>
-                  </span>
-                  <span className="row" style={{ gap: 4 }}>
-                    <span
-                      className={`chip ${insufficient ? "muted" : check.setOk ? "green" : "red"}`}
-                      title={insufficient ? "資料不足" : `套裝：${check.comboLabel}`}
-                    >
-                      套裝
-                    </span>
-                    <span
-                      className={`chip ${insufficient ? "muted" : check.mainOk ? "green" : "red"}`}
-                      title={insufficient ? "資料不足" : `主屬性：${check.mainLabel}`}
-                    >
-                      主屬
-                    </span>
-                    <span
-                      className={`chip ${check.artifactOk ? "green" : "red"}`}
-                      title={`神器常見效果 ${check.artifactGood}/${check.artifactTotal} 條`}
-                    >
-                      神器
-                    </span>
-                  </span>
+          <>
+            <div className="card-pad row wrap" style={{ gap: 6, borderBottom: "1px solid var(--line-soft)" }}>
+              {([
+                ["all", `有資料 ${views.length - luckCounts.none}`],
+                ["issue", `需要注意 ${luckCounts.issue}`],
+                ["set", `套裝 ${luckCounts.set}`],
+                ["main", `主屬 ${luckCounts.main}`],
+                ["art", `神器 ${luckCounts.art}`],
+                ["none", `沒資料 ${luckCounts.none}`],
+              ] as [LuckFilter, string][]).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`chip ${luckFilter === key ? "gold" : "muted"}`}
+                  style={{ cursor: "pointer" }}
+                  aria-pressed={luckFilter === key}
+                  onClick={() => setLuckFilter(key)}
+                >
+                  {label}
                 </button>
-              );
-            })}
-            {luckRows.length === 0 && (
-              <div className="empty" style={{ padding: "18px 0" }}>
-                {luckLoading ? "正在讀取 Lucksack 資料…" : "沒有需要注意的魔靈"}
+              ))}
+              <span className="tiny dim" style={{ marginLeft: "auto" }}>
+                點任一列看完整比較
+              </span>
+            </div>
+
+            {luckFiltered.length === 0 ? (
+              <div className="empty" style={{ padding: "22px 16px" }}>
+                {luckLoading ? "正在讀取 Lucksack 資料…" : luckFilter === "none" ? "全部都有資料" : "沒有符合這個篩選的魔靈"}
+              </div>
+            ) : luckFilter === "none" ? (
+              <div className="card-pad row wrap" style={{ gap: 8 }}>
+                {luckFiltered.map(({ view }) => (
+                  <span key={view.unit.id} className="chip muted" title="Lucksack 在 Guardian 3 沒有這隻的統計（樣本太少或還沒收錄）">
+                    {unitLabel(view.unit)}
+                  </span>
+                ))}
+                <div className="tiny dim" style={{ flexBasis: "100%", marginTop: 4 }}>
+                  這些魔靈在 Guardian 3 幾乎沒人使用，Lucksack 沒有提供套裝 / 主屬 / 神器統計，因此不列入比較。
+                </div>
+              </div>
+            ) : (
+              <div className="table-scroll luck-scroll">
+                <table className="table luck-table">
+                  <thead>
+                    <tr>
+                      <th>魔靈</th>
+                      <th className="num">符合度</th>
+                      <th>套裝</th>
+                      <th>主屬（2/4/6）</th>
+                      <th className="num">神器</th>
+                      <th>提醒</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {luckFiltered.map(({ view, check, data }) => {
+                      const c = check as BuildCheck;
+                      const insufficient = c.insufficient;
+                      const bad = c.warnings.length > 0;
+                      return (
+                        <tr key={view.unit.id} onClick={() => setOpen(view.unit.id)} style={{ cursor: "pointer" }}>
+                          <td>
+                            <span className="row" style={{ gap: 6, alignItems: "center" }}>
+                              <MonsterIcon id={view.monster.id} size={26} />
+                              <span className="col" style={{ gap: 0 }}>
+                                <b style={{ fontSize: 12.5 }}>{unitLabel(view.unit)}</b>
+                                <span className="tiny dim">
+                                  {ELEMENTS[view.monster.el as 1]?.name} · 選用 {((data?.summary?.pick_rate ?? 0) * 100).toFixed(1)}%
+                                  {data?.summary ? ` · 勝率 ${(data.summary.win_rate * 100).toFixed(1)}%` : ""}
+                                </span>
+                              </span>
+                            </span>
+                          </td>
+                          <td className="num">
+                            {insufficient ? (
+                              <span className="chip muted">—</span>
+                            ) : (
+                              <span className={`chip ${c.score >= 70 ? "green" : c.score >= 40 ? "gold" : "red"}`}>
+                                {c.score}%
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ color: insufficient ? "var(--muted)" : c.setOk ? "var(--green)" : "var(--gold)" }}>
+                            {insufficient ? "資料不足" : c.setOk ? `✓ ${c.comboLabel}` : `⚠ ${c.comboLabel}`}
+                          </td>
+                          <td style={{ color: insufficient ? "var(--muted)" : c.mainOk ? "var(--green)" : "var(--gold)" }}>
+                            {insufficient ? "資料不足" : c.mainOk ? `✓ ${c.mainLabel}` : `⚠ ${c.mainLabel}`}
+                          </td>
+                          <td className="num" style={{ color: c.artifactOk ? "var(--green)" : "var(--gold)" }}>
+                            {c.artifactTotal === 0 ? "—" : `${c.artifactOk ? "✓" : "⚠"} ${c.artifactGood}/${c.artifactTotal}`}
+                          </td>
+                          <td
+                            className="tiny"
+                            style={{ color: bad ? "var(--gold)" : "var(--muted)", maxWidth: 320 }}
+                            title={bad ? c.warnings.join("\n") : undefined}
+                          >
+                            <span style={{ display: "inline-block", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {insufficient ? "樣本太少，只能比對神器" : bad ? `⚠ ${c.warnings[0]}` : "✓ 符合主流"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
-            <div className="tiny dim" style={{ marginTop: 2 }}>
-              資料來源：lucksack.gg · {GUARDIAN3_LABEL} · 快取 6 小時；點任一列可看完整比較與熱門配法。
+
+            <div className="card-pad tiny dim" style={{ paddingTop: 0 }}>
+              {luckCounts.none > 0 && luckFilter !== "none" && (
+                <span>
+                  另有 <b>{luckCounts.none}</b> 隻在 Guardian 3 沒有統計（
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    style={{ padding: "0 4px", fontSize: 11 }}
+                    onClick={() => setLuckFilter("none")}
+                  >
+                    查看
+                  </button>
+                  ）。{" "}
+                </span>
+              )}
+              資料來源：lucksack.gg · {GUARDIAN3_LABEL}
+              {luckDataset ? ` · 第 ${luckDataset.season} 賽季 · ${new Date(luckDataset.updatedAt).toLocaleString("zh-TW")} 更新` : ""}
+              。統計兩星期更新一次，可用 <span className="mono">npm run data:lucksack</span> 重新抓取。
             </div>
-          </div>
+          </>
         )}
       </div>
 
@@ -564,7 +656,8 @@ export default function RtaPage() {
             <LuckDetail
               check={currentCheck}
               data={luckData[current.unit.id] as LuckMonsterData}
-              season={luckSeason}
+              season={luckDataset?.season ?? null}
+              effectCut={luckDataset?.effectCut ?? 0.002}
             />
           )}
 

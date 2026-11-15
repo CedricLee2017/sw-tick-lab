@@ -536,6 +536,12 @@ p { margin: 0; }
 /* 自行分類（標籤）：綠色，和金色套裝／效率標籤區隔 */
 .rune-tag.tag { color: #6ee7b7; border-color: rgba(110,231,183,.4); background: rgba(16,185,129,.12); }
 
+/* RTA：Lucksack 對照表 */
+.luck-scroll { max-height: 460px; overflow: auto; }
+.luck-table th, .luck-table td { padding-top: 6px; padding-bottom: 6px; vertical-align: middle; }
+.luck-table thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.luck-table tbody tr:hover td { background: rgba(18, 27, 48, .6); }
+
 /* 自行分類編輯器 */
 .tag-rule-row {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

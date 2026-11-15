@@ -1,4 +1,4 @@
-/** Lucksack（RTA 數據網站）對照：抓取 Guardian 3 的套裝 / 主屬 / 神器使用率並比對自己的配裝 */
+/** Lucksack（RTA 數據）對照：讀取預先抓好的 Guardian 3 統計並比對自己的配裝 */
 import { artifactSubText } from "./artifacts";
 import { SET_BY_ID, STAT_TYPES } from "./constants";
 import type { Artifact, Rune } from "./types";
@@ -39,6 +39,8 @@ export function luckSetToOurs(luckId: number): number {
   const name = LUCK_SET_NAME[luckId];
   return name ? OUR_SET_BY_EN.get(name.toLowerCase()) ?? 0 : 0;
 }
+
+// ── 資料檔（scripts/fetch-lucksack.mjs 產生） ──────────────
 
 export interface LuckRuneSet {
   primary_set: number;
@@ -99,106 +101,139 @@ export interface LuckMonsterData {
   stats: LuckStats;
 }
 
-export interface LuckCatalogEntry {
+/** 資料檔裡的一隻魔靈（數字都已經精簡、四捨五入） */
+export interface LuckDatasetEntry {
+  /** Lucksack 查資料用的 monster id */
   id: number;
+  /** 魔靈目錄上的 com2us id（通常等於我們的魔靈 id） */
+  cid: number;
   slug: string;
   name: string;
   el: number;
   nat: number;
+  pick: number;
+  win: number;
+  games: number;
+  /** [primary, secondary, tertiary, pickrate, winrate] */
+  sets: number[][];
+  /** [slot2, slot4, slot6, pickrate, winrate] */
+  mains: number[][];
+  /** [effect_id, pickrate]：屬性神器 */
+  arts: number[][];
+  /** [effect_id, pickrate]：類型神器 */
+  arch: number[][];
 }
 
-const ELEMENT_NAME: Record<number, string> = { 1: "Water", 2: "Fire", 3: "Wind", 4: "Light", 5: "Dark" };
-
-const API_BASE = "/api/lucksack";
+export interface LuckDataset {
+  source: string;
+  season: number;
+  rank: number;
+  rankGroup: string;
+  /** 低於這個使用率的神器效果不收錄 */
+  effectCut: number;
+  updatedAt: string;
+  monsters: LuckDatasetEntry[];
+}
 
 /** 預設只看 Guardian 3（Lucksack 的 rank id = 16） */
 export const GUARDIAN3_RANK = 16;
 export const GUARDIAN3_LABEL = "Guardian 3";
 
-const CATALOG_KEY = "swtick:lucksack:catalog";
-const CATALOG_TTL = 1000 * 60 * 60 * 24 * 7;
-const MONSTER_TTL = 1000 * 60 * 60 * 6;
-const monsterKey = (slug: string, season: number, rank: number) => `swtick:lucksack:m:${slug}:${season}:${rank}`;
+const BASE = import.meta.env.BASE_URL || "/";
+let datasetPromise: Promise<LuckDataset | null> | null = null;
 
-function readLocal<T>(key: string, ttl: number): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { at: number; data: T };
-    if (!parsed?.at || Date.now() - parsed.at > ttl) return null;
-    return parsed.data;
-  } catch {
-    return null;
+/** 讀取預先抓好的 Lucksack 資料（同一頁只抓一次） */
+export function loadLuckDataset(force = false): Promise<LuckDataset | null> {
+  if (!datasetPromise || force) {
+    datasetPromise = (async () => {
+      try {
+        const res = await fetch(`${BASE}data/lucksack.json`);
+        if (!res.ok) return null;
+        // 檔案可能是 Windows 產生的（有 BOM），先去掉再解析
+        const text = (await res.text()).replace(/^\uFEFF/, "");
+        return JSON.parse(text) as LuckDataset;
+      } catch {
+        return null;
+      }
+    })();
   }
+  return datasetPromise;
 }
 
-function writeLocal(key: string, data: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify({ at: Date.now(), data }));
-  } catch {
-    /* 容量不足時忽略，下次重新抓 */
+export interface LuckIndex {
+  /** 用魔靈目錄 id（= 我們的魔靈 id）找 */
+  byCid: Map<number, LuckDatasetEntry>;
+  /** 用 Lucksack 查資料的 id 找 */
+  byId: Map<number, LuckDatasetEntry>;
+  /** 名稱（小寫）→ 候選 */
+  byName: Map<string, LuckDatasetEntry[]>;
+}
+
+export function indexLuckDataset(ds: LuckDataset): LuckIndex {
+  const byCid = new Map<number, LuckDatasetEntry>();
+  const byId = new Map<number, LuckDatasetEntry>();
+  const byName = new Map<string, LuckDatasetEntry[]>();
+  for (const e of ds.monsters) {
+    if (e.cid) byCid.set(e.cid, e);
+    byId.set(e.id, e);
+    const key = e.name.trim().toLowerCase();
+    const list = byName.get(key);
+    if (list) list.push(e);
+    else byName.set(key, [e]);
   }
+  return { byCid, byId, byName };
 }
 
-/** 目前的 RTA 賽季（Lucksack 的 seasons 表） */
-export async function loadLuckSeason(): Promise<number | null> {
-  try {
-    const res = await fetch(`${API_BASE}?seasons=1`);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { current?: number | null };
-    return typeof data.current === "number" ? data.current : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 魔靈目錄（id / slug / 名稱 / 屬性），用來把我們的魔靈對到 Lucksack 的頁面 */
-export async function loadLuckCatalog(): Promise<LuckCatalogEntry[]> {
-  const cached = readLocal<LuckCatalogEntry[]>(CATALOG_KEY, CATALOG_TTL);
-  if (cached && cached.length > 0) return cached;
-  const res = await fetch(`${API_BASE}?catalog=1`);
-  if (!res.ok) throw new Error(`catalog ${res.status}`);
-  const data = (await res.json()) as LuckCatalogEntry[];
-  if (Array.isArray(data) && data.length > 0) writeLocal(CATALOG_KEY, data);
-  return Array.isArray(data) ? data : [];
-}
-
-/** 用我們的魔靈（com2us id + 名稱 + 屬性）找出 Lucksack 的 slug */
-export function resolveLuckSlug(
+/** 把我們的魔靈對到資料檔（先看 id，再看名稱＋屬性） */
+export function findLuckEntry(
+  index: LuckIndex,
   monster: { id: number; name: string; el: number },
-  catalog: LuckCatalogEntry[],
-): string | null {
-  const byId = catalog.find((c) => c.id === monster.id);
-  if (byId) return byId.slug;
-  const name = monster.name.trim().toLowerCase();
-  const elName = ELEMENT_NAME[monster.el];
-  const byName = catalog.filter((c) => c.name.trim().toLowerCase() === name);
-  const exact = byName.find((c) => elName && ELEMENT_NAME[c.el] === elName);
-  return (exact ?? byName[0])?.slug ?? null;
+): LuckDatasetEntry | null {
+  const byId = index.byCid.get(monster.id) ?? index.byId.get(monster.id);
+  if (byId) return byId;
+  const list = index.byName.get(monster.name.trim().toLowerCase());
+  if (!list || list.length === 0) return null;
+  return list.find((e) => e.el === monster.el) ?? list[0];
 }
 
-const memCache = new Map<string, LuckMonsterData>();
-
-/** 抓一隻魔靈在指定賽季 / 牌位的統計（含 localStorage 快取） */
-export async function loadLuckMonster(
-  slug: string,
-  season: number,
-  rank = GUARDIAN3_RANK,
-): Promise<LuckMonsterData> {
-  const key = monsterKey(slug, season, rank);
-  const mem = memCache.get(key);
-  if (mem) return mem;
-  const cached = readLocal<LuckMonsterData>(key, MONSTER_TTL);
-  if (cached) {
-    memCache.set(key, cached);
-    return cached;
-  }
-  const res = await fetch(`${API_BASE}?slug=${encodeURIComponent(slug)}&season=${season}&rank=${rank}`);
-  if (!res.ok) throw new Error(`lucksack ${res.status}`);
-  const data = (await res.json()) as LuckMonsterData;
-  memCache.set(key, data);
-  writeLocal(key, data);
-  return data;
+/** 資料檔的一筆 → 與 compareBuild 相同的格式 */
+export function entryToData(e: LuckDatasetEntry): LuckMonsterData {
+  // 資料檔是外部產生的，遇到格式不正確的列就跳過，避免整頁壞掉
+  const rows = (v: unknown): number[][] => (Array.isArray(v) ? (v.filter((r) => Array.isArray(r)) as number[][]) : []);
+  return {
+    monster: { slug: e.slug, id: e.id, name: e.name, naturalStars: e.nat },
+    summary: {
+      battle_count: e.games,
+      pick_count: 0,
+      win_count: 0,
+      ban_count: 0,
+      lead_count: 0,
+      pick_rate: e.pick,
+      win_rate: e.win,
+      ban_rate: 0,
+      lead_rate: 0,
+    },
+    stats: {
+      rune_sets: rows(e.sets).map(([primary, secondary, tertiary, pickrate, winrate]) => ({
+        primary_set: primary,
+        secondary_set: secondary || null,
+        tertiary_set: tertiary || null,
+        count: 0,
+        pickrate,
+        winrate,
+      })),
+      slot_stats: rows(e.mains).map(([slotTwo, slotFour, slotSix, pickrate, winrate]) => ({
+        slot_two: slotTwo,
+        slot_four: slotFour,
+        slot_six: slotSix,
+        count: 0,
+        pickrate,
+        winrate,
+      })),
+      artifact_type: rows(e.arts).map(([effectId, pickrate]) => ({ effect_id: effectId, pickrate, count: 0, winrate: 0 })),
+      artifact_arch: rows(e.arch).map(([effectId, pickrate]) => ({ effect_id: effectId, pickrate, count: 0, winrate: 0 })),
+    },
+  };
 }
 
 // ── 配裝比對 ──────────────────────────────────────────────
@@ -244,7 +279,6 @@ export function luckComboText(row: LuckRuneSet): string {
   return comboText(luckCombo(row));
 }
 
-/** 神器效果文字（縮短版） */
 export interface ArtifactCheck {
   artifactId: number;
   effectId: number;
@@ -298,6 +332,7 @@ export function compareBuild(
   runes: Rune[],
   artifacts: Artifact[],
   data: LuckMonsterData | null | undefined,
+  effectCut = 0.002,
 ): BuildCheck | null {
   if (!data) return null;
   const stats = data.stats ?? {};
@@ -345,7 +380,7 @@ export function compareBuild(
   const artifactGood = checks.filter((c) => c.ok).length;
   const artifactOk = artifactTotal === 0 || artifactGood === artifactTotal;
 
-  // 樣本太少的魔靈官方不提供套裝 / 主屬統計，只能看神器
+  // 樣本太少的魔靈不提供套裝 / 主屬統計，只能看神器
   const insufficient = setList.length === 0 && slotList.length === 0;
 
   // 警告
@@ -375,7 +410,7 @@ export function compareBuild(
     seen.add(c.effectId);
     warnings.push(
       c.pickrate == null
-        ? `神器效果「${c.label}」在 Guardian 3 資料中沒有出現`
+        ? `神器效果「${c.label}」在 Guardian 3 只有不到 ${(effectCut * 100).toFixed(1)}% 玩家使用`
         : `神器效果「${c.label}」只有 ${(c.pickrate * 100).toFixed(1)}% 玩家使用`,
     );
   }

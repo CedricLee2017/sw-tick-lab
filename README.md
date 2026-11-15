@@ -24,7 +24,8 @@
   - RTA 符文 / 神器來自 `world_arena_rune_equip_list` / `world_arena_artifact_equip_list`，與一般配裝完全獨立；同一顆符文可同時出現在兩邊。
   - 可切換「無速度隊長」/「有速度隊長」，速度隊長 % 可自行輸入；RTA Tick 以 1.5% / Tick 計算。
   - 每隻魔靈可展開查看 RTA 六顆符文、兩件神器、HP / ATK / DEF / EHP 與速度。
-  - **Lucksack 對照（Guardian 3）**：透過 `/api/lucksack` 代理抓取 lucksack.gg 的 RTA 統計（目前賽季、Guardian 3），逐隻比對常用魔靈的套裝組合、2/4/6 主屬性與神器效果使用率。不符合主流的會標紅提醒（例如「套裝『迅速×2 + 意志×2』不是熱門組合，最常見：暴走×4 + 意志×2，99.9%」），並給 0–100 符合度；樣本太少的魔靈標示「資料不足」，不會誤判。點任一列可看熱門套裝 / 主屬 / 神器使用率表格。資料快取 6 小時，可手動重新整理。
+  - **Lucksack 對照（Guardian 3）**：讀取預先抓好、放在 `public/data/lucksack.json` 的 lucksack.gg RTA 統計（Guardian 3、目前賽季、全部有樣本的魔靈），逐隻比對常用魔靈的套裝組合、2/4/6 主屬性與神器效果使用率。不符合主流的會標提醒（例如「套裝『迅速×2 + 意志×2』不是熱門組合，最常見：暴走×4 + 意志×2，99.9%」）並給 0–100 符合度；表格可依「需要注意 / 套裝 / 主屬 / 神器 / 沒資料」篩選，預設把有問題的排在最前面。樣本太少的魔靈標示「資料不足」，不會誤判。點任一列可看熱門套裝 / 主屬 / 神器使用率表格。
+  - 統計兩星期才需要更新一次：`npm run data:lucksack` 會逐隻抓取並精簡成靜態檔（約 1,000 隻、數百 KB），網站只讀這個檔案，不會即時呼叫 Lucksack（他們的 API 有 Cloudflare WAF，逐隻即時查詢很容易被擋）。
 - **一鍵配符**：指定魔靈與 Tick（或面板速度），自動計算符文速度需求，列出所有符合條件的配裝（每頁 30 組）。可設定**數值下限與上限**（體力 / 攻擊 / 防禦 / 暴率 / 抵抗 / 命中）以及**最高面板速度**，例如「速度不要超過 280、體力不要超過 32,000」。
   - **快速預設配符**：一鍵套用常用配置（套裝、主屬性、數值條件、Focus 比重、排序），套用後按「開始配符」即可。內建：
     - **極限輸出風丑**：自動選風丑（Lushen）、憤怒 ×4 + 刀刃 ×2、#2 攻擊% / #4 暴傷 / #6 攻擊%、暴率下限 100%，Focus 攻擊 / 暴率 / 暴傷 各 10 分，並以傷害排序。
@@ -191,6 +192,7 @@ npm run skills # 由 SWARFARM API 重新產生 public/data/skills.json（技能�
 npm run skills:effects # 只補技能效果名稱對照（魔靈圖鑑篩選用）
 npm run skills:descriptions # 只補完整技能說明（魔靈圖鑑詳情用）
 npm run demo   # 重新產生 public/demo-account.json 示範存檔
+npm run data:lucksack # 重新抓 Lucksack 的 RTA 統計 → public/data/lucksack.json（約 10–20 分鐘，兩星期一次即可）
 npm run icons  # 重新產生 PWA 圖示（public/icons/*.png）
 ```
 
@@ -323,8 +325,8 @@ public/
   icons/                192 / 512 / maskable / apple-touch 圖示
 ```
 
-前端：Vite + React + TypeScript + zustand，無後端。
-- 唯一的例外是 `/api/lucksack`（Pages Function 代理）：lucksack.gg 的 API 有 Cloudflare WAF，沒有瀏覽器標頭會回 403，前端也受 CORS 限制，因此由伺服器補上 `Origin` / `Referer` / `Sec-Fetch-*` 後轉發，並用邊緣快取（目錄 24 小時、統計 3 小時）降低請求量。本機開發需同時啟動 `npm run dev:api`。
+前端：Vite + React + TypeScript + zustand，沒有即時後端；只有 `functions/` 的登入 / 存檔 API。
+- Lucksack 的 RTA 統計不是即時查詢，而是由 `npm run data:lucksack` 定期抓成 `public/data/lucksack.json`（見「資料來源」）。這樣就不必在瀏覽器面對 Lucksack 的 Cloudflare WAF 與 CORS 限制。
 
 ## 資料來源與聲明
 
