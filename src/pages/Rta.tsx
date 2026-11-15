@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, Search, Swords, Trophy } from "lucide-react";import { MONSTER_MAP, unitLabel, useStore } from "../store";
+import { RefreshCw, Search, Swords, Trophy } from "lucide-react";
+import { MONSTER_MAP, unitLabel, useStore } from "../store";
 import { ELEMENTS } from "../lib/constants";
 import { rtaView, type RtaView } from "../lib/rta";
-import { setSummary } from "../lib/stats";
+import { effectiveSetCounts, setSummary } from "../lib/stats";
 import {
   GUARDIAN3_LABEL,
   GUARDIAN3_RANK,
@@ -463,7 +464,9 @@ export default function RtaPage() {
 
         <div className="card-pad col" style={{ gap: 6 }}>
           {shown.map((v, i) => {
-            const sets = v.runes.reduce((m, r) => ({ ...m, [r.set]: (m[r.set] ?? 0) + 1 }), {} as Record<number, number>);
+            const sets = effectiveSetCounts(
+              v.runes.reduce((m, r) => ({ ...m, [r.set]: (m[r.set] ?? 0) + 1 }), {} as Record<number, number>),
+            );
             const lb = leaderOn ? Math.ceil((v.base.spd * Math.max(0, Math.min(50, leaderPct))) / 100) : 0;
             return (
               <button
@@ -524,7 +527,7 @@ export default function RtaPage() {
           <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>
             <div className="card-title">RTA 符文</div>
             <span className="tiny dim">
-              {current.runes.length}/6 · {current.runes.length > 0 ? setSummary(current.runes.reduce((m, r) => ({ ...m, [r.set]: (m[r.set] ?? 0) + 1 }), {} as Record<number, number>)) : "未配置"}
+              {current.runes.length}/6 · {current.runes.length > 0 ? setSummary(effectiveSetCounts(current.runes.reduce((m, r) => ({ ...m, [r.set]: (m[r.set] ?? 0) + 1 }), {} as Record<number, number>))) : "未配置"}
             </span>
           </div>
           {current.runes.length === 0 ? (

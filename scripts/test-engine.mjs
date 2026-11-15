@@ -36,7 +36,7 @@ const {
   runeScore, runeScoreRaw, scoreOfStat, runeEfficiency,
   grindMax, grindStoneMax, grindGradeFor, grindCapsFromStock, matchingGrindstones,
   analyzeRune, planScore, planMaterials, planWithStock, maxScoreWithStock,
-  defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills,
+  defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
   rtaStats, rtaView,
@@ -813,6 +813,35 @@ check("無形符文補足缺少的套裝", () => {
   assert.equal(withIntBuilds[0].stats.cr, 27, "刀刃 +12 暴率未套用");
   const without = optimize({ ...opts, intangible: false });
   assert.equal(without.count, 0, "沒有無形時不應能組成 4+2");
+});
+
+check("無形符文在一般 / RTA 數值也會補齊套裝效果", () => {
+  const mk = (id, slot, set) => ({
+    id, set, slot, grade: 6, level: 15,
+    main: { t: 1, v: 2448 }, prefix: { t: 0, v: 0 }, subs: [], occupied: 0,
+    ancient: false, locked: false, eff: 0, effMax: 100,
+  });
+  const base = { hp: 10000, atk: 700, def: 700, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
+  const bonus = defaultBonus({ towerSpd: 0 });
+
+  // 3 迅速 + 1 無形 + 2 守護 → 迅速 4 件（速度 +25%）、守護 2 件（防禦 +15%）
+  const swift = [mk(9001, 1, 3), mk(9002, 2, 3), mk(9003, 3, 3), mk(9004, 4, 25), mk(9005, 5, 2), mk(9006, 6, 2)];
+  const s = statsForRunes(base, swift, bonus);
+  assert.equal(s.spd, 125, "3 迅速 + 無形應套用速度 +25%");
+  assert.equal(s.def, 805, "守護 2 件應套用防禦 +15%");
+  assert.equal(effectiveSetCounts({ 3: 3, 25: 1 })[3], 4, "顯示用件數要補成 4 件");
+  assert.equal(effectiveSetCounts({ 3: 3, 25: 1 })[25], undefined, "用掉的無形不應留在顯示件數");
+
+  // 1 刀刃 + 1 無形 → 刀刃 2 件（暴率 +12%）
+  const blade = [mk(9011, 1, 4), mk(9012, 2, 25), mk(9013, 3, 2), mk(9014, 4, 2), mk(9015, 5, 2), mk(9016, 6, 2)];
+  assert.equal(statsForRunes(base, blade, bonus).cr, 27, "刀刃 1 件 + 無形應套用暴率 +12%");
+
+  // 沒能湊成整組時，無形不應該亂補（2 迅速 + 1 無形 = 3 件，沒有加成）
+  const short = [mk(9021, 1, 3), mk(9022, 2, 3), mk(9023, 3, 25), mk(9024, 4, 2), mk(9025, 5, 2), mk(9026, 6, 2)];
+  assert.equal(statsForRunes(base, short, bonus).spd, 100, "只有 3 件迅速時不應有速度加成");
+
+  // RTA 使用同一套計算
+  assert.equal(rtaStats(base, swift, [], 0, false).spd, 125, "RTA 也應套用無形補齊的迅速套裝");
 });
 
 check("主屬性篩選（#4 HP%、#6 攻擊%）", () => {

@@ -22,7 +22,7 @@ import {
   type SkillObjective,
   type TopBuild,
 } from "./optimizer";
-import type { BaseStats } from "./stats";
+import { effectiveSetCounts, type BaseStats } from "./stats";
 import type { BonusConfig, FocusEntry, Rune, Stats } from "./types";
 
 export type TeamRole = "speed" | "booster" | "dps" | "tank" | "support" | "free";
@@ -213,10 +213,7 @@ interface State {
   keys: number[];
 }
 
-const INTANGIBLE_ID = 25;
-
-/** 把候選配裝的符文 id 轉成套裝件數（含無形補套裝） */
-export function teamSetsOf(
+/** 把候選配裝的符文 id 轉成套裝件數（含無形補套裝） */export function teamSetsOf(
   runeIds: number[],
   runeById: Map<number, Rune>,
   required: { set: number; count: number }[],
@@ -227,17 +224,7 @@ export function teamSetsOf(
     const r = runeById.get(id);
     if (r) sets[r.set] = (sets[r.set] ?? 0) + 1;
   }
-  if (intangible) {
-    let wild = sets[INTANGIBLE_ID] ?? 0;
-    for (const rs of normalizeRequiredSets(required)) {
-      const have = sets[rs.set] ?? 0;
-      if (have < rs.count && wild > 0 && rs.count - have === 1) {
-        sets[rs.set] = have + 1;
-        wild--;
-      }
-    }
-  }
-  return sets;
+  return effectiveSetCounts(sets, intangible ? normalizeRequiredSets(required) : []);
 }
 
 interface SearchOverride {

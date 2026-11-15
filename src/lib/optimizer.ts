@@ -3,6 +3,7 @@ import { SPD_TYPE, SUB_STAT_MAX, STAT_TYPES, SET_BY_ID, type StatKey } from "./c
 import {
   addRuneToAccum,
   applySetBonuses,
+  effectiveSetCounts,
   ehpWithSkills,
   emptyAccum,
   finalizeStats,
@@ -305,22 +306,12 @@ export function buildAt(
     if (r) sets[r.set] = (sets[r.set] ?? 0) + 1;
   }
   // 無形符文：把缺少的 1 件補到需求套裝上（與引擎計算時的套裝加成一致）
-  if (res.intangible) {
-    let wild = sets[25] ?? 0;
-    for (const rs of res.requiredSets) {
-      const have = sets[rs.set] ?? 0;
-      if (have < rs.count && wild > 0 && rs.count - have === 1) {
-        sets[rs.set] = have + 1;
-        wild--;
-      }
-    }
-  }
   return {
     runes,
     stats: statsAt(res, i, rta, guildSkills),
     score: res.scores[i],
     eff: res.effs[i],
-    sets,
+    sets: effectiveSetCounts(sets, res.requiredSets),
     focusFit: res.focusFits[i],
   };
 }
@@ -765,16 +756,8 @@ export function optimize(req: OptRequest): OptResult {
       for (const rs of requiredSets) short += Math.max(0, rs.count - (acc.sets[rs.set] ?? 0));
       if (short > wild) return;
       const a: StatAccum = { ...acc, sets: { ...acc.sets } };
-      // 把無形符文補到缺 1 件的套裝上（依序），讓套裝加成正確
-      let w = wild;
-      for (const rs of requiredSets) {
-        const have = a.sets[rs.set] ?? 0;
-        if (have < rs.count && w > 0 && rs.count - have === 1) {
-          a.sets[rs.set] = have + 1;
-          w--;
-        }
-      }
-      applySetBonuses(a, base);
+      // 無形符文由 applySetBonuses 補到缺 1 件的套裝（有指定套裝時優先補在需求上）
+      applySetBonuses(a, base, requiredSets);
       // 面板（不含召喚師技能）用來顯示；篩選條件則比對實戰數值（含一般技能）
       const stats = finalizeStats(base, a, bonus, rta);
       const battleStats = finalizeStats(base, a, bonus, rta, true);

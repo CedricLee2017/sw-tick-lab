@@ -203,9 +203,70 @@ export function addArtifactToAccum(a: StatAccum, artifact: Artifact) {
   else if (meta.key === "def") a.flatDef += artifact.main.v;
 }
 
-/** 套裝加成（祝福 15% HP 等） */
-export function applySetBonuses(a: StatAccum, base: BaseStats) {
-  for (const [idStr, count] of Object.entries(a.sets)) {
+/** 無形套裝 id：可以補足 1 件缺失的套裝（每個魔靈限 1 顆） */
+export const INTANGIBLE_SET_ID = 25;
+
+/**
+ * 實際生效的套裝件數：把「無形」符文補到缺 1 件的套裝上。
+ *
+ * 例如 3 件迅速 + 1 件無形 = 迅速 4 件（會套用速度 +25%），
+ * 顯示與計算都用這個函式，才不會出現「面板有加成、文字卻寫 3 件」。
+ *
+ * `preferred` 是呼叫端指定的套裝需求（配符引擎的「指定套裝」），會優先補在這些套裝上；
+ * 其餘情況補在「補了之後能多湊出一組、件數最多」的套裝（4 件套優先）。
+ */
+export function effectiveSetCounts(
+  sets: Record<number, number>,
+  preferred: { set: number; count: number }[] = [],
+): Record<number, number> {
+  const counts: Record<number, number> = { ...sets };
+  let wild = counts[INTANGIBLE_SET_ID] ?? 0;
+  delete counts[INTANGIBLE_SET_ID];
+
+  // 1. 先滿足呼叫端指定的套裝需求
+  for (const req of preferred) {
+    if (wild <= 0) break;
+    const def = SET_BY_ID[req.set];
+    if (!def || def.pieces <= 0) continue;
+    const have = counts[req.set] ?? 0;
+    if (have < req.count && req.count - have === 1) {
+      counts[req.set] = have + 1;
+      wild--;
+    }
+  }
+
+  // 2. 剩下的補在能多湊出一組的套裝上
+  while (wild > 0) {
+    let bestSet = 0;
+    let bestPieces = 0;
+    for (const [idStr, count] of Object.entries(counts)) {
+      const id = Number(idStr);
+      const def = SET_BY_ID[id];
+      if (!def || def.pieces <= 1 || !def.stat || !def.value) continue;
+      const gain = Math.floor((count + 1) / def.pieces) - Math.floor(count / def.pieces);
+      if (gain <= 0) continue;
+      if (def.pieces > bestPieces) {
+        bestPieces = def.pieces;
+        bestSet = id;
+      }
+    }
+    if (!bestSet) break;
+    counts[bestSet] += 1;
+    wild--;
+  }
+
+  // 沒用到的無形仍然保留，讓畫面看得出符文還在
+  if (wild > 0) counts[INTANGIBLE_SET_ID] = wild;
+  return counts;
+}
+
+/** 套裝加成（祝福 15% HP 等）；無形符文會先補到缺少的套裝上 */
+export function applySetBonuses(
+  a: StatAccum,
+  base: BaseStats,
+  preferred: { set: number; count: number }[] = [],
+) {
+  for (const [idStr, count] of Object.entries(effectiveSetCounts(a.sets, preferred))) {
     const def = SET_BY_ID[Number(idStr)];
     if (!def || !def.stat || !def.value) continue;
     const times = def.pieces > 0 ? Math.floor(count / def.pieces) : 0;
