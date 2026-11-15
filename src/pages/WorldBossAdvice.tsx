@@ -7,17 +7,18 @@ import { SET_BY_ID } from "../lib/constants";
 import {
   FOCUS_LABEL,
   WB_ARCH_LABEL,
+  WB_MAIN_LABEL,
   WB_TIER_LABEL,
   buildWorldBossPlan,
-  type WbFocus,
+  type WbMainStat,
   type WbMonsterPlan,
 } from "../lib/worldBossAdvice";
 
-type SortKey = "priority" | "focus";
+type SortKey = "runeScore" | "priority" | "focus";
 
-/** 把 2/4/6 建議主屬性變成「2/4 體力% · 6 防禦力%」 */
+/** 把 2/4/6 實際主屬性變成「2/4 體力% · 6 防禦力%」 */
 function mainPlanText(plan: WbMonsterPlan): string {
-  const groups = new Map<WbFocus, number[]>();
+  const groups = new Map<WbMainStat, number[]>();
   for (const slot of [2, 4, 6]) {
     const stat = plan.mainPlan[slot];
     const slots = groups.get(stat) ?? [];
@@ -26,10 +27,10 @@ function mainPlanText(plan: WbMonsterPlan): string {
   }
   if (groups.size === 1) {
     const [stat] = [...groups.keys()];
-    return `${FOCUS_LABEL[stat]}%`;
+    return `${WB_MAIN_LABEL[stat]}%`;
   }
   return [...groups.entries()]
-    .map(([stat, slots]) => `${slots.join("/")} ${FOCUS_LABEL[stat]}%`)
+    .map(([stat, slots]) => `${slots.join("/")} ${WB_MAIN_LABEL[stat]}%`)
     .join(" · ");
 }
 
@@ -77,9 +78,12 @@ function PlanCard({
           <span className="chip gold" title="主要堆疊的面板屬性">
             {FOCUS_LABEL[plan.focus]} {fmt(plan.focusValue)}
           </span>
+          <span className="chip" title="6 顆符文的遊戲分數（◆）總和">
+            ◆ 總分 {fmt(plan.runeScoreTotal)}
+          </span>
           <span
             className="chip muted"
-            title={`2/4/6 位建議主屬性（依魔靈類型${plan.monster.arch === "Support" ? `與基本體力 ${fmt(plan.base.hp)}／防禦 ${fmt(plan.base.def)}` : ""}決定）`}
+            title={`2/4/6 位實際主屬性（依魔靈類型${plan.monster.arch === "Support" ? `與基本體力 ${fmt(plan.base.hp)}／防禦 ${fmt(plan.base.def)}` : ""}決定；4 號位可用爆傷／爆率）`}
           >
             2/4/6：{mainPlanText(plan)}
           </span>
@@ -95,7 +99,7 @@ function PlanCard({
 
         <div className="row between wrap tiny dim" style={{ gap: 6 }}>
           <span>符文 {plan.runes.length}/6 · 神器 {plan.artifacts.length}/2</span>
-          <span>速度、暴擊率、暴擊傷害不計入配符評分</span>
+          <span>速度不計；爆率／爆傷主要用於 4 號位及少量分數</span>
         </div>
 
         <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8 }}>
@@ -143,7 +147,7 @@ export default function WorldBossAdvicePage() {
   const [count, setCount] = useState(60);
   const [freeOnly, setFreeOnly] = useState(false);
   const [arch, setArch] = useState("");
-  const [sort, setSort] = useState<SortKey>("priority");
+  const [sort, setSort] = useState<SortKey>("runeScore");
   const [q, setQ] = useState("");
 
   const plan = useMemo(
@@ -201,8 +205,18 @@ export default function WorldBossAdvicePage() {
       );
     }
     if (sort === "focus") arr = [...arr].sort((a, b) => b.focusValue - a.focusValue);
+    if (sort === "runeScore") arr = [...arr].sort((a, b) => b.runeScoreTotal - a.runeScoreTotal);
     return arr;
   }, [plan, arch, q, sort]);
+
+  const totalStats = useMemo(() => {
+    if (plan.length === 0) return null;
+    const totals = plan.map((p) => p.runeScoreTotal);
+    const min = Math.min(...totals);
+    const max = Math.max(...totals);
+    const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+    return { min, max, avg };
+  }, [plan]);
 
   if (!account) {
     return <div className="empty"><Crown size={40} /><div>尚未載入存檔</div></div>;
@@ -218,17 +232,24 @@ export default function WorldBossAdvicePage() {
             </div>
             <div className="card-sub">
               依「原五 &gt; 二覺 &gt; 原四，再比技能升級次數」挑選水屬性魔靈，並自動配成 2+2+2 套裝。
-              2/4/6 位主屬性：攻擊型全攻擊%、體力型全體力%、防禦型全防禦%，支援型依基本體力／防禦力混搭；
-              選符以配合類型的面板為主，遊戲符文分數作為次要加分。速度、暴擊率、暴擊傷害不計。
+              2/6 位主屬性：攻擊型攻擊%、體力型體力%、防禦型防禦%，支援型依基本體力／防禦力混搭；
+              4 號位可用爆傷或爆率（爆率會盡量控制在 100% 以下）。
+              選符以配合類型的面板為主，遊戲符文分數（◆）作次要加分。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
             <span className="chip muted">水系魔靈 {fmt(waterCount)}</span>
             <span className="chip gold">已選 {plan.length} 隻</span>
+            {totalStats && (
+              <span className="chip muted" title="60 隻魔靈每隻 6 顆符文的 ◆ 總分範圍">
+                符文總分 {fmt(totalStats.min)}–{fmt(totalStats.max)}（平均 {fmt(Math.round(totalStats.avg))}）
+              </span>
+            )}
           </div>
         </div>
         <div className="tiny dim" style={{ marginTop: 6 }}>
-          <Info size={11} /> 這裡只是建議清單，不會改動你的存檔；同一顆符文 / 神器最多只會出現一次，高等級魔靈會先拿最好的符文。
+          <Info size={11} /> 這裡只是建議清單，不會改動你的存檔；同一顆符文 / 神器最多只會出現一次。
+          符文以「總分最低的魔靈優先拿下一組」平衡分配，令 60 隻的 ◆ 總分盡量接近。
           每隻魔靈都可以按「完整面板」查看三圍、6 顆符文與 2 件神器的完整資料。
         </div>
         {!hasSkillData && (
@@ -254,7 +275,8 @@ export default function WorldBossAdvicePage() {
               <option key={a} value={a}>{WB_ARCH_LABEL[a] ?? a}</option>
             ))}
           </select>
-          <select className="select" style={{ width: 150, marginTop: 18 }} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+          <select className="select" style={{ width: 190, marginTop: 18 }} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+            <option value="runeScore">符文分數總和（高→低）</option>
             <option value="priority">依挑選優先級</option>
             <option value="focus">依主屬性面板</option>
           </select>
