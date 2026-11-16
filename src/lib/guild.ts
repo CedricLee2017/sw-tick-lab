@@ -153,14 +153,28 @@ function makeUnit(
  *  - `{ blocks: [...] }`（extract-guild 腳本產生的格式）
  *  - 直接貼上的 response
  */
-export function parseGuildData(
-  inputs: { name: string; text: string }[],
-  importedAt = Date.now(),
+/** 公會頁會用到的 API；FullLogger 裡沒有這些就代表這次沒抓到公會資料 */
+export const GUILD_COMMANDS = [
+  "GetGuildTestDeckDetail",
+  "GetGuildTestDeckList",
+  "GetGuildSiegeDefenseDeckListAlly",
+  "GetGuildSiegeMatchupInfo",
+];
+
+export interface GuildBlock {
+  command: string;
+  response: any;
+}
+
+/** 把已解析好的 block 組成成員 / 隊伍 / 魔靈 */
+function ingestBlocks(
+  blocks: GuildBlock[],
+  files: string[],
+  warnings: string[],
+  importedAt: number,
 ): GuildParseResult {
   const names = new Map<number, string>();
   const decks = new Map<string, DeckDraft>();
-  const warnings: string[] = [];
-  let blocks = 0;
 
   const upsertDeck = (id: number, source: GuildDeckSource, desc?: string): DeckDraft | null => {
     if (!id) return null;
@@ -175,35 +189,23 @@ export function parseGuildData(
     return draft;
   };
 
-  for (const input of inputs) {
-    let root: unknown;
-    try {
-      root = JSON.parse(input.text.replace(/^\uFEFF/, ""));
-    } catch {
-      warnings.push(`${input.name}：不是有效的 JSON，已略過`);
-      continue;
+  for (const { response } of blocks) {
+    const r = response;
+    if (!r || typeof r !== "object") continue;
+
+    // 成員名稱：對戰資訊 / 測試隊伍清單 / 隊伍詳情都會帶
+    for (const w of asArray<any>(r.wizard_info_list)) {
+      const id = num(w?.wizard_id);
+      if (id) names.set(id, String(w?.wizard_name ?? names.get(id) ?? ""));
     }
-    const list: { command: string; response: any }[] = [];
-    collectBlocks(root, list);
-    blocks += list.length;
-
-    for (const { response } of list) {
-      const r = response;
-      if (!r || typeof r !== "object") continue;
-
-      // 成員名稱：對戰資訊 / 測試隊伍清單 / 隊伍詳情都會帶
-      for (const w of asArray<any>(r.wizard_info_list)) {
-        const id = num(w?.wizard_id);
-        if (id) names.set(id, String(w?.wizard_name ?? names.get(id) ?? ""));
-      }
-      for (const w of asArray<any>(r.member_info_list)) {
-        const id = num(w?.wizard_id);
-        if (id) names.set(id, String(w?.wizard_name ?? names.get(id) ?? ""));
-      }
-      for (const d of asArray<any>(r.deck_list)) {
-        const id = num(d?.wizard_id);
-        if (id && d?.wizard_name) names.set(id, String(d.wizard_name));
-      }
+    for (const w of asArray<any>(r.member_info_list)) {
+      const id = num(w?.wizard_id);
+      if (id) names.set(id, String(w?.wizard_name ?? names.get(id) ?? ""));
+    }
+    for (const d of asArray<any>(r.deck_list)) {
+      const id = num(d?.wizard_id);
+      if (id && d?.wizard_name) names.set(id, String(d.wizard_name));
+    }
 
       // 公會測試隊伍：一隊一隊的完整資料（有符文與神器）
       const info = r.deck_info;
@@ -238,7 +240,6 @@ export function parseGuildData(
         }
       }
     }
-  }
 
   // 組成成員 → 隊伍 → 魔靈
   const byMember = new Map<number, GuildMember>();
@@ -272,10 +273,140 @@ export function parseGuildData(
   }
 
   return {
-    data: { importedAt, files: inputs.map((i) => i.name), members },
+    data: { importedAt, files, members },
     warnings,
-    blocks,
+    blocks: blocks.length,
   };
+}
+
+/**
+ * 解析公會資料。可接受：
+ *  - SWEX FullLogger 拆出來的 `{ command, request, response }`
+ *  - 多個 block 的陣列
+ *  - `{ blocks: [...] }`（extract-guild 腳本產生的格式）
+ *  - 直接貼上的 response
+ * `extraBlocks` 是已經解析好的 block（例如直接讀 full_log.txt）。
+ */
+export function parseGuildData(
+  inputs: { name: string; text: string }[],
+  importedAt = Date.now(),
+  extraBlocks: GuildBlock[] = [],
+): GuildParseResult {
+  const warnings: string[] = [];
+  const blocks: GuildBlock[] = [...extraBlocks];
+
+  for (const input of inputs) {
+    let root: unknown;
+    try {
+      root = JSON.parse(input.text.replace(/^\uFEFF/, ""));
+    } catch {
+      warnings.push(`${input.name}：不是有效的 JSON，已略過`);
+      continue;
+    }
+    collectBlocks(root, blocks);
+  }
+
+  return ingestBlocks(blocks, inputs.map((i) => i.name), warnings, importedAt);
+}
+
+/**
+ * 逐行解析 SWEX FullLogger 的 `full_log.txt`，只留下公會相關的 block。
+ * 邊讀邊解析，不會一次把整份（可達上百 MB）載入記憶體。
+ */
+export async function readGuildLogFile(
+  file: File,
+  onProgress?: (readBytes: number, totalBytes: number, found: number) => void,
+): Promise<{ blocks: GuildBlock[]; commands: Record<string, number> }> {
+  const wanted = new Set(GUILD_COMMANDS);
+  const blocks: GuildBlock[] = [];
+  const commands: Record<string, number> = {};
+  const decoder = new TextDecoder();
+  const reader = file.stream().getReader();
+  let buf = "";
+  let command = "";
+  let state = "none";
+  let read = 0;
+
+  const handleLine = (line: string) => {
+    if (line.startsWith("API Command: ")) {
+      command = line.slice("API Command: ".length).split(" - ", 1)[0].trim();
+      state = "cmd";
+      return;
+    }
+    if (line.startsWith("Request:")) {
+      state = "req";
+      return;
+    }
+    if (line.startsWith("Response:")) {
+      state = "resp";
+      return;
+    }
+    if (state === "resp" && line.trim()) {
+      state = "done";
+      if (wanted.has(command)) {
+        try {
+          blocks.push({ command, response: JSON.parse(line) });
+          commands[command] = (commands[command] ?? 0) + 1;
+        } catch {
+          /* 單一行壞掉就略過 */
+        }
+      }
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value?.byteLength ?? 0;
+    buf += decoder.decode(value, { stream: true });
+    let idx = buf.indexOf("\n");
+    while (idx >= 0) {
+      handleLine(buf.slice(0, idx).replace(/\r$/, ""));
+      buf = buf.slice(idx + 1);
+      idx = buf.indexOf("\n");
+    }
+    onProgress?.(read, file.size, blocks.length);
+  }
+  if (buf.trim()) handleLine(buf.replace(/\r$/, ""));
+  onProgress?.(file.size, file.size, blocks.length);
+  return { blocks, commands };
+}
+
+/** 已經讀成字串的 FullLogger（例如使用者把 log 貼進來） */
+export function readGuildLogText(text: string): { blocks: GuildBlock[]; commands: Record<string, number> } {
+  const wanted = new Set(GUILD_COMMANDS);
+  const blocks: GuildBlock[] = [];
+  const commands: Record<string, number> = {};
+  let command = "";
+  let state = "none";
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (line.startsWith("API Command: ")) {
+      command = line.slice("API Command: ".length).split(" - ", 1)[0].trim();
+      state = "cmd";
+      continue;
+    }
+    if (line.startsWith("Request:")) {
+      state = "req";
+      continue;
+    }
+    if (line.startsWith("Response:")) {
+      state = "resp";
+      continue;
+    }
+    if (state === "resp" && line.trim()) {
+      state = "done";
+      if (wanted.has(command)) {
+        try {
+          blocks.push({ command, response: JSON.parse(line) });
+          commands[command] = (commands[command] ?? 0) + 1;
+        } catch {
+          /* 略過 */
+        }
+      }
+    }
+  }
+  return { blocks, commands };
 }
 
 // ── 本機儲存（放在 IndexedDB，跟帳號存檔分開） ─────────────

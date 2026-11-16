@@ -11,11 +11,13 @@ import {
   guildUnitStats,
   loadGuildData,
   parseGuildData,
+  readGuildLogFile,
+  readGuildLogText,
   saveGuildData,
+  type GuildBlock,
   type GuildDeck,
   type GuildMember,
   type GuildUnit,
-  type GuildUnitRow,
 } from "../lib/guild";
 import { artifactSubText } from "../lib/artifacts";
 import { effectiveSetCounts, setSummary } from "../lib/stats";
@@ -131,6 +133,7 @@ export default function GuildPage() {
   const [data, setData] = useState<ReturnType<typeof parseGuildData>["data"] | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ name: string; pct: number; found: number } | null>(null);
   const [drag, setDrag] = useState(false);
   const [tab, setTab] = useState<"members" | "compare">("members");
   const [q, setQ] = useState("");
@@ -162,8 +165,22 @@ export default function GuildPage() {
     if (!files || files.length === 0) return;
     setBusy(true);
     try {
-      const inputs = await Promise.all([...files].map(async (f) => ({ name: f.name, text: await f.text() })));
-      const parsed = parseGuildData(inputs);
+      // .txt / .log 直接當 SWEX FullLogger 串流解析；其他檔案先試 JSON，內容像 log 也吃得下
+      const texts: { name: string; text: string }[] = [];
+      const blocks: GuildBlock[] = [];
+      for (const file of [...files]) {
+        if (/\.(txt|log)$/i.test(file.name)) {
+          const res = await readGuildLogFile(file, (read, total, found) => {
+            setProgress({ name: file.name, pct: total ? Math.min(100, Math.round((read / total) * 100)) : 0, found });
+          });
+          blocks.push(...res.blocks);
+        } else {
+          const text = await file.text();
+          if (text.includes("API Command:")) blocks.push(...readGuildLogText(text).blocks);
+          else texts.push({ name: file.name, text });
+        }
+      }
+      const parsed = parseGuildData(texts, Date.now(), blocks);
       setWarnings(parsed.warnings);
       if (parsed.data.members.length > 0) {
         await saveGuildData(parsed.data);
@@ -177,6 +194,7 @@ export default function GuildPage() {
       notify("讀取檔案失敗", "err");
     } finally {
       setBusy(false);
+      setProgress(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   };
@@ -230,9 +248,15 @@ export default function GuildPage() {
               style={{ cursor: "pointer", padding: "28px 18px" }}
             >
               <div className="dz-icon"><Upload size={26} /></div>
-              <div style={{ fontWeight: 700 }}>{busy ? "解析中…" : "拖放 guild.json 或 SWEX 公會 JSON 到這裡"}</div>
-              <div className="tiny dim">可多選（GetGuildTestDeckDetail / GetGuildSiegeDefenseDeckListAlly 等）</div>
-              <input ref={inputRef} type="file" accept=".json,application/json" multiple hidden onChange={(e) => void importFiles(e.target.files)} />
+              <div style={{ fontWeight: 700 }}>
+                {busy
+                  ? progress
+                    ? `讀取 ${progress.name}… ${progress.pct}%（找到 ${progress.found} 筆公會資料）`
+                    : "解析中…"
+                  : "拖放 full_log.txt（或 guild.json / 公會 JSON）到這裡"}
+              </div>
+              <div className="tiny dim">可以直接選 SWEX 的 full_log.txt，會邊讀邊挑出公會資料；也可以多選拆分後的 JSON</div>
+              <input ref={inputRef} type="file" accept=".json,.txt,.log,application/json,text/plain" multiple hidden onChange={(e) => void importFiles(e.target.files)} />
             </div>
             {warnings.length > 0 && (
               <div className="col" style={{ gap: 4 }}>
@@ -242,10 +266,10 @@ export default function GuildPage() {
               </div>
             )}
             <div className="tiny dim" style={{ lineHeight: 1.8 }}>
-              資料怎麼來：<span className="mono">node scripts/extract-guild.mjs --log "…\full_log.txt" --out guild.json</span>
-              （或 <span className="mono">--dir swex_split</span>），再把產生的 guild.json 拖進來。
-              只有「公會測試隊伍」與「據點戰隊友防守」含完整符文 / 神器；敵方防守只有魔靈資訊，抓不到符文。
-              資料只存在這台裝置的瀏覽器。
+              資料怎麼來：用 SWEX 匯出 <span className="mono">full_log.txt</span>（FullLogger）直接拖進來，或在遊戲裡開一下「公會測試隊伍 / 據點戰隊友防守」讓 SWEX 記錄到{" "}
+              <span className="mono">GetGuildTestDeckDetail</span> / <span className="mono">GetGuildSiegeDefenseDeckListAlly</span>。
+              也可以先跑 <span className="mono">npm run data:guild -- --log "…\full_log.txt"</span> 產生 guild.json 再匯入。
+              只有這兩種 API 含完整符文 / 神器；敵方防守只有魔靈資訊。資料只存在這台裝置的瀏覽器。
             </div>
           </div>
         </div>
@@ -272,7 +296,7 @@ export default function GuildPage() {
           <button type="button" className="btn btn-sm btn-ghost" onClick={() => void clear()}>
             <Trash2 size={12} /> 清除
           </button>
-          <input ref={inputRef} type="file" accept=".json,application/json" multiple hidden onChange={(e) => void importFiles(e.target.files)} />
+          <input ref={inputRef} type="file" accept=".json,.txt,.log,application/json,text/plain" multiple hidden onChange={(e) => void importFiles(e.target.files)} />
         </div>
       </div>
 
