@@ -31,6 +31,7 @@ import RunesPage from "./pages/Runes";
 import GrindPage from "./pages/Grind";
 import ArtifactsPage from "./pages/Artifacts";
 import ArtifactReductionPage from "./pages/ArtifactReduction";
+import GuildPage from "./pages/Guild";
 import SettingsPage from "./pages/Settings";
 import { MonsterIcon } from "./components/ui";
 import { RankProvider } from "./components/RankProvider";
@@ -38,7 +39,7 @@ import { buildRankIndex } from "./lib/rankings";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "worldboss-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "artifact-reduction" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "worldboss-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "grind" | "artifacts" | "artifact-reduction" | "guild" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -64,6 +65,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "grind", label: "精煉建議", icon: <Hammer size={17} />, title: "精煉建議", sub: "依符文素質、套裝與裝備對象排出精煉順序" },
   { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },
   { key: "artifact-reduction", label: "減傷統計", icon: <Shield size={17} />, title: "神器減傷統計", sub: "屬性減傷分組比較，找出可以賣掉的神器" },
+  { key: "guild", label: "公會", icon: <Users size={17} />, title: "公會", sub: "匯入隊友資料，比較成員的符文與神器" },
   { key: "admin", label: "後台", icon: <ShieldCheck size={17} />, title: "管理後台", sub: "會員、上傳紀錄與容量" },
   { key: "settings", label: "設定", icon: <SettingsIcon size={17} />, title: "設定", sub: "建築、隊長技與進階選項" },
 ];
@@ -104,6 +106,7 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   grind: GrindPage,
   artifacts: ArtifactsPage,
   "artifact-reduction": ArtifactReductionPage,
+  guild: GuildPage,
   admin: AdminPage,
   settings: SettingsPage,
 };

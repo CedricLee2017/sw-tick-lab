@@ -177,6 +177,44 @@ function artifactOf(a: any, owner = 0): Artifact {
   };
 }
 
+/** 單件神器解析（帳號存檔與公會資料共用） */
+export function parseArtifact(a: any, owner = 0): Artifact {
+  return artifactOf(a, owner);
+}
+
+/**
+ * 單顆符文解析（帳號存檔與公會隊友的防守 / 測試隊伍共用）。
+ * `owner` 會填入 occupied；`grindFirst` 用於 SWOP 的欄位順序。
+ */
+export function parseRune(r: any, owner = 0, grindFirst = false): Rune | null {
+  if (!r) return null;
+  const set = setOf(r.set_id ?? r.set ?? r.setName ?? r.set_name);
+  const slot = num(r.slot_no ?? r.slot);
+  if (!set || !slot) return null;
+  // 遠古符文：class / rank 會 +10（例如 class 16 = 遠古 6★、rank 15 = 遠古傳說）
+  const rawClass = num(r.class ?? r.stars ?? r.grade, 6);
+  const rawRank = num(r.rank, 0);
+  const ancient = truthy(r.ancient) || rawClass > 10 || rawRank > 10;
+  const grade = Math.min(6, Math.max(1, rawClass > 10 ? rawClass - 10 : rawClass));
+  const rune: Rune = {
+    id: num(r.rune_id ?? r.id),
+    set,
+    slot,
+    grade,
+    level: Math.min(15, Math.max(0, num(r.upgrade_curr ?? r.level, 0))),
+    main: pair(r.pri_eff ?? r.main ?? r.mainStat),
+    prefix: pair(r.prefix_eff ?? r.prefix),
+    subs: subs(r.sec_eff ?? r.subs ?? r.substats, grindFirst),
+    occupied: num(r.occupied_id ?? r.occupied ?? r.equippedBy ?? r.equipped_by) || owner,
+    ancient,
+    locked: truthy(r.locked),
+    eff: 0,
+    effMax: 100,
+  };
+  rune.eff = runeEfficiency(rune, true).current;
+  return rune;
+}
+
 
 export interface ParseResult {
   account: Account | null;
@@ -252,14 +290,13 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
   let duplicateRunes = 0;
   for (const { r, owner } of runeSources) {
     if (!r) continue;
-    const set = setOf(r.set_id ?? r.set ?? r.setName ?? r.set_name);
-    const slot = num(r.slot_no ?? r.slot);
-    if (!set || !slot) {
+    const rune = parseRune(r, owner, grindFirst);
+    if (!rune) {
       skippedRunes++;
       continue;
     }
-    let id = num(r.rune_id ?? r.id);
-    if (!id) id = -(runes.length + skippedRunes + 1);
+    if (!rune.id) rune.id = -(runes.length + skippedRunes + 1);
+    const id = rune.id;
     if (id > 0 && seenIds.has(id)) {
       duplicateRunes++;
       const existing = idToRune.get(id);
@@ -267,28 +304,7 @@ export function parseAccountJSON(text: string, fileName = "account.json"): Parse
       continue;
     }
     if (id > 0) seenIds.add(id);
-    if (!SET_BY_ID[set]) unknownSets.add(set);
-    // 遠古符文：class / rank 會 +10（例如 class 16 = 遠古 6★、rank 15 = 遠古傳說）
-    const rawClass = num(r.class ?? r.stars ?? r.grade, 6);
-    const rawRank = num(r.rank, 0);
-    const ancient = truthy(r.ancient) || rawClass > 10 || rawRank > 10;
-    const grade = Math.min(6, Math.max(1, rawClass > 10 ? rawClass - 10 : rawClass));
-    const rune: Rune = {
-      id,
-      set,
-      slot,
-      grade,
-      level: Math.min(15, Math.max(0, num(r.upgrade_curr ?? r.level, 0))),
-      main: pair(r.pri_eff ?? r.main ?? r.mainStat),
-      prefix: pair(r.prefix_eff ?? r.prefix),
-      subs: subs(r.sec_eff ?? r.subs ?? r.substats, grindFirst),
-      occupied: num(r.occupied_id ?? r.occupied ?? r.equippedBy ?? r.equipped_by) || owner,
-      ancient,
-      locked: truthy(r.locked),
-      eff: 0,
-      effMax: 100,
-    };
-    rune.eff = runeEfficiency(rune, true).current;
+    if (!SET_BY_ID[rune.set]) unknownSets.add(rune.set);
     runes.push(rune);
     if (id > 0) idToRune.set(id, rune);
   }

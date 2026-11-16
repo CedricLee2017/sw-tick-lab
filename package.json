@@ -17,6 +17,7 @@
     "skills:descriptions": "node scripts/fetch-skills.mjs --descriptions",
     "demo": "node scripts/build-demo.mjs",
     "data:lucksack": "node scripts/fetch-lucksack.mjs",
+    "data:guild": "node scripts/extract-guild.mjs",
     "set-password": "node scripts/set-password.mjs",
     "test": "node scripts/test-engine.mjs",
     "deploy": "npm run build && npx wrangler pages deploy dist --project-name sw-tick-lab",
