@@ -32,6 +32,20 @@ export interface GuildMember {
   wizardId: number;
   name: string;
   decks: GuildDeck[];
+  /** 來自公會名單（member_info_list）的資料；只有隊伍資料時可能沒有 */
+  roster?: GuildRosterEntry;
+}
+
+/** 公會名單上的一位成員 */
+export interface GuildRosterEntry {
+  wizardId: number;
+  name: string;
+  guildId: number;
+  level: number;
+  /** 遊戲內職位（1 = 會長） */
+  grade: number;
+  lastLogin?: number;
+  join?: number;
 }
 
 export interface GuildData {
@@ -39,6 +53,8 @@ export interface GuildData {
   /** 匯入的檔案名稱（方便辨認這次資料從哪來） */
   files: string[];
   members: GuildMember[];
+  /** 名單上出現的公會（名稱） */
+  guilds: { id: number; name: string }[];
 }
 
 export interface GuildParseResult {
@@ -175,6 +191,28 @@ function ingestBlocks(
 ): GuildParseResult {
   const names = new Map<number, string>();
   const decks = new Map<string, DeckDraft>();
+  const roster = new Map<number, GuildRosterEntry>();
+  const wizards = new Map<number, GuildRosterEntry>();
+  const guilds = new Map<number, string>();
+
+  const addRoster = (target: Map<number, GuildRosterEntry>, raw: any, withGrade: boolean) => {
+    const wizardId = num(raw?.wizard_id);
+    if (!wizardId) return;
+    const name = String(raw?.wizard_name ?? "");
+    if (name) names.set(wizardId, name);
+    const guildId = num(raw?.guild_id);
+    if (guildId && raw?.guild_name) guilds.set(guildId, String(raw.guild_name));
+    const existing = target.get(wizardId) ?? roster.get(wizardId);
+    target.set(wizardId, {
+      wizardId,
+      name: name || existing?.name || "",
+      guildId: guildId || existing?.guildId || 0,
+      level: num(raw?.wizard_level) || existing?.level || 0,
+      grade: withGrade ? num(raw?.grade) : existing?.grade ?? 0,
+      lastLogin: num(raw?.last_login_timestamp) || existing?.lastLogin,
+      join: num(raw?.join_timestamp) || existing?.join,
+    });
+  };
 
   const upsertDeck = (id: number, source: GuildDeckSource, desc?: string): DeckDraft | null => {
     if (!id) return null;
@@ -194,13 +232,15 @@ function ingestBlocks(
     if (!r || typeof r !== "object") continue;
 
     // 成員名稱：對戰資訊 / 測試隊伍清單 / 隊伍詳情都會帶
-    for (const w of asArray<any>(r.wizard_info_list)) {
-      const id = num(w?.wizard_id);
-      if (id) names.set(id, String(w?.wizard_name ?? names.get(id) ?? ""));
+    for (const g of asArray<any>(r.guild_list)) {
+      const id = num(g?.guild_id);
+      if (id && g?.guild_name) guilds.set(id, String(g.guild_name));
     }
-    for (const w of asArray<any>(r.member_info_list)) {
+    for (const w of asArray<any>(r.member_info_list)) addRoster(roster, w, true);
+    for (const w of asArray<any>(r.wizard_info_list)) {
+      addRoster(wizards, w, false);
       const id = num(w?.wizard_id);
-      if (id) names.set(id, String(w?.wizard_name ?? names.get(id) ?? ""));
+      if (id && w?.wizard_name) names.set(id, String(w.wizard_name));
     }
     for (const d of asArray<any>(r.deck_list)) {
       const id = num(d?.wizard_id);
@@ -241,17 +281,29 @@ function ingestBlocks(
       }
     }
 
-  // 組成成員 → 隊伍 → 魔靈
+  // 組成成員 → 隊伍 → 魔靈（名單上的成員即使沒有隊伍也會列出）
+  const rosterList = roster.size > 0 ? [...roster.values()] : [...wizards.values()];
   const byMember = new Map<number, GuildMember>();
+  const ensure = (wizardId: number): GuildMember => {
+    let member = byMember.get(wizardId);
+    if (!member) {
+      const entry = roster.get(wizardId) ?? wizards.get(wizardId);
+      member = {
+        wizardId,
+        name: names.get(wizardId) || entry?.name || `#${wizardId}`,
+        decks: [],
+        roster: entry,
+      };
+      byMember.set(wizardId, member);
+    }
+    return member;
+  };
+  for (const entry of rosterList) ensure(entry.wizardId);
+
   for (const draft of decks.values()) {
     if (draft.units.size === 0) continue;
-    const units = [...draft.units.values()];
-    for (const unit of units) {
-      let member = byMember.get(unit.wizardId);
-      if (!member) {
-        member = { wizardId: unit.wizardId, name: names.get(unit.wizardId) || `#${unit.wizardId}`, decks: [] };
-        byMember.set(unit.wizardId, member);
-      }
+    for (const unit of draft.units.values()) {
+      const member = ensure(unit.wizardId);
       let deck = member.decks.find((d) => d.id === draft.id);
       if (!deck) {
         deck = { id: draft.id, source: draft.source, desc: draft.desc, units: [] };
@@ -273,7 +325,7 @@ function ingestBlocks(
   }
 
   return {
-    data: { importedAt, files, members },
+    data: { importedAt, files, members, guilds: [...guilds].map(([id, name]) => ({ id, name })) },
     warnings,
     blocks: blocks.length,
   };
@@ -480,12 +532,15 @@ export interface GuildMemberSummary {
   avgEff: number;
 }
 
-export function guildMemberSummaries(rows: GuildUnitRow[]): GuildMemberSummary[] {
+export function guildMemberSummaries(data: GuildData | null, rows: GuildUnitRow[]): GuildMemberSummary[] {
   const map = new Map<number, GuildMemberSummary>();
+  for (const member of data?.members ?? []) {
+    map.set(member.wizardId, { member, decks: member.decks.length, units: 0, artifacts: 0, fastest: 0, avgEff: 0 });
+  }
   for (const row of rows) {
     let s = map.get(row.member.wizardId);
     if (!s) {
-      s = { member: row.member, decks: 0, units: 0, artifacts: 0, fastest: 0, avgEff: 0 };
+      s = { member: row.member, decks: row.member.decks.length, units: 0, artifacts: 0, fastest: 0, avgEff: 0 };
       map.set(row.member.wizardId, s);
     }
     s.units++;
@@ -497,5 +552,15 @@ export function guildMemberSummaries(rows: GuildUnitRow[]): GuildMemberSummary[]
     s.decks = s.member.decks.length;
     s.avgEff = s.units > 0 ? s.avgEff / s.units : 0;
   }
-  return [...map.values()].sort((a, b) => b.fastest - a.fastest || a.member.name.localeCompare(b.member.name, "zh-TW"));
+  // 有隊伍資料的排前面（最快速度高到低），只有名單資料的排後面（會長優先）
+  return [...map.values()].sort((a, b) => {
+    if (a.units === 0 && b.units > 0) return 1;
+    if (b.units === 0 && a.units > 0) return -1;
+    if (a.units === 0 && b.units === 0) {
+      const ga = a.member.roster?.grade ?? 9;
+      const gb = b.member.roster?.grade ?? 9;
+      return ga - gb || a.member.name.localeCompare(b.member.name, "zh-TW");
+    }
+    return b.fastest - a.fastest || a.member.name.localeCompare(b.member.name, "zh-TW");
+  });
 }

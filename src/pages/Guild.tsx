@@ -150,7 +150,7 @@ export default function GuildPage() {
   }, []);
 
   const rows = useMemo(() => guildUnitRows(data), [data]);
-  const summaries = useMemo(() => guildMemberSummaries(rows), [rows]);
+  const summaries = useMemo(() => guildMemberSummaries(data, rows), [data, rows]);
   const groups = useMemo(() => compareGroups(rows), [rows]);
   const group = groups.find((g) => g.master === compareMaster) ?? groups[0];
 
@@ -301,7 +301,11 @@ export default function GuildPage() {
       </div>
 
       <div className="grid g4" style={{ marginBottom: 14 }}>
-        <div className="stat-tile"><div className="k">成員</div><div className="v">{totals.members}<span className="u">位</span></div></div>
+        <div className="stat-tile">
+          <div className="k">成員</div>
+          <div className="v">{summaries.length}<span className="u">位</span></div>
+          <div className="tiny dim">有隊伍資料 {summaries.filter((s) => s.units > 0).length} 位</div>
+        </div>
         <div className="stat-tile"><div className="k">魔靈</div><div className="v">{totals.units}<span className="u">隻</span></div><div className="tiny dim">{totals.decks} 支隊伍</div></div>
         <div className="stat-tile"><div className="k">神器</div><div className="v">{totals.artifacts}<span className="u">件</span></div></div>
         <div className="stat-tile"><div className="k">平均符文效率</div><div className="v">{totals.avgEff.toFixed(1)}<span className="u">%</span></div></div>
@@ -360,34 +364,44 @@ export default function GuildPage() {
                   <th className="num">神器</th>
                   <th className="num">最快速度</th>
                   <th className="num">平均效率</th>
-                  <th>隊伍</th>
+                  <th>最後登入</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredSummaries.map((s) => (
-                  <tr
-                    key={s.member.wizardId}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => {
-                      setMemberOpen(s.member);
-                      setMemberUnit(null);
-                    }}
-                  >
-                    <td>
-                      <b>{s.member.name}</b>
-                      {account?.wizardId === s.member.wizardId && <span className="chip gold" style={{ marginLeft: 6 }}>你</span>}
-                      <div className="tiny dim mono">#{s.member.wizardId}</div>
-                    </td>
-                    <td className="num">{s.decks}</td>
-                    <td className="num">{s.units}</td>
-                    <td className="num">{s.artifacts}</td>
-                    <td className="num">{s.fastest || "—"}</td>
-                    <td className="num">{s.avgEff.toFixed(1)}%</td>
-                    <td className="tiny dim">
-                      {[...new Set(s.member.decks.map((d) => SOURCE_LABEL[d.source]))].join(" · ")}
-                    </td>
-                  </tr>
-                ))}
+                {filteredSummaries.map((s) => {
+                  const hasDecks = s.decks > 0;
+                  const r = s.member.roster;
+                  return (
+                    <tr
+                      key={s.member.wizardId}
+                      style={{ cursor: hasDecks ? "pointer" : "default", opacity: hasDecks ? 1 : 0.72 }}
+                      onClick={() => {
+                        if (!hasDecks) return;
+                        setMemberOpen(s.member);
+                        setMemberUnit(null);
+                      }}
+                      title={hasDecks ? "查看隊伍與符文" : "只有公會名單資料，沒有隊伍（符文）資料"}
+                    >
+                      <td>
+                        <b>{s.member.name}</b>
+                        {account?.wizardId === s.member.wizardId && <span className="chip gold" style={{ marginLeft: 6 }}>你</span>}
+                        {r?.grade === 1 && <span className="chip muted" style={{ marginLeft: 6 }}>會長</span>}
+                        <div className="tiny dim mono">
+                          #{s.member.wizardId}
+                          {r?.level ? ` · Lv.${r.level}` : ""}
+                        </div>
+                      </td>
+                      <td className="num">{s.decks || "—"}</td>
+                      <td className="num">{s.units || "—"}</td>
+                      <td className="num">{s.artifacts || "—"}</td>
+                      <td className="num">{s.fastest || "—"}</td>
+                      <td className="num">{s.units ? `${s.avgEff.toFixed(1)}%` : "—"}</td>
+                      <td className="tiny dim">
+                        {r?.lastLogin ? new Date(r.lastLogin * 1000).toLocaleDateString("zh-TW") : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {filteredSummaries.length === 0 && (
                   <tr><td colSpan={7} className="tiny dim">沒有符合的成員</td></tr>
                 )}

@@ -47,6 +47,7 @@ function trim(command, response) {
   }
   if (command === "GetGuildSiegeMatchupInfo") {
     return {
+      guild_list: response.guild_list,
       wizard_info_list: response.wizard_info_list,
       member_info_list: response.member_info_list,
     };
