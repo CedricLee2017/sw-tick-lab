@@ -16,7 +16,7 @@ import {
 } from "../lib/deckSpeed";
 import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
-import { loadSkillData, skillsForMonster, type DamageOptions, type Skill, type SkillData } from "../lib/damage";
+import { computeSkillDamage, loadSkillData, skillsForMonster, type DamageOptions, type Skill, type SkillData } from "../lib/damage";
 import { autoAssignRoles, roleSetup, type RoleUnit } from "../lib/teamRoles";
 import { battleSpeedForPanelExtra, computeFollowPlan, leadBonus, mirrorTimeline, orderSafeFloorSpeeds, panelExtraFor } from "../lib/teamSpeed";
 import {
@@ -299,7 +299,7 @@ const MAX_TABLE_FILTERS = 4;
 const RESULT_COUNTS = [5, 10, 20, 50, 100] as const;
 
 /** 表格檢視可顯示 / 篩選 / 排序的面板數值 */
-type TableStatKey = "panelSpd" | "spd" | "hp" | "atk" | "def" | "cr" | "cd" | "res" | "acc" | "ehp";
+type TableStatKey = "panelSpd" | "spd" | "hp" | "atk" | "def" | "cr" | "cd" | "dmg" | "res" | "acc" | "ehp";
 const TABLE_STATS: { key: TableStatKey; label: string; pct?: boolean }[] = [
   { key: "panelSpd", label: "面板速" },
   { key: "spd", label: "戰鬥速" },
@@ -308,6 +308,7 @@ const TABLE_STATS: { key: TableStatKey; label: string; pct?: boolean }[] = [
   { key: "def", label: "防禦" },
   { key: "cr", label: "暴率", pct: true },
   { key: "cd", label: "暴傷", pct: true },
+  { key: "dmg", label: "技能傷害" },
   { key: "res", label: "抵抗", pct: true },
   { key: "acc", label: "命中", pct: true },
   { key: "ehp", label: "EHP" },
@@ -328,16 +329,17 @@ interface TableSort {
   dir: "asc" | "desc";
 }
 
-/** 表格顯示 / 篩選 / 排序用的數值（面板速優先使用 panelSpd） */
-function tableStatValue(m: TeamBuild, key: TableStatKey): number {
+/** 表格顯示 / 篩選 / 排序用的數值（面板速優先使用 panelSpd；技能傷害另外傳入） */
+function tableStatValue(m: TeamBuild, key: TableStatKey, dmg = 0): number {
   if (key === "ehp") return m.ehp;
+  if (key === "dmg") return dmg;
   if (key === "panelSpd") return m.stats.panelSpd ?? m.stats.spd;
   return m.stats[key];
 }
 
 function tableStatText(value: number, stat: TableStatKey): string {
   if (stat === "cr" || stat === "cd" || stat === "res" || stat === "acc") return `${Math.round(value)}%`;
-  if (stat === "hp" || stat === "atk" || stat === "def" || stat === "ehp") return fmt(value);
+  if (stat === "hp" || stat === "atk" || stat === "def" || stat === "ehp" || stat === "dmg") return fmt(value);
   return String(Math.round(value));
 }
 
@@ -1960,6 +1962,36 @@ export default function TeamOptimizerPage() {
 
   const totalWeight = members.reduce((s, m) => s + Math.max(1, m.weight), 0);
 
+  /**
+   * 表格 / 卡片顯示的技能傷害：
+   * - 目標設為「技能傷害」時，直接用搜尋結果的實際傷害（TeamBuild.score）
+   * - 其他目標改用自動挑選的技能（優先 S1～S3 的最高階技能）套同一套傷害公式估算，
+   *   公式會依技能吃攻擊 / 體力 / 防禦 / 速度 / 暴率 / 暴傷而代入對應面板；
+   *   技能資料還沒載入時，退回「攻擊 × (1 + 暴率 × 暴傷)」的期望傷害。
+   */
+  const skillDamageOf = useMemo(() => {
+    const cache = new WeakMap<TeamBuild, { value: number; actual: boolean; name?: string }>();
+    return (m: TeamBuild) => {
+      const hit = cache.get(m);
+      if (hit) return hit;
+      let out: { value: number; actual: boolean; name?: string };
+      if (m.objective === "skill" && m.score > 0) {
+        out = { value: m.score, actual: true, name: m.skillName };
+      } else {
+        const skill = defaultAttackSkill(skillData ? skillsForMonster(skillData, m.master) : []);
+        const fallback =
+          m.stats.atk * (1 + (Math.min(100, Math.max(0, m.stats.cr)) * Math.max(0, m.stats.cd)) / 10000);
+        out = {
+          value: skill ? computeSkillDamage(m.stats, skill, TEAM_DAMAGE_OPTS).total : fallback,
+          actual: false,
+          name: skill?.n,
+        };
+      }
+      cache.set(m, out);
+      return out;
+    };
+  }, [skillData]);
+
   /** 每一隊自己的速度順序（結果頁顯示用；同速時依攻擊順序） */
   const planSpeedOrders: TeamPlan["members"][] = activePlan
     ? Array.from({ length: teams }, (_, t) =>
@@ -1985,14 +2017,14 @@ export default function TeamOptimizerPage() {
       tableFilters.every((f) => {
         const m = p.members[f.member];
         if (!m) return false;
-        const v = tableStatValue(m, f.stat);
+        const v = tableStatValue(m, f.stat, skillDamageOf(m).value);
         return (f.min == null || v >= f.min) && (f.max == null || v <= f.max);
       }),
     );
   const sortValueOf = (p: TeamPlan): number => {
     if (tableSort.member == null || tableSort.stat === "score") return p.teamScore;
     const m = p.members[tableSort.member];
-    return m ? tableStatValue(m, tableSort.stat) : 0;
+    return m ? tableStatValue(m, tableSort.stat, skillDamageOf(m).value) : 0;
   };
   tableRows.sort((a, b) => {
     const d = sortValueOf(a.p) - sortValueOf(b.p);
@@ -3447,7 +3479,7 @@ export default function TeamOptimizerPage() {
               </div>
 
               <div className="table-scroll" style={{ marginTop: 6 }}>
-                <table className="table team-table" style={{ minWidth: 150 + activePlan.members.length * 650 }}>
+                <table className="table team-table" style={{ minWidth: 150 + activePlan.members.length * 715 }}>
                   <thead>
                     <tr>
                       <th rowSpan={2}>#</th>
@@ -3512,17 +3544,36 @@ export default function TeamOptimizerPage() {
                           {Math.round(p.teamScore * 10) / 10}
                           <span className="tiny dim"> / {totalWeight}</span>
                         </td>
-                        {p.members.flatMap((m, mi) =>
-                          TABLE_STATS.map((s, si) => (
-                            <td
-                              key={`${mi}:${s.key}`}
-                              className={`num team-table-cell ${si === 0 ? "team-table-group-start" : ""}`}
-                              style={accentVars(mi)}
-                            >
-                              {tableStatText(tableStatValue(m, s.key), s.key)}
-                            </td>
-                          )),
-                        )}
+                        {p.members.flatMap((m, mi) => {
+                          const dmg = skillDamageOf(m);
+                          return TABLE_STATS.map((s, si) => {
+                            const value = tableStatValue(m, s.key, dmg.value);
+                            return (
+                              <td
+                                key={`${mi}:${s.key}`}
+                                className={`num team-table-cell ${si === 0 ? "team-table-group-start" : ""}`}
+                                style={accentVars(mi)}
+                                title={
+                                  s.key === "dmg"
+                                    ? dmg.actual
+                                      ? `${dmg.name ?? "指定技能"}：依技能傷害目標算出的實際傷害`
+                                      : `${dmg.name ? `${dmg.name}：` : ""}未指定技能傷害目標，以自動挑選的技能估算`
+                                    : undefined
+                                }
+                              >
+                                {s.key === "dmg" ? (
+                                  dmg.actual ? (
+                                    <b className="gold">{tableStatText(value, s.key)}</b>
+                                  ) : (
+                                    <span className="dim">{tableStatText(value, s.key)}</span>
+                                  )
+                                ) : (
+                                  tableStatText(value, s.key)
+                                )}
+                              </td>
+                            );
+                          });
+                        })}
                       </tr>
                     ))}
                     {tableRows.length === 0 && (
@@ -3538,6 +3589,7 @@ export default function TeamOptimizerPage() {
               <div className="tiny dim" style={{ marginTop: 5 }}>
                 點表格列可切換到該組（再按上方「卡片」看完整符文）；點欄位標題可依該數值排序，再點一次切換高低。
                 每一隻魔靈的欄位都有自己的顏色與色塊邊框，滑過表格列時顏色會加深，方便追蹤數值。
+                「技能傷害」在目標設為技能傷害時顯示實際計算值（金色），其他目標則以自動挑選的技能估算（灰色），滑過欄位可看技能名稱。
               </div>
             </div>
           )}
@@ -3581,6 +3633,7 @@ export default function TeamOptimizerPage() {
               const runes = m.runeIds.map((id) => runeMap.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
               const v = viewOf(m.unitId);
               const artifacts = v?.artifacts ?? [];
+              const dmg = skillDamageOf(m);
               return (
                 <div key={m.unitId} className="team-result-member">
                   <div className="row between wrap" style={{ gap: 8 }}>
@@ -3622,9 +3675,21 @@ export default function TeamOptimizerPage() {
                             label: "EHP",
                             value: <span title="含一般召喚師技能；公會技能不計入">{fmt(m.ehp)}</span>,
                           },
-                          ...(m.objective === "skill"
-                            ? [{ label: "技能傷害", value: <b className="gold">{fmt(m.score)}</b> }]
-                            : []),
+                          {
+                            label: dmg.actual ? "技能傷害" : "技能傷害（估）",
+                            value: dmg.actual ? (
+                              <b className="gold" title={`${dmg.name ?? "指定技能"}：依技能傷害目標算出的實際傷害`}>
+                                {fmt(dmg.value)}
+                              </b>
+                            ) : (
+                              <span
+                                className="dim"
+                                title={`${dmg.name ? `${dmg.name}：` : ""}未指定技能傷害目標，以自動挑選的技能估算`}
+                              >
+                                {fmt(dmg.value)}
+                              </span>
+                            ),
+                          },
                         ]}
                       />
                       <div className="tiny dim" style={{ marginTop: 7 }}>
