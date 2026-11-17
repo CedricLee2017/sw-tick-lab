@@ -3049,6 +3049,38 @@ check("projectRune 只換掉指定副屬性，遠古寶石上限較高", () => {
   assert.equal(gemMaxValue(99, false), 0);
 });
 
+check("精魔後效率可以超過 100%（高骰＋精煉不設上限）", () => {
+  const rule = {
+    id: "tag-over100",
+    name: "超百測試",
+    sets: [],
+    stats: [
+      { t: 2, min: 12 },
+      { t: 6, min: 12 },
+      { t: 8, min: 10 },
+      { t: 9, min: 9 },
+    ],
+    minMatch: 4,
+    enabled: true,
+  };
+  // 體% 40+10、防% 40+10、速 30+5、抵抗 5 → 把抵抗換成暴率 9，效率會超過 100%
+  const rune = mkEnchantRune(8113, [
+    [2, 40],
+    [6, 40],
+    [8, 30],
+    [11, 5],
+  ]);
+  rune.subs[0].g = 10;
+  rune.subs[1].g = 10;
+  rune.subs[2].g = 5;
+
+  const list = analyzeEnchant([rune], [rule]);
+  assert.equal(list.length, 1);
+  const opt = list[0].options[0];
+  assert.equal(opt.toT, 9);
+  assert.ok(opt.effAfter > 100, `精魔後效率應超過 100%，實際 ${opt.effAfter}`);
+});
+
 check("效率 / 分數可雙向排序", () => {
   const high = mkEnchantRune(8111, [
     [8, 20],

@@ -60,7 +60,7 @@ function EnchantCard({
       <div className="row wrap" style={{ gap: 6 }}>
         <span
           className={`chip ${delta >= 0 ? "gold" : "muted"}`}
-          title="以 6★ 傳說寶石最大值估算，精魔後效率（含精煉）"
+          title="以 6★ 傳說寶石最大值估算，精魔後效率（含精煉；可超過 100%）"
         >
           精魔後效率 {Math.round(t.bestEff)}%
           <span className="dim"> ({fmtGain(delta)})</span>
@@ -276,7 +276,7 @@ export default function EnchantPage() {
           </div>
           <div className="card-sub">
             找出「換掉一條副屬性後，就會符合自行分類」的符文；只列出目前不符合、而且只差一條屬性的符文。
-            寶石數值以 6★ 傳說最大值估算，實際數值會依寶石等級與骰值較低。
+            寶石數值以 6★ 傳說最大值估算，實際數值會依寶石等級與骰值較低；效率不設上限，高骰＋精煉後超過 100% 也會照實顯示。
           </div>
         </div>
         <span className="chip gold">精魔候選 {base.length} 顆</span>
