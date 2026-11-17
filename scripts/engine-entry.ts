@@ -39,6 +39,7 @@ export {
 export {
   ENCHANT_SORTS,
   analyzeEnchant,
+  enchantGrindMax,
   enchantStatLabel,
   enchantStatSuffix,
   gemMaxValue,

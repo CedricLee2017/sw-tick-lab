@@ -36,7 +36,7 @@ const {
   runeScore, runeScoreRaw, scoreOfStat, runeEfficiency,
   grindMax, grindStoneMax, grindGradeFor, grindCapsFromStock, matchingGrindstones,
   analyzeRune, planScore, planMaterials, planWithStock, maxScoreWithStock,
-  analyzeEnchant, gemMaxValue, projectRune, sortEnchantTargets,
+  analyzeEnchant, gemMaxValue, enchantGrindMax, projectRune, sortEnchantTargets,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
@@ -3047,6 +3047,62 @@ check("projectRune 只換掉指定副屬性，遠古寶石上限較高", () => {
   assert.equal(rune.subs[3].t, 9, "不會改到原本的符文");
   assert.ok(gemMaxValue(2, true) > gemMaxValue(2, false));
   assert.equal(gemMaxValue(99, false), 0);
+
+  const ground = projectRune(rune, 3, 2, gemMaxValue(2, false), enchantGrindMax(2, false));
+  assert.deepEqual(ground.subs[3], { t: 2, v: 13, g: 10, gem: 1 });
+  assert.equal(enchantGrindMax(9), 0, "暴率不能精煉");
+  assert.ok(enchantGrindMax(2, true) > enchantGrindMax(2, false));
+});
+
+check("精魔後再精煉可補到門檻；關閉精煉假設則不列", () => {
+  // 極限輸出符：攻擊力% 20、暴傷 20，兩條符合；把雜屬性換成攻擊力% 13＋精煉 10 = 23
+  const rule = {
+    id: "tag-atk20",
+    name: "攻擊符",
+    sets: [],
+    stats: [
+      { t: 4, min: 20 },
+      { t: 10, min: 20 },
+    ],
+    minMatch: 2,
+    enabled: true,
+  };
+  const rune = mkEnchantRune(8114, [
+    [10, 21],
+    [9, 5],
+    [2, 10],
+    [11, 5],
+  ]);
+  const list = analyzeEnchant([rune], [rule]);
+  assert.equal(list.length, 1);
+  const opt = list[0].options[0];
+  assert.equal(opt.toT, 4);
+  assert.equal(opt.toGem, 13);
+  assert.equal(opt.toGrind, 10);
+  assert.equal(opt.toValue, 23);
+  assert.equal(opt.alreadyGem, false);
+  assert.equal(
+    analyzeEnchant([rune], [rule], undefined, { includeGrind: false }).length,
+    0,
+    "只算寶石 13 未達門檻 20",
+  );
+
+  // 抵抗不能精煉：就算開啟精煉假設，20 的門檻仍然補不到
+  const resRule = {
+    ...rule,
+    id: "tag-res20",
+    stats: [
+      { t: 11, min: 20 },
+      { t: 10, min: 20 },
+    ],
+  };
+  const noRes = mkEnchantRune(8115, [
+    [10, 21],
+    [9, 5],
+    [2, 10],
+    [3, 10],
+  ]);
+  assert.equal(analyzeEnchant([noRes], [resRule]).length, 0);
 });
 
 check("精魔後效率可以超過 100%（高骰＋精煉不設上限）", () => {

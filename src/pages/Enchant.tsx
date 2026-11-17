@@ -60,7 +60,7 @@ function EnchantCard({
       <div className="row wrap" style={{ gap: 6 }}>
         <span
           className={`chip ${delta >= 0 ? "gold" : "muted"}`}
-          title="以 6★ 傳說寶石最大值估算，精魔後效率（含精煉；可超過 100%）"
+          title="以 6★ 傳說寶石＋精煉上限估算，精魔後效率（含精煉；可超過 100%）"
         >
           精魔後效率 {Math.round(t.bestEff)}%
           <span className="dim"> ({fmtGain(delta)})</span>
@@ -77,7 +77,8 @@ function EnchantCard({
             key={`${o.fromIndex}:${o.toT}`}
             className={`grind-opt ${o === t.options[0] ? "best" : ""}`}
             title={
-              `把「${o.fromLabel} +${o.fromValue}${statSuffix(o.fromT)}」換成「${o.toLabel} +${o.toValue}${statSuffix(o.toT)}」，` +
+              `把「${o.fromLabel} +${o.fromValue}${statSuffix(o.fromT)}」換成「${o.toLabel} +${o.toValue}${statSuffix(o.toT)}」` +
+              `（寶石 +${o.toGem}${o.toGrind > 0 ? `、精煉 +${o.toGrind}` : ""}），` +
               `精魔後效率 ${Math.round(o.effAfter)}%、分數 ${o.scoreAfter}`
             }
           >
@@ -96,8 +97,9 @@ function EnchantCard({
             <div className="tiny dim" style={{ lineHeight: 1.55 }}>
               符合 {o.rules.map((r) => r.name).join(" / ")}
               <br />
-              需要{setName} {o.toLabel}寶石 ≥ {o.need}
-              {statSuffix(o.toT)}
+              需要{setName} {o.toLabel}寶石 +{o.toGem}{statSuffix(o.toT)}
+              {o.toGrind > 0 ? `，再精煉 +${o.toGrind}` : ""}（合計 {o.toValue}）
+              ≥ 門檻 {o.need}{statSuffix(o.toT)}
               {o.alreadyGem && <span className="gold"> · 這條已經是寶石轉出來的，遊戲只允許再轉同一條</span>}
             </div>
           </div>
@@ -131,6 +133,7 @@ export default function EnchantPage() {
   const [onlyEquipped, setOnlyEquipped] = useState(false);
   const [onlySix, setOnlySix] = useState(false);
   const [onlyReady, setOnlyReady] = useState(true);
+  const [assumeGrind, setAssumeGrind] = useState(true);
   const [setId, setSetId] = useState(0);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<EnchantSort>("eff-desc");
@@ -150,8 +153,8 @@ export default function EnchantPage() {
 
   const all = useMemo(() => {
     if (!account) return [];
-    return analyzeEnchant(account.runes, activeTags, owners);
-  }, [account, activeTags, owners]);
+    return analyzeEnchant(account.runes, activeTags, owners, { includeGrind: assumeGrind });
+  }, [account, activeTags, owners, assumeGrind]);
 
   /** 每顆候選目前符合的分類（顯示在卡片上，避免和精魔後的分類混淆） */
   const currentTagsOf = useMemo(() => {
@@ -276,7 +279,7 @@ export default function EnchantPage() {
           </div>
           <div className="card-sub">
             找出「換掉一條副屬性後，就會符合自行分類」的符文；只列出目前不符合、而且只差一條屬性的符文。
-            寶石數值以 6★ 傳說最大值估算，實際數值會依寶石等級與骰值較低；效率不設上限，高骰＋精煉後超過 100% 也會照實顯示。
+            數值以 6★ 傳說寶石＋精煉上限估算，實際會依寶石與磨石等級、骰值較低；效率不設上限，超過 100% 會照實顯示。
           </div>
         </div>
         <span className="chip gold">精魔候選 {base.length} 顆</span>
@@ -364,6 +367,9 @@ export default function EnchantPage() {
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }} title="遊戲規定符文要 +12 以上才能使用精魔寶石">
             <input type="checkbox" checked={onlyReady} onChange={(e) => setOnlyReady(e.target.checked)} /> 只看 +12 以上（可精魔）
           </label>
+          <label className="row tiny" style={{ gap: 6, cursor: "pointer" }} title="精魔後通常會再用磨石把新副屬性補高；關閉則只計算寶石本身數值">
+            <input type="checkbox" checked={assumeGrind} onChange={(e) => setAssumeGrind(e.target.checked)} /> 假設精魔後精煉滿
+          </label>
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
             <input type="checkbox" checked={onlyEquipped} onChange={(e) => setOnlyEquipped(e.target.checked)} /> 只看已裝備
           </label>
@@ -398,7 +404,7 @@ export default function EnchantPage() {
           <li><b>不能重複。</b>新屬性不能和主屬性、其他副屬性、固有屬性重複；也不能換成符文已經有的屬性。</li>
           <li><b>需要 +12。</b>符文至少要 +12 才能使用精魔寶石，所以此頁預設只列 +12 以上的符文。</li>
           <li><b>寶石要同套裝。</b>一般寶石只能用在同一套裝的符文；遠古符文要用遠古寶石；無形寶石則不限套裝。</li>
-          <li><b>數值怎麼看。</b>此頁用 6★ 傳說寶石最大值估算：體攻防% 13、速度 10、暴率 9、暴傷 10、抵抗／命中 11、固定體力 580、固定攻防 40；實際數值會依寶石等級與骰值而較低。因此分類門檻若高於上述上限（例如抵抗要 20），單靠一顆寶石補不到，必須符文原本就有該條屬性。</li>
+          <li><b>數值怎麼看。</b>此頁用 6★ 傳說寶石＋傳說磨石上限估算：體攻防% 13＋10、速度 10＋5、固定體力 580＋550、固定攻防 40＋30；暴率 9、暴傷 10、抵抗／命中 11（這四條不能精煉，所以只有寶石數值）。實際會依寶石與磨石等級、骰值而較低。因此門檻若高於上述合計上限（例如抵抗要 20），單靠一顆寶石＋精煉也補不到。</li>
           <li><b>先看分類。</b>選一個自行分類（例如輔助符），頁面只會列出精魔後能符合它的符文，再用效率或符文分數排序，挑你真正會用的那幾顆。</li>
         </ol>
       </details>
@@ -408,8 +414,8 @@ export default function EnchantPage() {
           <FlaskConical size={34} style={{ opacity: .3, marginBottom: 8 }} />
           <div style={{ fontWeight: 600, color: "var(--text)" }}>沒有符合條件的精魔候選</div>
           <div className="tiny dim" style={{ marginTop: 4, lineHeight: 1.7 }}>
-            目前沒有「只差一條副屬性」就能符合所選分類的符文。可能是分類門檻高於單顆寶石上限
-            （例如抵抗要求 20，但 6★ 傳說寶石最多 11）、符文已經符合，或篩選條件太窄；
+            目前沒有「只差一條副屬性」就能符合所選分類的符文。可能是分類門檻高於寶石＋精煉上限
+            （例如抵抗要 20，但抵抗不能精煉、6★ 傳說寶石最多 11）、符文已經符合，或篩選條件太窄；
             可以取消「只看 +12 以上 / 只看 6★ / 只看已裝備」或換一個分類試試。
           </div>
         </div>

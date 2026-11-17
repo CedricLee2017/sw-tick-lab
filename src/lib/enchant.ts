@@ -7,9 +7,12 @@
  *   3. 新屬性不能是主屬性、不能和現有副屬性／固有屬性重複，也不能用低於門檻的寶石硬湊。
  *   4. 已經用寶石轉過一次的符文，只能再轉同一條副屬性（遊戲規則）。
  *
- * 寶石數值以「6★ 傳說寶石最大值」估算，實際數值會依寶石等級與骰值而較低。
+ * 數值以「6★ 傳說寶石最大值」估算；預設再假設精魔後會把新副屬性精煉到傳說上限
+ * （體攻防% / 速度可精煉，暴率 / 暴傷 / 抵抗 / 命中不可精煉）。
+ * 實際數值會依寶石與磨石等級、骰值而較低。
  */
 import { STAT_TYPES } from "./constants";
+import { grindMax } from "./grind";
 import { runeEfficiency, runeScore } from "./stats";
 import { matchesRuneTag, runeStatValue, tagRequiredMatches } from "./runeTags";
 import type { Rune, RuneTagRule } from "./types";
@@ -49,6 +52,11 @@ export function gemMaxValue(t: number, ancient = false): number {
   return (ancient ? GEM_MAX_ANCIENT[t] : GEM_MAX[t]) ?? 0;
 }
 
+/** 精魔後新副屬性可再精煉的上限；不能精煉的屬性（暴率 / 暴傷 / 抵抗 / 命中）回傳 0 */
+export function enchantGrindMax(t: number, ancient = false): number {
+  return grindMax(t, ancient);
+}
+
 export function enchantStatLabel(t: number): string {
   return STAT_TYPES[t]?.label ?? `屬性 ${t}`;
 }
@@ -77,7 +85,11 @@ export interface EnchantOption {
   alreadyGem: boolean;
   toT: number;
   toLabel: string;
-  /** 以 6★ 傳說寶石最大值估算的新數值 */
+  /** 以 6★ 傳說寶石最大值估算的寶石本身數值 */
+  toGem: number;
+  /** 精魔後假設再精煉的加成上限（不可精煉為 0） */
+  toGrind: number;
+  /** 寶石＋精煉的合計估算值 */
   toValue: number;
   /** 分類要求的門檻（新屬性至少要這麼多） */
   need: number;
@@ -116,14 +128,25 @@ function sortedGemSources(rune: Rune): number[] {
   return rune.subs.map((_, i) => i);
 }
 
-/** 把一條副屬性換成指定屬性後的新符文（不動主屬性與固有屬性） */
-export function projectRune(rune: Rune, fromIndex: number, toT: number, toValue: number): Rune {
+/** 把一條副屬性換成指定屬性後的新符文（不動主屬性與固有屬性；grind 為假設的精煉值） */
+export function projectRune(
+  rune: Rune,
+  fromIndex: number,
+  toT: number,
+  gemValue: number,
+  grind = 0,
+): Rune {
   return {
     ...rune,
     subs: rune.subs.map((s, i) =>
-      i === fromIndex ? { t: toT, v: toValue, g: 0, gem: 1 } : { ...s },
+      i === fromIndex ? { t: toT, v: gemValue, g: grind, gem: 1 } : { ...s },
     ),
   };
+}
+
+export interface EnchantOptions {
+  /** 假設精魔後把新副屬性精煉到上限（預設 true；關閉則只計算寶石本身數值） */
+  includeGrind?: boolean;
 }
 
 /**
@@ -134,7 +157,9 @@ export function analyzeEnchant(
   runes: Rune[],
   rules: RuneTagRule[],
   owners?: Map<number, EnchantOwner>,
+  opts: EnchantOptions = {},
 ): EnchantTarget[] {
+  const includeGrind = opts.includeGrind !== false;
   const active = rules.filter((rule) => rule.enabled);
   if (active.length === 0) return [];
 
@@ -165,8 +190,10 @@ export function analyzeEnchant(
         if (rune.subs.some((s) => s.t === target.t)) continue;
         if (rune.prefix?.t === target.t) continue;
         if (hasMain && rune.main.t === target.t) continue;
-        const toValue = gemMaxValue(target.t, rune.ancient);
-        // 傳說寶石最大值也達不到門檻就不列
+        const toGem = gemMaxValue(target.t, rune.ancient);
+        const toGrind = includeGrind ? enchantGrindMax(target.t, rune.ancient) : 0;
+        const toValue = toGem + toGrind;
+        // 寶石＋（可選的）精煉上限也達不到門檻就不列
         if (toValue < target.min) continue;
 
         for (const index of sources) {
@@ -178,7 +205,7 @@ export function analyzeEnchant(
           const key = `${index}:${target.t}`;
           let option = byKey.get(key);
           if (!option) {
-            const projected = projectRune(rune, index, target.t, toValue);
+            const projected = projectRune(rune, index, target.t, toGem, toGrind);
             // 用實際的規則判斷一次，避免 minMatch / 固有屬性等邊界情況
             if (!matchesRuneTag(rule, projected)) continue;
             option = {
@@ -189,6 +216,8 @@ export function analyzeEnchant(
               alreadyGem: (source.gem ?? 0) > 0,
               toT: target.t,
               toLabel: enchantStatLabel(target.t),
+              toGem,
+              toGrind,
               toValue,
               need: target.min,
               rules: [],
