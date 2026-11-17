@@ -36,6 +36,15 @@ export {
   planWithStock,
   maxScoreWithStock,
 } from "../src/lib/grind";
+export {
+  ENCHANT_SORTS,
+  analyzeEnchant,
+  enchantStatLabel,
+  enchantStatSuffix,
+  gemMaxValue,
+  projectRune,
+  sortEnchantTargets,
+} from "../src/lib/enchant";
 export * from "../src/lib/deckSetup";
 export * from "../src/lib/librarySync";
 export * from "../src/lib/siege";

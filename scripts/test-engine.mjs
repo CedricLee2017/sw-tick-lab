@@ -36,6 +36,7 @@ const {
   runeScore, runeScoreRaw, scoreOfStat, runeEfficiency,
   grindMax, grindStoneMax, grindGradeFor, grindCapsFromStock, matchingGrindstones,
   analyzeRune, planScore, planMaterials, planWithStock, maxScoreWithStock,
+  analyzeEnchant, gemMaxValue, projectRune, sortEnchantTargets,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
@@ -2859,6 +2860,223 @@ check("據點進攻：全新防守隊也會推荐 Nosna44 的參考進攻隊", (
   assert.ok(advice.fallbackTeams.length > 0);
   assert.equal(advice.fallbackTeams[0].source, "fallback");
   assert.equal(advice.fallbackTeams[0].team.length, 3);
+});
+
+console.log("\n[16] 精魔建議（寶石變換）");
+
+/** 測試用符文：預設 6★ +15、套裝 3、位置 2（主屬性體力%） */
+function mkEnchantRune(id, subs, extra = {}) {
+  return {
+    id,
+    set: 3,
+    slot: 2,
+    grade: 6,
+    level: 15,
+    main: { t: 2, v: 63 },
+    prefix: { t: 0, v: 0 },
+    subs: subs.map(([t, v, gem = 0]) => ({ t, v, g: 0, gem })),
+    occupied: 0,
+    ancient: false,
+    locked: false,
+    eff: 0,
+    effMax: 100,
+    ...extra,
+  };
+}
+
+/** 輔助符：速度 10、體力% 12、防禦% 12、效果抵抗 10，四條全滿才符合 */
+const SUPPORT_RULE = {
+  id: "tag-support-test",
+  name: "輔助符",
+  sets: [],
+  stats: [
+    { t: 8, min: 10 },
+    { t: 2, min: 12 },
+    { t: 6, min: 12 },
+    { t: 11, min: 10 },
+  ],
+  minMatch: 4,
+  enabled: true,
+};
+
+check("只差一條屬性時，會建議把多餘的副屬性換成缺少的屬性", () => {
+  // 速 / 體% / 防% / 爆率% → 爆率% 換抗性就符合輔助符
+  const rune = mkEnchantRune(8101, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [9, 10],
+  ]);
+  const list = analyzeEnchant([rune], [SUPPORT_RULE]);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].rune.id, 8101);
+  assert.equal(list[0].options.length, 1);
+  const opt = list[0].options[0];
+  assert.equal(opt.fromT, 9, "被換掉的是爆率");
+  assert.equal(opt.fromIndex, 3);
+  assert.equal(opt.toT, 11, "換成效果抵抗");
+  assert.equal(opt.toValue, gemMaxValue(11, false));
+  assert.equal(opt.rules[0].name, "輔助符");
+  assert.ok(opt.effAfter > 0);
+  assert.ok(typeof opt.scoreAfter === "number");
+  assert.deepEqual(list[0].ruleIds, ["tag-support-test"]);
+});
+
+check("已經符合分類的符文不會列入", () => {
+  const rune = mkEnchantRune(8102, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [11, 12],
+  ]);
+  assert.equal(analyzeEnchant([rune], [SUPPORT_RULE]).length, 0);
+});
+
+check("差兩條以上、或門檻超過寶石上限時不列入", () => {
+  // 只符合速度與體力%，差兩條
+  const short = mkEnchantRune(8103, [
+    [8, 15],
+    [2, 20],
+    [9, 10],
+    [10, 10],
+  ]);
+  assert.equal(analyzeEnchant([short], [SUPPORT_RULE]).length, 0);
+
+  // 抗性門檻 20，但 6★ 傳說寶石最多只有 11
+  const tooHigh = {
+    ...SUPPORT_RULE,
+    id: "tag-res20",
+    stats: SUPPORT_RULE.stats.map((s) => (s.t === 11 ? { t: 11, min: 20 } : s)),
+  };
+  const rune = mkEnchantRune(8104, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [9, 10],
+  ]);
+  assert.equal(analyzeEnchant([rune], [tooHigh]).length, 0);
+});
+
+check("不能蓋掉數值不足的同一條副屬性，也不能換成主屬性", () => {
+  // 已經有抗性 5（不足 10），寶石不能把抗性換成抗性
+  const lowRes = mkEnchantRune(8105, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [11, 5],
+  ]);
+  assert.equal(analyzeEnchant([lowRes], [SUPPORT_RULE]).length, 0);
+
+  // 缺速度，但速度是主屬性（slot 2），不能換成速度
+  const speedRule = {
+    id: "tag-speed-test",
+    name: "速度符",
+    sets: [],
+    stats: [
+      { t: 8, min: 10 },
+      { t: 2, min: 12 },
+    ],
+    minMatch: 2,
+    enabled: true,
+  };
+  const mainSpd = mkEnchantRune(
+    8106,
+    [
+      [6, 20],
+      [11, 20],
+      [9, 10],
+      [10, 10],
+    ],
+    { main: { t: 8, v: 30 } },
+  );
+  assert.equal(analyzeEnchant([mainSpd], [speedRule]).length, 0);
+
+  // 固有屬性（prefix）是速度時也不能再換成速度
+  const prefixSpd = mkEnchantRune(
+    8107,
+    [
+      [6, 20],
+      [11, 20],
+      [9, 10],
+      [10, 10],
+    ],
+    { prefix: { t: 8, v: 5 } },
+  );
+  assert.equal(analyzeEnchant([prefixSpd], [speedRule]).length, 0);
+});
+
+check("已用寶石轉過的符文，只能再轉同一條副屬性", () => {
+  // 第 5 條（固定攻擊）是寶石轉出來的；其他條沒用過寶石，但也不能再轉
+  const rune = mkEnchantRune(8108, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [9, 10],
+    [3, 20, 1],
+  ]);
+  const list = analyzeEnchant([rune], [SUPPORT_RULE]);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].options.length, 1, "只有寶石那一條能被替換");
+  const opt = list[0].options[0];
+  assert.equal(opt.fromIndex, 4);
+  assert.equal(opt.alreadyGem, true);
+  assert.equal(opt.toT, 11);
+});
+
+check("停用的分類不列入", () => {
+  const rune = mkEnchantRune(8109, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [9, 10],
+  ]);
+  assert.equal(analyzeEnchant([rune], [{ ...SUPPORT_RULE, enabled: false }]).length, 0);
+});
+
+check("projectRune 只換掉指定副屬性，遠古寶石上限較高", () => {
+  const rune = mkEnchantRune(8110, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [9, 10],
+  ]);
+  const after = projectRune(rune, 3, 11, gemMaxValue(11, false));
+  assert.equal(after.subs.length, 4);
+  assert.deepEqual(after.subs[3], { t: 11, v: 11, g: 0, gem: 1 });
+  assert.equal(after.subs[0].t, 8, "其他副屬性不變");
+  assert.equal(rune.subs[3].t, 9, "不會改到原本的符文");
+  assert.ok(gemMaxValue(2, true) > gemMaxValue(2, false));
+  assert.equal(gemMaxValue(99, false), 0);
+});
+
+check("效率 / 分數可雙向排序", () => {
+  const high = mkEnchantRune(8111, [
+    [8, 20],
+    [2, 30],
+    [6, 30],
+    [9, 15],
+  ]);
+  const low = mkEnchantRune(8112, [
+    [8, 10],
+    [2, 13],
+    [6, 13],
+    [9, 5],
+  ]);
+  const list = analyzeEnchant([low, high], [SUPPORT_RULE]);
+  assert.equal(list.length, 2);
+  const highTarget = list.find((t) => t.rune.id === 8111);
+  const lowTarget = list.find((t) => t.rune.id === 8112);
+  assert.ok(highTarget && lowTarget);
+  assert.ok(highTarget.bestEff > lowTarget.bestEff, "測試資料的前提：8111 效率較高");
+
+  const desc = sortEnchantTargets(list, "eff-desc");
+  assert.equal(desc[0].rune.id, 8111);
+  const asc = sortEnchantTargets(list, "eff-asc");
+  assert.equal(asc[0].rune.id, 8112);
+  const scoreDesc = sortEnchantTargets(list, "score-desc");
+  assert.ok(scoreDesc[0].bestScore >= scoreDesc[1].bestScore);
+  const scoreAsc = sortEnchantTargets(list, "score-asc");
+  assert.ok(scoreAsc[0].bestScore <= scoreAsc[1].bestScore);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
