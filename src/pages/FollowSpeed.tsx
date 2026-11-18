@@ -35,7 +35,7 @@ const DUEL_KEY = "swtick:follow-speed-duel";
 
 type Mode = "team" | "duel";
 
-/** 進攻防守（3v3）：只比較雙方跑最快的那一隻 */
+/** 拼速（3v3）：只比較雙方跑最快的那一隻 */
 interface DuelState {
   defId: number;
   defLead: number;
@@ -141,7 +141,7 @@ export default function FollowSpeedPage() {
   const rate = rta ? 1.5 : 7;
   const members = rows.slice(0, size);
 
-  /** 進攻防守模式固定用一般 7% */
+  /** 拼速模式固定用一般 7% */
   const duelRate = 7;
 
   const patch = (index: number, next: Partial<Row>) => {
@@ -232,7 +232,7 @@ export default function FollowSpeedPage() {
   const { results, safeExtra, openerPanel, opponentSpeed, openerNotFastest, openerNeed } = computed;
 
   /**
-   * 進攻防守（3v3）：只有一隻防守、一隻進攻，比的是「誰先滿攻擊條」。
+   * 拼速（3v3）：只有一隻防守、一隻進攻，比的是「誰先滿攻擊條」。
    * 面板 = 基礎 + ceil(基礎 × 隊長技%) + 額外；同速時進攻方先手（與接速頁一致）。
    */
   const duelCalc = useMemo(() => {
@@ -360,7 +360,7 @@ export default function FollowSpeedPage() {
   const reset = () => {
     if (mode === "duel") {
       setDuel({ ...EMPTY_DUEL });
-      notify("已清空進攻防守速度");
+      notify("已清空拼速計算");
       return;
     }
     setRows(emptyRows());
@@ -394,12 +394,12 @@ export default function FollowSpeedPage() {
         <div>
           <div className="card-title row" style={{ gap: 7 }}>
             {mode === "team" ? <Gauge size={15} className="gold" /> : <Swords size={15} className="gold" />}
-            {mode === "team" ? "接速最低速度" : "進攻防守速度（3v3）"}
+            {mode === "team" ? "接速最低速度" : "拼速計算"}
           </div>
           <div className="card-sub">
             {mode === "team"
               ? "選魔靈後只輸入額外速度；系統用基礎速度、提條、速度強化與隊長技算出每隻的接速需求，不顯示 Tick。"
-              : "輸入防守方與進攻方的基礎速度、速度隊長技與額外速度，直接算出進攻方要跑贏所需的額外速度。"}
+              : "3v3 據點戰：輸入防守方與進攻方的基礎速度、速度隊長技與額外速度，直接算出進攻方要跑贏所需的額外速度。"}
           </div>
         </div>
         <button type="button" className="btn btn-sm btn-ghost" onClick={reset}>
@@ -422,7 +422,7 @@ export default function FollowSpeedPage() {
           style={{ cursor: "pointer" }}
           onClick={() => setMode("duel")}
         >
-          進攻防守（3v3）
+          拼速計算
         </button>
         <span className="tiny dim" style={{ alignSelf: "center" }}>
           {mode === "team" ? "一隊 3～5 隻的接速需求" : "兩隻比速度，算跑贏防守所需的最低速度"}
