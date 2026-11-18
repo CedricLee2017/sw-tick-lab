@@ -148,6 +148,7 @@ function EnchantScoreCard({
   t,
   setName,
   heldMaterials,
+  stockOn,
   targetScore,
   locked,
   excluded,
@@ -159,6 +160,8 @@ function EnchantScoreCard({
   setName: string;
   /** 勾選持有素材時，最好的精魔方式所需的持有寶石＋磨石（空字串表示未勾選） */
   heldMaterials: string;
+  /** 分數是否已改用持有素材等級計算 */
+  stockOn: boolean;
   targetScore: number;
   locked: boolean;
   excluded: boolean;
@@ -167,6 +170,7 @@ function EnchantScoreCard({
   onToggleExclude: () => void;
 }) {
   const remain = Math.max(0, targetScore - t.scoreNow);
+  const maxLabel = stockOn ? `持有素材精滿 ${t.maxScore}` : `MAX ${t.maxScore}`;
   return (
     <RuneCard
       rune={t.rune}
@@ -180,13 +184,17 @@ function EnchantScoreCard({
       <div className="row wrap" style={{ gap: 6 }}>
         <span
           className="chip gold"
-          title="精魔一次（6★ 傳說寶石上限）＋其他可精煉副屬性都拉到上限後的遊戲分數"
+          title={
+            stockOn
+              ? "用持有的寶石等級精魔一次，其他副屬性用持有的磨石等級精滿後能達到的遊戲分數"
+              : "精魔一次（6★ 傳說寶石上限）＋其他可精煉副屬性都拉到上限後的遊戲分數"
+          }
         >
-          MAX {t.maxScore} 分
+          {maxLabel} 分
         </span>
         <span className="chip muted" title="目前遊戲分數（含目前精煉）">目前 {t.scoreNow}</span>
         {t.gain > 0 && (
-          <span className="chip muted" title="MAX − 目前分數">
+          <span className="chip muted" title={`${maxLabel} − 目前分數`}>
             +{t.gain}
           </span>
         )}
@@ -242,13 +250,13 @@ function EnchantScoreCard({
         </div>
       ) : (
         <div className="tiny dim" style={{ lineHeight: 1.6 }}>
-          不需要精魔：把可精煉的副屬性拉到上限就有 {t.maxNow} 分。
+          不需要精魔：{stockOn ? "用持有磨石把可精煉的副屬性精滿" : "把可精煉的副屬性拉到上限"}就有 {t.maxNow} 分。
         </div>
       )}
 
       {t.best && t.best.grindPlan.length > 0 && (
         <div className="tiny" style={{ color: "var(--gold)", lineHeight: 1.65 }}>
-          其他副屬性精煉到上限：
+          {stockOn ? "其他副屬性用持有磨石精滿：" : "其他副屬性精煉到上限："}
           {t.best.grindPlan
             .map((g) => `${g.label} ${g.from}→${g.to}${statSuffix(g.t)}`)
             .join(" · ")}
@@ -258,10 +266,10 @@ function EnchantScoreCard({
       <div className="tiny dim" style={{ lineHeight: 1.6 }}>
         {t.options.length > 3 && <>另外還有 {t.options.length - 3} 種精魔方式（依分數排序）。</>}
         {t.scoreNow >= targetScore
-          ? `目前 ${t.scoreNow} 分 → MAX ${t.maxScore} 分（已達目標 ${targetScore}）。`
+          ? `目前 ${t.scoreNow} 分 → ${maxLabel} 分（已達目標 ${targetScore}）。`
           : t.maxScore >= targetScore
-            ? `目前 ${t.scoreNow} 分 → MAX ${t.maxScore} 分（目標 ${targetScore}，精魔＋精煉後可達標）。`
-            : `目前 ${t.scoreNow} 分 → MAX ${t.maxScore} 分（目標 ${targetScore}，還差 ${remain} 分）。`}
+            ? `目前 ${t.scoreNow} 分 → ${maxLabel} 分（目標 ${targetScore}，精魔＋精煉後可達標）。`
+            : `目前 ${t.scoreNow} 分 → ${maxLabel} 分（目標 ${targetScore}，還差 ${remain} 分）。`}
       </div>
     </RuneCard>
   );
@@ -573,7 +581,7 @@ export default function EnchantPage() {
             <Tile k="已達標" v={String(scoreSummary.met)} sub="目前分數就足夠" />
             <Tile k="精煉即可達標" v={String(scoreSummary.grindOnly)} sub="不用精魔" />
             <Tile
-              k="最高 MAX"
+              k={stockOn ? "最高持有素材分數" : "最高 MAX"}
               v={scoreSummary.best > 0 ? String(scoreSummary.best) : "—"}
               sub={scoreSummary.best > 0 ? "此清單最高分" : "目前沒有候選"}
             />
@@ -902,7 +910,7 @@ export default function EnchantPage() {
           <li><b>先看分類。</b>選一個自行分類（例如輔助符），頁面只會列出精魔後能符合它的符文，再用效率或符文分數排序，挑你真正會用的那幾顆。</li>
           <li><b>依分數。</b>不需要自行分類，直接用遊戲分數（副屬性＋固有屬性，含精煉；不含主屬性與套裝）當標準。輸入目標分數（例如 250）後，頁面會枚舉所有合法精魔方式，只列出「精魔一次＋其他可精煉副屬性都拉到上限」能達到該分數的符文，並列出要換哪一條、換成什麼、還要不要再精煉。MAX 是最理想值：只看分數高低，不管換出來的屬性你會不會用（例如把抵抗換成體力% 只為了墊分），實際也會依寶石與磨石等級、骰值而較低。</li>
           <li><b>已達標與精煉即可達標。</b>「已達標」代表目前分數就夠；「精煉即可達標」代表不用精魔，只要把現有可精煉副屬性拉滿就到目標。想看這兩類可以取消「只看還沒達標」。</li>
-          <li><b>持有精煉石和精魔石素材。</b>勾選後只列出「換成你手上真的有的寶石」、而且「精魔後要用來精煉的磨石也真的持有」的符文；素材要比照套裝（遠古符文用遠古素材、無形素材不限套裝）且屬性正確。暴率 / 暴傷 / 抵抗 / 命中不能精煉，不需要磨石；關閉「假設精魔後精煉滿」時也不需要磨石。卡片會列出用到的素材、等級與持有數量。舊存檔若沒有素材資料，請重新匯入一次 JSON；素材數量不會跨符文扣除。</li>
+          <li><b>持有精煉石和精魔石素材。</b>勾選後只列出「換成你手上真的有的寶石」、而且「精魔後要用來精煉的磨石也真的持有」的符文；素材要比照套裝（遠古符文用遠古素材、無形素材不限套裝）且屬性正確。暴率 / 暴傷 / 抵抗 / 命中不能精煉，不需要磨石；在「依分類」關閉「假設精魔後精煉滿」時也不需要磨石。<b>分數會改以持有素材的等級計算</b>：卡片顯示「持有素材精滿 X 分」，而不是 6★ 傳說上限的 MAX；是否達標也用這個分數判斷。卡片會列出用到的素材、等級、可加數值與持有數量。舊存檔若沒有素材資料，請重新匯入一次 JSON；素材數量不會跨符文扣除。</li>
           <li><b>主屬篩選。</b>可依符文主屬性（例如 2 號速度、4 號暴傷、6 號體力%）縮小清單；下拉只列出這份存檔實際擁有的主屬性。</li>
           <li><b>排除符文 / 排除套裝。</b>在「排除符文 / 排除套裝」卡片點套裝即可排除整套，或搜尋符文 ID / 套裝 / 主屬 / 擁有者加入單顆排除；兩者可疊加，也和上面的套裝、主屬、持有素材等條件一起生效。這些排除只影響精魔建議這一頁，不會改到全域「符文限制」的排除清單（卡片上的「排除」標記仍來自全域設定）。</li>
         </ol>
@@ -963,6 +971,7 @@ export default function EnchantPage() {
                 t={t}
                 setName={gemNames.get(String(t.rune.id)) ?? ""}
                 heldMaterials={stockOn && t.best ? heldMaterialsLabel(t.rune, t.best.toT, t.best.toGrind, stock) : ""}
+                stockOn={stockOn}
                 targetScore={targetScore}
                 locked={lockedSet.has(t.rune.id)}
                 excluded={excludedSet.has(t.rune.id)}

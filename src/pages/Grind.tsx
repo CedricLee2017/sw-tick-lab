@@ -99,9 +99,9 @@ function TargetCard({
         {showScore ? (
           <span
             className="chip gold"
-            title={stock ? "用目前持有的磨石最多能達到的分數" : "全部可精煉屬性精煉到上限後的分數"}
+            title={stock ? "用目前持有的磨石等級精滿後能達到的遊戲分數" : "全部可精煉屬性精煉到上限後的分數"}
           >
-            {stock ? `素材可達 ${stockMax}` : `可達 ${t.maxGameScore}`}
+            {stock ? `持有素材精滿 ${stockMax} 分` : `可達 ${t.maxGameScore}`}
           </span>
         ) : (
           <span className={`chip ${t.tier === "high" ? "gold" : "muted"}`}>
@@ -137,7 +137,7 @@ function TargetCard({
         <>
           <div className="tiny" style={{ lineHeight: 1.7 }}>
             <span className="gold">遊戲分數 {t.gameScore}</span>
-            <span className="dim"> · {stock ? `素材可達 ${stockMax} 分` : `精煉後最高 ${t.maxGameScore} 分`}</span>
+            <span className="dim"> · {stock ? `持有素材精滿 ${stockMax} 分（傳說上限 ${t.maxGameScore} 分）` : `精煉後最高 ${t.maxGameScore} 分`}</span>
             {t.gameScore >= targetScore ? (
               <span className="dim"> · 已達 {targetScore} 分</span>
             ) : (

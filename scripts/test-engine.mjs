@@ -39,6 +39,7 @@ const {
   analyzeEnchant, analyzeEnchantScore, maxGrindRune, sortEnchantScoreTargets,
   ENCHANT_SCORE_SORTS, gemMaxValue, enchantGrindMax, projectRune, slotAllowsStat, sortEnchantTargets,
   gemFitsRune, matchingEnchantGems, heldGemLabel, heldMaterialsLabel,
+  gemStoneMax, gemValueFromStock, grindValueFromStock, maxScoreWithEnchantStock,
   filterEnchantByStock, filterEnchantScoreByStock, ENCHANT_MAIN_STATS,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
@@ -3407,7 +3408,7 @@ check("持有素材：分類模式要寶石＋磨石都持有（可精煉的目�
   assert.deepEqual(kept.ruleIds, t.ruleIds);
   assert.match(
     heldMaterialsLabel(rune, 6, t.options[0].toGrind, { gems: [gem], grindstones: [stone] }),
-    /防禦力%寶石 ×1（傳說） · .*防禦力%磨石 ×2（傳說）/,
+    /防禦力%寶石 ×1（傳說 \+13） · .*防禦力%磨石 ×2（傳說 \+10）/,
     "卡片要同時顯示寶石與磨石",
   );
 });
@@ -3435,12 +3436,70 @@ check("持有素材：分數模式要寶石＋磨石都持有，且仍高於純�
   assert.equal(filterEnchantScoreByStock(t, { gems: [gem], grindstones: [] }), null, "缺磨石不列入");
   const kept = filterEnchantScoreByStock(t, { gems: [gem], grindstones: [stone] });
   assert.ok(kept);
-  assert.equal(kept.maxScore, t.best.scoreAfter);
+  assert.equal(kept.maxScore, maxScoreWithEnchantStock(t, { gems: [gem], grindstones: [stone] }), "顯示持有素材可達分數");
+  assert.ok(kept.maxScore <= t.maxScore, "只持有一種磨石時不會高於傳說上限的 MAX");
   assert.equal(kept.gain, kept.maxScore - kept.scoreNow);
   const wrong = { set: 3, stat: 11, grade: 5, ancient: false, immemorial: false, amount: 2 };
   assert.equal(filterEnchantScoreByStock(t, { gems: [wrong], grindstones: [stone] }), null, "最佳方式沒有對應寶石就排除");
   const noEnchant = analyzeEnchantScore([mkEnchantRune(8305, [[8, 30], [2, 40], [6, 40], [9, 30]])])[0];
   assert.equal(filterEnchantScoreByStock(noEnchant, { gems: [gem], grindstones: [stone] }), null, "不用精魔的候選不列入素材清單");
+});
+
+check("寶石等級數值：傳說等於現有上限，等級越低上限越低", () => {
+  assert.equal(gemStoneMax(2, 5, false), gemMaxValue(2, false));
+  assert.equal(gemStoneMax(8, 5, true), gemMaxValue(8, true));
+  assert.equal(gemStoneMax(2, 3, false), 9, "稀有體力%寶石 +9");
+  assert.ok(gemStoneMax(2, 3, false) < gemStoneMax(2, 5, false));
+  assert.equal(gemStoneMax(11, 5, false), 11);
+});
+
+check("持有素材數值：只算套裝、屬性正確的最高等級素材", () => {
+  const rune = mkEnchantRune(8307, [[8, 15], [2, 20], [6, 20], [9, 10]]);
+  const stock = {
+    gems: [
+      { set: 3, stat: 2, grade: 3, ancient: false, immemorial: false, amount: 1 },
+      { set: 3, stat: 2, grade: 5, ancient: false, immemorial: false, amount: 2 },
+      { set: 15, stat: 2, grade: 5, ancient: false, immemorial: false, amount: 3 },
+    ],
+    grindstones: [
+      { set: 3, stat: 2, grade: 4, ancient: false, immemorial: false, amount: 1 },
+      { set: 3, stat: 2, grade: 5, ancient: false, immemorial: false, amount: 2 },
+    ],
+  };
+  assert.equal(gemValueFromStock(rune, 2, stock), 13, "取同套裝稀有/傳說中較高的傳說");
+  assert.equal(gemValueFromStock(rune, 12, stock), 0, "沒有命中寶石");
+  assert.equal(grindValueFromStock(rune, 2, stock), 10, "傳說磨石 +10");
+  assert.equal(grindValueFromStock(rune, 11, stock), 0, "抵抗不能精煉");
+});
+
+check("持有素材分數：低等級素材分數低於傳說 MAX，分數與達標都據此判斷", () => {
+  const rune = mkEnchantRune(8308, [[8, 15], [2, 20], [6, 20], [9, 10]]);
+  const t = analyzeEnchantScore([rune])[0];
+  assert.ok(t.best);
+  const stat = t.best.toT;
+  const fullStock = {
+    gems: [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12].map((s) => ({ set: 3, stat: s, grade: 5, ancient: false, immemorial: false, amount: 1 })),
+    grindstones: [1, 2, 3, 4, 5, 6, 8].map((s) => ({ set: 3, stat: s, grade: 5, ancient: false, immemorial: false, amount: 1 })),
+  };
+  const rareStock = {
+    gems: [{ set: 3, stat, grade: 3, ancient: false, immemorial: false, amount: 1 }],
+    grindstones: [{ set: 3, stat, grade: 3, ancient: false, immemorial: false, amount: 1 }],
+  };
+  assert.equal(maxScoreWithEnchantStock(t, fullStock), t.maxScore, "全傳說素材等於理論 MAX");
+  const rareScore = maxScoreWithEnchantStock(t, rareStock);
+  assert.ok(rareScore < t.maxScore, "稀有素材分數低於傳說 MAX");
+  const kept = filterEnchantScoreByStock(t, rareStock);
+  assert.ok(kept);
+  assert.equal(kept.maxScore, rareScore, "卡片顯示持有素材精滿後的分數");
+  assert.equal(kept.best.toGem, gemStoneMax(stat, 3, false), "寶石數值改用持有等級");
+  assert.equal(kept.best.toGrind, grindStoneMax(stat, 3, false), "磨石數值改用持有等級");
+  assert.equal(kept.best.scoreAfter, rareScore);
+  // 普通素材只會把分數拉低，精魔反而吃虧，應直接排除
+  const commonStock = {
+    gems: [{ set: 3, stat, grade: 1, ancient: false, immemorial: false, amount: 1 }],
+    grindstones: [{ set: 3, stat, grade: 1, ancient: false, immemorial: false, amount: 1 }],
+  };
+  assert.equal(filterEnchantScoreByStock(t, commonStock), null, "素材太差、精魔後反而更低分就不列");
 });
 
 check("主屬篩選選項涵蓋所有可能的主屬性", () => {

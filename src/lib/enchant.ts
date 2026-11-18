@@ -13,7 +13,7 @@
  * 實際數值會依寶石與磨石等級、骰值而較低。
  */
 import { SET_BY_ID, STAT_TYPES } from "./constants";
-import { GRIND_GRADE_LABEL, grindMax, matchingGrindstones } from "./grind";
+import { GRIND_GRADE_LABEL, grindMax, grindStoneMax, matchingGrindstones } from "./grind";
 import { runeEfficiency, runeScore, runeScoreRaw } from "./stats";
 import { matchesRuneTag, runeStatValue, tagRequiredMatches } from "./runeTags";
 import type { EnchantGem, Grindstone, Rune, RuneTagRule } from "./types";
@@ -51,6 +51,30 @@ const GEM_MAX_ANCIENT: Record<number, number> = {
 /** 這顆符文能用寶石轉出的最大值（遠古符文用遠古寶石上限） */
 export function gemMaxValue(t: number, ancient = false): number {
   return (ancient ? GEM_MAX_ANCIENT[t] : GEM_MAX[t]) ?? 0;
+}
+
+/** 6★ 寶石各等級的最大加成（1 普通 / 2 魔法 / 3 稀有 / 4 英雄 / 5 傳說） */
+const GEM_MAX_BY_GRADE: Record<number, Record<number, number>> = {
+  1: { 1: 150, 2: 4, 3: 12, 4: 4, 5: 12, 6: 4, 8: 3, 9: 3, 10: 4, 11: 4, 12: 4 },
+  2: { 1: 220, 2: 7, 3: 16, 4: 7, 5: 16, 6: 7, 8: 4, 9: 4, 10: 5, 11: 6, 12: 6 },
+  3: { 1: 310, 2: 9, 3: 23, 4: 9, 5: 23, 6: 9, 8: 6, 9: 5, 10: 6, 11: 8, 12: 8 },
+  4: { 1: 420, 2: 11, 3: 30, 4: 11, 5: 30, 6: 11, 8: 8, 9: 7, 10: 8, 11: 9, 12: 9 },
+  5: GEM_MAX,
+};
+
+/** 遠古寶石各等級的最大加成 */
+const ANCIENT_GEM_MAX_BY_GRADE: Record<number, Record<number, number>> = {
+  1: { 1: 210, 2: 6, 3: 16, 4: 6, 5: 16, 6: 6, 8: 4, 9: 4, 10: 6, 11: 6, 12: 6 },
+  2: { 1: 280, 2: 9, 3: 20, 4: 9, 5: 20, 6: 9, 8: 5, 9: 5, 10: 7, 11: 8, 12: 8 },
+  3: { 1: 370, 2: 11, 3: 27, 4: 11, 5: 27, 6: 11, 8: 7, 9: 6, 10: 8, 11: 10, 12: 10 },
+  4: { 1: 480, 2: 13, 3: 34, 4: 13, 5: 34, 6: 13, 8: 9, 9: 8, 10: 10, 11: 11, 12: 11 },
+  5: GEM_MAX_ANCIENT,
+};
+
+/** 某個等級（1 普通～5 傳說）的 6★ 寶石對這條屬性最多能加多少 */
+export function gemStoneMax(stat: number, grade: number, ancient = false): number {
+  const g = Math.min(5, Math.max(1, Math.round(grade)));
+  return (ancient ? ANCIENT_GEM_MAX_BY_GRADE[g] : GEM_MAX_BY_GRADE[g])?.[stat] ?? 0;
 }
 
 /** 精魔後新副屬性可再精煉的上限；不能精煉的屬性（暴率 / 暴傷 / 抵抗 / 命中）回傳 0 */
@@ -551,20 +575,71 @@ function hasEnchantMaterials(rune: Rune, toT: number, toGrind: number, stock: En
   return matchingGrindForEnchant(rune, toT, stock).length > 0;
 }
 
-/** 卡片上顯示的持有素材：寶石＋（需要精煉時）磨石 */
+/** 持有寶石對這條屬性能轉出的最大值（套裝規則正確、等級最高的那顆） */
+export function gemValueFromStock(rune: Rune, stat: number, stock: EnchantStock): number {
+  let best = 0;
+  for (const gem of stock.gems) {
+    if (gem.stat !== stat || !gemFitsRune(rune, gem)) continue;
+    best = Math.max(best, gemStoneMax(stat, gem.grade, rune.ancient));
+  }
+  return best;
+}
+
+/** 持有磨石對這條屬性能精煉到的最大值（不超過該符文／遠古上限） */
+export function grindValueFromStock(rune: Rune, stat: number, stock: EnchantStock): number {
+  let best = 0;
+  for (const stone of stock.grindstones) {
+    // 磨石與寶石的套裝規則相同（gemFitsRune 只看欄位，可共用）
+    if (stone.stat !== stat || !gemFitsRune(rune, stone)) continue;
+    best = Math.max(best, grindStoneMax(stat, stone.grade, rune.ancient));
+  }
+  return Math.min(best, grindMax(stat, rune.ancient));
+}
+
+/** 把符文所有可精煉副屬拉到「持有磨石」的上限；已精煉得更高的保留原值 */
+function grindRuneWithStock(rune: Rune, stock: EnchantStock): Rune {
+  return {
+    ...rune,
+    subs: rune.subs.map((s) => ({ ...s, g: Math.max(s.g ?? 0, grindValueFromStock(rune, s.t, stock)) })),
+  };
+}
+
+/** 卡片上顯示的持有素材：寶石＋（需要精煉時）磨石，含等級可加的最大值 */
 export function heldMaterialsLabel(rune: Rune, toT: number, toGrind: number, stock: EnchantStock): string {
   const parts: string[] = [];
-  const gem = heldGemLabel(rune, toT, stock.gems);
-  if (gem) parts.push(gem);
+  const gem = matchingEnchantGems(rune, toT, stock.gems)[0];
+  if (gem) {
+    const set = gem.immemorial ? "無形" : SET_BY_ID[gem.set]?.name ?? `套裝 ${gem.set}`;
+    const grade = GEM_GRADE_LABEL[gem.grade] ?? `${gem.grade} 級`;
+    parts.push(
+      `${set} ${enchantStatLabel(toT)}寶石 ×${gem.amount}（${grade} +${gemStoneMax(toT, gem.grade, rune.ancient)}${gem.ancient ? "・遠古" : ""}）`,
+    );
+  }
   if (toGrind > 0) {
     const stone = matchingGrindForEnchant(rune, toT, stock)[0];
     if (stone) {
       const set = stone.immemorial ? "無形" : SET_BY_ID[stone.set]?.name ?? `套裝 ${stone.set}`;
       const grade = GRIND_GRADE_LABEL[stone.grade] ?? `${stone.grade} 級`;
-      parts.push(`${set} ${enchantStatLabel(toT)}磨石 ×${stone.amount}（${grade}${stone.ancient ? "・遠古" : ""}）`);
+      parts.push(
+        `${set} ${enchantStatLabel(toT)}磨石 ×${stone.amount}（${grade} +${grindStoneMax(toT, stone.grade, rune.ancient)}${stone.ancient ? "・遠古" : ""}）`,
+      );
     }
   }
   return parts.join(" · ");
+}
+
+/** 只用持有素材（寶石等級＋磨石等級），這顆符文精魔＋精滿後最多能到幾分 */
+export function maxScoreWithEnchantStock(target: EnchantScoreTarget, stock: EnchantStock): number {
+  const rune = target.rune;
+  let best = Math.round(runeScoreRaw(grindRuneWithStock(rune, stock), true));
+  for (const o of target.options) {
+    const gem = gemValueFromStock(rune, o.toT, stock);
+    if (gem <= 0) continue;
+    const grind = grindValueFromStock(rune, o.toT, stock);
+    const projected = grindRuneWithStock(projectRune(rune, o.fromIndex, o.toT, gem, grind), stock);
+    best = Math.max(best, Math.round(runeScoreRaw(projected, true)));
+  }
+  return best;
 }
 
 /** 分類模式：只保留「真的持有寶石＋磨石」的精魔方式；沒有完整素材時回傳 null */
@@ -580,17 +655,54 @@ export function filterEnchantByStock(target: EnchantTarget, stock: EnchantStock)
   };
 }
 
-/** 分數模式：只保留素材齊全、且精魔後分數仍高於純精煉的候選 */
+/**
+ * 分數模式：素材齊全才留下，並把分數／效率從「傳說上限估算」改成
+ * 「用持有的寶石等級＋磨石等級精滿」的實際可達值。
+ */
 export function filterEnchantScoreByStock(
   target: EnchantScoreTarget,
   stock: EnchantStock,
 ): EnchantScoreTarget | null {
-  const options = target.options.filter((o) => hasEnchantMaterials(target.rune, o.toT, o.toGrind, stock));
+  const rune = target.rune;
+  const maxNow = Math.round(runeScoreRaw(grindRuneWithStock(rune, stock), true));
+  const options: EnchantScoreOption[] = [];
+
+  for (const o of target.options) {
+    const gem = gemValueFromStock(rune, o.toT, stock);
+    const grind = grindValueFromStock(rune, o.toT, stock);
+    if (gem <= 0 || (o.toGrind > 0 && grind <= 0)) continue;
+    const projected = grindRuneWithStock(projectRune(rune, o.fromIndex, o.toT, gem, grind), stock);
+    const scoreAfter = Math.round(runeScoreRaw(projected, true));
+    // 用持有素材反而沒有純精煉高，就不算精魔選項
+    if (scoreAfter <= maxNow) continue;
+    const grindPlan = rune.subs
+      .map((s, i) => ({ s, i }))
+      .filter(({ s, i }) => i !== o.fromIndex && grindValueFromStock(rune, s.t, stock) > (s.g ?? 0))
+      .map(({ s }) => ({
+        t: s.t,
+        label: enchantStatLabel(s.t),
+        from: s.v + (s.g ?? 0),
+        to: s.v + grindValueFromStock(rune, s.t, stock),
+      }));
+    options.push({
+      ...o,
+      toGem: gem,
+      toGrind: grind,
+      toValue: gem + grind,
+      scoreAfter,
+      gain: scoreAfter - target.scoreNow,
+      effAfter: runeEfficiency(projected, true).current,
+      grindPlan,
+    });
+  }
+
+  options.sort((a, b) => b.scoreAfter - a.scoreAfter || b.gain - a.gain || a.fromIndex - b.fromIndex);
   const top = options[0];
-  // 素材不全（或只精煉就已是最佳）的符文不需要精魔，不列入「持有素材」清單
-  if (!top || top.scoreAfter <= target.maxNow) return null;
+  // 素材不足或只精煉就已是最佳，不列入「持有素材」清單
+  if (!top) return null;
   return {
     ...target,
+    maxNow,
     options,
     best: top,
     maxScore: top.scoreAfter,
