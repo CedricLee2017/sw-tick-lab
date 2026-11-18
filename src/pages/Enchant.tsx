@@ -11,15 +11,16 @@ import {
   analyzeEnchant,
   analyzeEnchantScore,
   enchantStatLabel,
-  filterEnchantByGems,
-  filterEnchantScoreByGems,
-  heldGemLabel,
+  filterEnchantByStock,
+  filterEnchantScoreByStock,
+  heldMaterialsLabel,
   sortEnchantScoreTargets,
   sortEnchantTargets,
   type EnchantOwner,
   type EnchantScoreSort,
   type EnchantScoreTarget,
   type EnchantSort,
+  type EnchantStock,
   type EnchantTarget,
 } from "../lib/enchant";
 import type { RuneTagRule } from "../lib/types";
@@ -42,7 +43,7 @@ type EnchantMode = "tag" | "score";
 function EnchantCard({
   t,
   setName,
-  heldGem,
+  heldMaterials,
   locked,
   excluded,
   currentTags,
@@ -52,8 +53,8 @@ function EnchantCard({
   t: EnchantTarget;
   /** 需要使用的寶石套裝名稱（含遠古標記） */
   setName: string;
-  /** 勾選持有素材時，最好的精魔方式所需的持有寶石（空字串表示未勾選） */
-  heldGem: string;
+  /** 勾選持有素材時，最好的精魔方式所需的持有寶石＋磨石（空字串表示未勾選） */
+  heldMaterials: string;
   locked: boolean;
   excluded: boolean;
   /** 這顆符文目前已經符合的分類（精魔前） */
@@ -84,9 +85,9 @@ function EnchantCard({
         <span className="chip muted" title="遊戲分數：副屬性＋固有屬性，含精煉；不含主屬性與套裝">
           分數 {t.scoreNow} → {t.options[0]?.scoreAfter ?? t.scoreNow}
         </span>
-        {heldGem && (
-          <span className="chip green" title="目前持有、可用於這顆符文的寶石素材">
-            {heldGem}
+        {heldMaterials && (
+          <span className="chip green" title="目前持有、可用於這顆符文的精魔石與精煉石素材">
+            {heldMaterials}
           </span>
         )}
       </div>
@@ -144,7 +145,7 @@ function EnchantCard({
 function EnchantScoreCard({
   t,
   setName,
-  heldGem,
+  heldMaterials,
   targetScore,
   locked,
   excluded,
@@ -154,8 +155,8 @@ function EnchantScoreCard({
 }: {
   t: EnchantScoreTarget;
   setName: string;
-  /** 勾選持有素材時，最好的精魔方式所需的持有寶石（空字串表示未勾選） */
-  heldGem: string;
+  /** 勾選持有素材時，最好的精魔方式所需的持有寶石＋磨石（空字串表示未勾選） */
+  heldMaterials: string;
   targetScore: number;
   locked: boolean;
   excluded: boolean;
@@ -196,9 +197,9 @@ function EnchantScoreCard({
         ) : (
           <span className="chip gold">還差 {remain} 分</span>
         )}
-        {heldGem && (
-          <span className="chip green" title="目前持有、可用於這顆符文的寶石素材">
-            {heldGem}
+        {heldMaterials && (
+          <span className="chip green" title="目前持有、可用於這顆符文的精魔石與精煉石素材">
+            {heldMaterials}
           </span>
         )}
       </div>
@@ -281,7 +282,7 @@ export default function EnchantPage() {
   const [assumeGrind, setAssumeGrind] = useState(true);
   const [setId, setSetId] = useState(0);
   const [mainStat, setMainStat] = useState(0);
-  const [onlyHaveGem, setOnlyHaveGem] = useState(false);
+  const [onlyHaveStock, setOnlyHaveStock] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<EnchantSort>("eff-desc");
   const [scoreSort, setScoreSort] = useState<EnchantScoreSort>("max-desc");
@@ -289,11 +290,15 @@ export default function EnchantPage() {
   const [onlyUnmet, setOnlyUnmet] = useState(true);
   const [take, setTake] = useState(40);
 
-  /** 持有的精魔石（寶石）素材；舊存檔沒有這個欄位時不能啟用素材篩選 */
-  const gems = useMemo(() => account?.gems ?? [], [account]);
-  const hasGemData = Array.isArray(account?.gems);
-  const gemTotal = useMemo(() => gems.reduce((sum, g) => sum + g.amount, 0), [gems]);
-  const gemOn = onlyHaveGem && hasGemData;
+  /** 持有的精魔石（寶石）＋精煉石（磨石）；舊存檔缺少任一欄位時不能啟用素材篩選 */
+  const stock = useMemo<EnchantStock>(
+    () => ({ gems: account?.gems ?? [], grindstones: account?.grindstones ?? [] }),
+    [account],
+  );
+  const hasStockData = Array.isArray(account?.gems) && Array.isArray(account?.grindstones);
+  const gemTotal = useMemo(() => stock.gems.reduce((sum, g) => sum + g.amount, 0), [stock]);
+  const grindTotal = useMemo(() => stock.grindstones.reduce((sum, g) => sum + g.amount, 0), [stock]);
+  const stockOn = onlyHaveStock && hasStockData;
 
   const activeTags = useMemo(() => runeTags.filter((r) => r.enabled), [runeTags]);
 
@@ -371,11 +376,11 @@ export default function EnchantPage() {
     [all, onlyReady, onlyEquipped, onlySix, setId, mainStat],
   );
 
-  /** 勾選「持有精魔石素材」時，只留下真的有寶石可精魔的候選 */
+  /** 勾選「持有精煉石和精魔石素材」時，只留下素材齊全的候選 */
   const gemReady = useMemo(() => {
-    if (!gemOn) return base;
-    return base.map((t) => filterEnchantByGems(t, gems)).filter((t): t is EnchantTarget => t !== null);
-  }, [base, gemOn, gems]);
+    if (!stockOn) return base;
+    return base.map((t) => filterEnchantByStock(t, stock)).filter((t): t is EnchantTarget => t !== null);
+  }, [base, stockOn, stock]);
 
   const tagCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -423,13 +428,13 @@ export default function EnchantPage() {
     });
   }, [scoreAll, onlyReady, onlyEquipped, onlySix, setId, mainStat, q]);
 
-  /** 勾選「持有精魔石素材」時，分數模式也只留下真的有寶石可精魔的候選 */
+  /** 勾選「持有精煉石和精魔石素材」時，分數模式也只留下素材齊全的候選 */
   const scoreGemReady = useMemo(() => {
-    if (!gemOn) return scoreFiltered;
+    if (!stockOn) return scoreFiltered;
     return scoreFiltered
-      .map((t) => filterEnchantScoreByGems(t, gems))
+      .map((t) => filterEnchantScoreByStock(t, stock))
       .filter((t): t is EnchantScoreTarget => t !== null);
-  }, [scoreFiltered, gemOn, gems]);
+  }, [scoreFiltered, stockOn, stock]);
 
   const scoreReach = useMemo(
     () => scoreGemReady.filter((t) => t.maxScore >= targetScore),
@@ -443,7 +448,7 @@ export default function EnchantPage() {
 
   useEffect(() => {
     setTake(40);
-  }, [mode, tagFilter, onlyEquipped, onlySix, onlyReady, assumeGrind, setId, mainStat, onlyHaveGem, q, sort, scoreSort, targetScore, onlyUnmet]);
+  }, [mode, tagFilter, onlyEquipped, onlySix, onlyReady, assumeGrind, setId, mainStat, onlyHaveStock, q, sort, scoreSort, targetScore, onlyUnmet]);
 
   const summary = useMemo(() => {
     const six = gemReady.filter((t) => t.rune.grade === 6).length;
@@ -711,28 +716,28 @@ export default function EnchantPage() {
           </label>
           <label
             className="row tiny"
-            style={{ gap: 6, cursor: hasGemData ? "pointer" : "not-allowed", opacity: hasGemData ? 1 : 0.55 }}
-            title="只列出「換成你手上真的有的寶石（同套裝 / 無形 / 遠古規則）」就能精魔的符文"
+            style={{ gap: 6, cursor: hasStockData ? "pointer" : "not-allowed", opacity: hasStockData ? 1 : 0.55 }}
+            title="只列出「換成你手上真的有的寶石，而且精煉也用你持有的磨石」就能精魔的符文（同套裝 / 無形 / 遠古規則）"
           >
             <input
               type="checkbox"
-              checked={gemOn}
-              disabled={!hasGemData}
-              onChange={(e) => setOnlyHaveGem(e.target.checked)}
+              checked={stockOn}
+              disabled={!hasStockData}
+              onChange={(e) => setOnlyHaveStock(e.target.checked)}
             />
-            只列出持有精魔石素材的符文
+            只列出持有精煉石和精魔石素材的符文
           </label>
           <span className="tiny dim">
-            {hasGemData
-              ? `持有 ${gems.length} 種寶石（共 ${gemTotal} 個）`
-              : "此存檔沒有精魔石素材資料，請重新匯入一次 JSON"}
+            {hasStockData
+              ? `持有 ${stock.grindstones.length} 種磨石（共 ${grindTotal} 個）· ${stock.gems.length} 種寶石（共 ${gemTotal} 個）`
+              : "此存檔沒有精煉石／精魔石素材資料，請重新匯入一次 JSON"}
           </span>
           <span className="tiny dim">
             {mode === "tag"
               ? `顯示 ${filtered.length} / ${gemReady.length} 顆`
               : `顯示 ${scoreList.length} / ${scoreGemReady.length} 顆`}
           </span>
-          {(onlyEquipped || onlySix || !onlyReady || setId || mainStat || onlyHaveGem || q || tagFilter.length > 0 || (!onlyUnmet && mode === "score")) && (
+          {(onlyEquipped || onlySix || !onlyReady || setId || mainStat || onlyHaveStock || q || tagFilter.length > 0 || (!onlyUnmet && mode === "score")) && (
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -742,7 +747,7 @@ export default function EnchantPage() {
                 setOnlyReady(true);
                 setSetId(0);
                 setMainStat(0);
-                setOnlyHaveGem(false);
+                setOnlyHaveStock(false);
                 setQ("");
                 setTagFilter([]);
                 setOnlyUnmet(true);
@@ -767,7 +772,7 @@ export default function EnchantPage() {
           <li><b>先看分類。</b>選一個自行分類（例如輔助符），頁面只會列出精魔後能符合它的符文，再用效率或符文分數排序，挑你真正會用的那幾顆。</li>
           <li><b>依分數。</b>不需要自行分類，直接用遊戲分數（副屬性＋固有屬性，含精煉；不含主屬性與套裝）當標準。輸入目標分數（例如 250）後，頁面會枚舉所有合法精魔方式，只列出「精魔一次＋其他可精煉副屬性都拉到上限」能達到該分數的符文，並列出要換哪一條、換成什麼、還要不要再精煉。MAX 是最理想值：只看分數高低，不管換出來的屬性你會不會用（例如把抵抗換成體力% 只為了墊分），實際也會依寶石與磨石等級、骰值而較低。</li>
           <li><b>已達標與精煉即可達標。</b>「已達標」代表目前分數就夠；「精煉即可達標」代表不用精魔，只要把現有可精煉副屬性拉滿就到目標。想看這兩類可以取消「只看還沒達標」。</li>
-          <li><b>持有精魔石素材。</b>勾選後只列出「換成你手上真的有的寶石」也能成立的符文：寶石要比照套裝（遠古符文用遠古寶石、無形寶石不限套裝）而且屬性正確，卡片會顯示持有數量與等級。舊存檔若沒有素材資料，請重新匯入一次 JSON。素材數量不會跨符文扣除。</li>
+          <li><b>持有精煉石和精魔石素材。</b>勾選後只列出「換成你手上真的有的寶石」、而且「精魔後要用來精煉的磨石也真的持有」的符文；素材要比照套裝（遠古符文用遠古素材、無形素材不限套裝）且屬性正確。暴率 / 暴傷 / 抵抗 / 命中不能精煉，不需要磨石；關閉「假設精魔後精煉滿」時也不需要磨石。卡片會列出用到的素材、等級與持有數量。舊存檔若沒有素材資料，請重新匯入一次 JSON；素材數量不會跨符文扣除。</li>
           <li><b>主屬篩選。</b>可依符文主屬性（例如 2 號速度、4 號暴傷、6 號體力%）縮小清單；下拉只列出這份存檔實際擁有的主屬性。</li>
         </ol>
       </details>
@@ -780,7 +785,7 @@ export default function EnchantPage() {
             <div className="tiny dim" style={{ marginTop: 4, lineHeight: 1.7 }}>
               目前沒有「只差一條副屬性」就能符合所選分類的符文。可能是分類門檻高於寶石＋精煉上限
               （例如抵抗要 20，但抵抗不能精煉、6★ 傳說寶石最多 11）、符文已經符合，或篩選條件太窄；
-              可以取消「只看 +12 以上 / 只看 6★ / 只看已裝備 / 只列出持有精魔石素材」、改回全部主屬，或換一個分類試試。
+              可以取消「只看 +12 以上 / 只看 6★ / 只看已裝備 / 只列出持有精煉石和精魔石素材」、改回全部主屬，或換一個分類試試。
             </div>
           </div>
         ) : (
@@ -791,7 +796,7 @@ export default function EnchantPage() {
                   key={t.rune.id}
                   t={t}
                   setName={gemNames.get(String(t.rune.id)) ?? ""}
-                  heldGem={gemOn && t.options[0] ? heldGemLabel(t.rune, t.options[0].toT, gems) : ""}
+                  heldMaterials={stockOn && t.options[0] ? heldMaterialsLabel(t.rune, t.options[0].toT, t.options[0].toGrind, stock) : ""}
                   locked={lockedSet.has(t.rune.id)}
                   excluded={excludedSet.has(t.rune.id)}
                   currentTags={(currentTagsOf.get(t.rune.id) ?? []).map((r) => r.name)}
@@ -814,7 +819,7 @@ export default function EnchantPage() {
           <FlaskConical size={34} style={{ opacity: .3, marginBottom: 8 }} />
           <div style={{ fontWeight: 600, color: "var(--text)" }}>沒有符文能在精魔＋精煉後達到 {targetScore} 分</div>
           <div className="tiny dim" style={{ marginTop: 4, lineHeight: 1.7 }}>
-            可以降低目標分數、取消「只看 +12 以上 / 只看 6★ / 只看已裝備 / 只列出持有精魔石素材」、改回全部主屬，
+            可以降低目標分數、取消「只看 +12 以上 / 只看 6★ / 只看已裝備 / 只列出持有精煉石和精魔石素材」、改回全部主屬，
             或取消「只看還沒達標」看看已經達標的符文。MAX 是以 6★ 傳說寶石＋精煉上限估算的理想值。
           </div>
         </div>
@@ -826,7 +831,7 @@ export default function EnchantPage() {
                 key={t.rune.id}
                 t={t}
                 setName={gemNames.get(String(t.rune.id)) ?? ""}
-                heldGem={gemOn && t.best ? heldGemLabel(t.rune, t.best.toT, gems) : ""}
+                heldMaterials={stockOn && t.best ? heldMaterialsLabel(t.rune, t.best.toT, t.best.toGrind, stock) : ""}
                 targetScore={targetScore}
                 locked={lockedSet.has(t.rune.id)}
                 excluded={excludedSet.has(t.rune.id)}

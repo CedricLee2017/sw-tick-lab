@@ -38,7 +38,8 @@ const {
   analyzeRune, planScore, planMaterials, planWithStock, maxScoreWithStock,
   analyzeEnchant, analyzeEnchantScore, maxGrindRune, sortEnchantScoreTargets,
   ENCHANT_SCORE_SORTS, gemMaxValue, enchantGrindMax, projectRune, slotAllowsStat, sortEnchantTargets,
-  gemFitsRune, matchingEnchantGems, heldGemLabel, filterEnchantByGems, filterEnchantScoreByGems, ENCHANT_MAIN_STATS,
+  gemFitsRune, matchingEnchantGems, heldGemLabel, heldMaterialsLabel,
+  filterEnchantByStock, filterEnchantScoreByStock, ENCHANT_MAIN_STATS,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
@@ -3355,7 +3356,7 @@ check("分數模式：MAX 分數可排序", () => {
   assert.equal(ENCHANT_SCORE_SORTS.length, 4);
 });
 
-/* ── 持有精魔石素材（寶石） ── */
+/* ── 持有精煉石＋精魔石素材 ── */
 
 check("寶石素材：同套裝 / 無形 / 遠古的使用規則", () => {
   const rune = mkEnchantRune(8301, [[8, 15], [2, 20], [6, 20], [9, 10]]);
@@ -3388,35 +3389,58 @@ check("寶石素材：只比對屬性，等級高的優先並顯示持有文字"
   assert.equal(heldGemLabel(rune, 12, gems), "");
 });
 
-check("持有素材：分類模式只留下有寶石可精魔的方式", () => {
-  const rune = mkEnchantRune(8303, [[8, 15], [2, 20], [6, 20], [9, 10]]);
-  const list = analyzeEnchant([rune], [SUPPORT_RULE]);
-  assert.equal(list.length, 1);
-  const t = list[0];
-  assert.equal(t.options[0].toT, 11);
-  const wrong = [{ set: 3, stat: 12, grade: 5, ancient: false, immemorial: false, amount: 1 }];
-  assert.equal(filterEnchantByGems(t, wrong), null, "手上只有命中寶石，不能用於抵抗候選");
-  const right = [{ set: 3, stat: 11, grade: 4, ancient: false, immemorial: false, amount: 3 }];
-  const kept = filterEnchantByGems(t, right);
-  assert.ok(kept, "有同套裝抵抗寶石就保留");
+check("持有素材：分類模式要寶石＋磨石都持有（可精煉的目標屬性）", () => {
+  // 缺防禦力%（可精煉），所以需要同套裝的防禦%寶石＋磨石
+  const rune = mkEnchantRune(8303, [[8, 15], [2, 20], [9, 10], [11, 12]]);
+  const t = analyzeEnchant([rune], [SUPPORT_RULE])[0];
+  assert.ok(t, "應該有精魔候選");
+  assert.equal(t.options[0].toT, 6);
+  assert.ok(t.options[0].toGrind > 0, "防禦力% 需要磨石");
+  const gem = { set: 3, stat: 6, grade: 5, ancient: false, immemorial: false, amount: 1 };
+  const stone = { set: 3, stat: 6, grade: 5, ancient: false, immemorial: false, amount: 2 };
+  assert.equal(filterEnchantByStock(t, { gems: [gem], grindstones: [] }), null, "只有寶石、沒有磨石，不列入");
+  assert.equal(filterEnchantByStock(t, { gems: [], grindstones: [stone] }), null, "只有磨石、沒有寶石，不列入");
+  const kept = filterEnchantByStock(t, { gems: [gem], grindstones: [stone] });
+  assert.ok(kept, "兩種素材都有才保留");
   assert.equal(kept.options.length, 1);
   assert.equal(kept.bestEff, t.bestEff);
   assert.deepEqual(kept.ruleIds, t.ruleIds);
+  assert.match(
+    heldMaterialsLabel(rune, 6, t.options[0].toGrind, { gems: [gem], grindstones: [stone] }),
+    /防禦力%寶石 ×1（傳說） · .*防禦力%磨石 ×2（傳說）/,
+    "卡片要同時顯示寶石與磨石",
+  );
 });
 
-check("持有素材：分數模式只留下有寶石可精魔、且仍高於純精煉的候選", () => {
+check("持有素材：不能精煉的目標屬性只需要寶石", () => {
+  const rune = mkEnchantRune(8306, [[8, 15], [2, 20], [6, 20], [9, 10]]);
+  const t = analyzeEnchant([rune], [SUPPORT_RULE])[0];
+  assert.equal(t.options[0].toT, 11, "抵抗不能精煉");
+  assert.equal(t.options[0].toGrind, 0);
+  const gem = { set: 3, stat: 11, grade: 4, ancient: false, immemorial: false, amount: 3 };
+  const kept = filterEnchantByStock(t, { gems: [gem], grindstones: [] });
+  assert.ok(kept, "抵抗只需要寶石，不需要磨石");
+  assert.doesNotMatch(heldMaterialsLabel(rune, 11, 0, { gems: [gem], grindstones: [] }), /磨石/);
+  const wrong = { set: 3, stat: 12, grade: 5, ancient: false, immemorial: false, amount: 1 };
+  assert.equal(filterEnchantByStock(t, { gems: [wrong], grindstones: [] }), null, "手上只有命中寶石，不能用於抵抗候選");
+});
+
+check("持有素材：分數模式要寶石＋磨石都持有，且仍高於純精煉", () => {
   const rune = mkEnchantRune(8304, [[8, 15], [2, 20], [6, 20], [9, 10]]);
   const t = analyzeEnchantScore([rune])[0];
   assert.ok(t.best);
-  const gems = [{ set: 3, stat: t.best.toT, grade: 5, ancient: false, immemorial: false, amount: 2 }];
-  const kept = filterEnchantScoreByGems(t, gems);
+  assert.ok(t.best.toGrind > 0, "最佳方式為攻擊力%，需要磨石");
+  const gem = { set: 3, stat: t.best.toT, grade: 5, ancient: false, immemorial: false, amount: 2 };
+  const stone = { set: 3, stat: t.best.toT, grade: 5, ancient: false, immemorial: false, amount: 2 };
+  assert.equal(filterEnchantScoreByStock(t, { gems: [gem], grindstones: [] }), null, "缺磨石不列入");
+  const kept = filterEnchantScoreByStock(t, { gems: [gem], grindstones: [stone] });
   assert.ok(kept);
   assert.equal(kept.maxScore, t.best.scoreAfter);
   assert.equal(kept.gain, kept.maxScore - kept.scoreNow);
-  const wrong = [{ set: 3, stat: 11, grade: 5, ancient: false, immemorial: false, amount: 2 }];
-  assert.equal(filterEnchantScoreByGems(t, wrong), null, "最佳方式沒有對應寶石就排除");
+  const wrong = { set: 3, stat: 11, grade: 5, ancient: false, immemorial: false, amount: 2 };
+  assert.equal(filterEnchantScoreByStock(t, { gems: [wrong], grindstones: [stone] }), null, "最佳方式沒有對應寶石就排除");
   const noEnchant = analyzeEnchantScore([mkEnchantRune(8305, [[8, 30], [2, 40], [6, 40], [9, 30]])])[0];
-  assert.equal(filterEnchantScoreByGems(noEnchant, gems), null, "不用精魔的候選不列入素材清單");
+  assert.equal(filterEnchantScoreByStock(noEnchant, { gems: [gem], grindstones: [stone] }), null, "不用精魔的候選不列入素材清單");
 });
 
 check("主屬篩選選項涵蓋所有可能的主屬性", () => {

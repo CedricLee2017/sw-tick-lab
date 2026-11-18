@@ -13,10 +13,10 @@
  * 實際數值會依寶石與磨石等級、骰值而較低。
  */
 import { SET_BY_ID, STAT_TYPES } from "./constants";
-import { grindMax } from "./grind";
+import { GRIND_GRADE_LABEL, grindMax, matchingGrindstones } from "./grind";
 import { runeEfficiency, runeScore, runeScoreRaw } from "./stats";
 import { matchesRuneTag, runeStatValue, tagRequiredMatches } from "./runeTags";
-import type { EnchantGem, Rune, RuneTagRule } from "./types";
+import type { EnchantGem, Grindstone, Rune, RuneTagRule } from "./types";
 
 /** 6★ 傳說寶石的最大值（一般符文） */
 const GEM_MAX: Record<number, number> = {
@@ -487,7 +487,7 @@ export function sortEnchantTargets(list: EnchantTarget[], sort: EnchantSort): En
   });
 }
 
-/* ───────────────────────── 持有精魔石（寶石）素材 ───────────────────────── */
+/* ───────────────────────── 持有精魔石＋精煉石素材 ───────────────────────── */
 
 /** 主屬性篩選的選項順序（1/3/5 固定值，2/4/6 百分比，8 速度，9–12 特殊） */
 export const ENCHANT_MAIN_STATS = [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12];
@@ -499,6 +499,12 @@ export const GEM_GRADE_LABEL: Record<number, string> = {
   4: "英雄",
   5: "傳說",
 };
+
+/** 持有素材：精魔用的寶石＋精魔後精煉用的磨石 */
+export interface EnchantStock {
+  gems: EnchantGem[];
+  grindstones: Grindstone[];
+}
 
 /** 這顆寶石能不能用在這顆符文上（遠古 / 無形 / 同套裝規則，和磨石一致） */
 export function gemFitsRune(rune: Rune, gem: EnchantGem): boolean {
@@ -520,7 +526,7 @@ export function matchingEnchantGems(rune: Rune, stat: number, gems: EnchantGem[]
     );
 }
 
-/** 卡片上顯示的持有素材文字，例如「迅速 效果抵抗寶石 ×2（傳說）」 */
+/** 卡片上顯示的持有寶石文字，例如「迅速 效果抵抗寶石 ×2（傳說）」 */
 export function heldGemLabel(rune: Rune, stat: number, gems: EnchantGem[]): string {
   const gem = matchingEnchantGems(rune, stat, gems)[0];
   if (!gem) return "";
@@ -529,9 +535,41 @@ export function heldGemLabel(rune: Rune, stat: number, gems: EnchantGem[]): stri
   return `${set} ${enchantStatLabel(stat)}寶石 ×${gem.amount}（${grade}${gem.ancient ? "・遠古" : ""}）`;
 }
 
-/** 分類模式：只保留「真的持有可用寶石」的精魔方式；沒有素材時回傳 null */
-export function filterEnchantByGems(target: EnchantTarget, gems: EnchantGem[]): EnchantTarget | null {
-  const options = target.options.filter((o) => matchingEnchantGems(target.rune, o.toT, gems).length > 0);
+/** 持有、可用於這顆符文且屬性正確的磨石；等級高的優先 */
+function matchingGrindForEnchant(rune: Rune, stat: number, stock: EnchantStock): Grindstone[] {
+  // need = 1：只要有能精煉這條屬性的磨石即可；等級只影響精煉上限，不影響能否使用
+  return [...matchingGrindstones(rune, stat, 1, stock.grindstones)].sort(
+    (a, b) => b.grade - a.grade || b.amount - a.amount,
+  );
+}
+
+/** 一種精魔方式需要的素材是否都真的持有：寶石一定要有，需要精煉時還要有磨石 */
+function hasEnchantMaterials(rune: Rune, toT: number, toGrind: number, stock: EnchantStock): boolean {
+  if (matchingEnchantGems(rune, toT, stock.gems).length === 0) return false;
+  // 暴率 / 暴傷 / 抵抗 / 命中不能精煉，不需要磨石
+  if (toGrind <= 0) return true;
+  return matchingGrindForEnchant(rune, toT, stock).length > 0;
+}
+
+/** 卡片上顯示的持有素材：寶石＋（需要精煉時）磨石 */
+export function heldMaterialsLabel(rune: Rune, toT: number, toGrind: number, stock: EnchantStock): string {
+  const parts: string[] = [];
+  const gem = heldGemLabel(rune, toT, stock.gems);
+  if (gem) parts.push(gem);
+  if (toGrind > 0) {
+    const stone = matchingGrindForEnchant(rune, toT, stock)[0];
+    if (stone) {
+      const set = stone.immemorial ? "無形" : SET_BY_ID[stone.set]?.name ?? `套裝 ${stone.set}`;
+      const grade = GRIND_GRADE_LABEL[stone.grade] ?? `${stone.grade} 級`;
+      parts.push(`${set} ${enchantStatLabel(toT)}磨石 ×${stone.amount}（${grade}${stone.ancient ? "・遠古" : ""}）`);
+    }
+  }
+  return parts.join(" · ");
+}
+
+/** 分類模式：只保留「真的持有寶石＋磨石」的精魔方式；沒有完整素材時回傳 null */
+export function filterEnchantByStock(target: EnchantTarget, stock: EnchantStock): EnchantTarget | null {
+  const options = target.options.filter((o) => hasEnchantMaterials(target.rune, o.toT, o.toGrind, stock));
   if (options.length === 0) return null;
   return {
     ...target,
@@ -542,14 +580,14 @@ export function filterEnchantByGems(target: EnchantTarget, gems: EnchantGem[]): 
   };
 }
 
-/** 分數模式：只保留有持有寶石、且精魔後分數仍高於純精煉的候選 */
-export function filterEnchantScoreByGems(
+/** 分數模式：只保留素材齊全、且精魔後分數仍高於純精煉的候選 */
+export function filterEnchantScoreByStock(
   target: EnchantScoreTarget,
-  gems: EnchantGem[],
+  stock: EnchantStock,
 ): EnchantScoreTarget | null {
-  const options = target.options.filter((o) => matchingEnchantGems(target.rune, o.toT, gems).length > 0);
+  const options = target.options.filter((o) => hasEnchantMaterials(target.rune, o.toT, o.toGrind, stock));
   const top = options[0];
-  // 沒有可用寶石（或只精煉就已是最佳）的符文不需要素材，不列入「持有素材」清單
+  // 素材不全（或只精煉就已是最佳）的符文不需要精魔，不列入「持有素材」清單
   if (!top || top.scoreAfter <= target.maxNow) return null;
   return {
     ...target,
