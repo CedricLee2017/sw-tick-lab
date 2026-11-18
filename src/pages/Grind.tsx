@@ -26,6 +26,7 @@ import {
   type GrindTarget,
 } from "../lib/grind";
 import type { Grindstone } from "../lib/types";
+import { buildRuneUseCounts, type RuneUseCount } from "../lib/usage";
 
 const STAT_FILTERS = [
   { value: 0, label: "全部副屬性" },
@@ -53,6 +54,7 @@ function TargetCard({
   showScore,
   targetScore,
   stock,
+  useCount,
   locked,
   excluded,
   tags,
@@ -66,6 +68,8 @@ function TargetCard({
   targetScore: number;
   /** 有提供時，精煉計畫會依持有素材的上限計算 */
   stock?: Grindstone[];
+  /** 「常用符文」方向：這顆符文在預設隊 / RTA 的使用次數 */
+  useCount?: RuneUseCount;
   locked: boolean;
   excluded: boolean;
   /** 這顆符文符合的自行分類名稱 */
@@ -96,6 +100,15 @@ function TargetCard({
       onToggleExclude={onToggleExclude}
     >
       <div className="row wrap" style={{ gap: 6 }}>
+        {useCount && (
+          <span
+            className="chip gold"
+            title={`預設隊 / 防守隊使用 ${useCount.deck} 次，RTA 使用 ${useCount.rta} 次（匯出當下的快照）`}
+          >
+            常用 {useCount.total} 次
+            <span className="dim"> · 預設隊 {useCount.deck} / RTA {useCount.rta}</span>
+          </span>
+        )}
         {showScore ? (
           <span
             className="chip gold"
@@ -235,6 +248,9 @@ export default function GrindPage() {
   const [q, setQ] = useState("");
   const [take, setTake] = useState(40);
 
+  /** 預設隊 / 防守隊與 RTA 的符文使用次數（常用符文方向用） */
+  const useCounts = useMemo(() => buildRuneUseCounts(account), [account]);
+
   const stock = useMemo(() => account?.grindstones ?? [], [account]);
   const hasStockData = Array.isArray(account?.grindstones);
   const stockTotal = useMemo(() => stock.reduce((sum, g) => sum + g.amount, 0), [stock]);
@@ -258,8 +274,20 @@ export default function GrindPage() {
   const all = useMemo(() => {
     if (!account) return [];
     const onlyStat = stat === 0 ? null : stat === -1 ? [1, 3, 5] : stat;
+    if (profile === "common") {
+      // 常用符文：只保留預設隊 / RTA 用過的，依使用次數由多到少
+      return analyzeGrind(account.runes, { profile: "support", owners, stat: onlyStat, accept, targetScore })
+        .filter((t) => (useCounts.get(t.rune.id)?.total ?? 0) > 0)
+        .sort(
+          (a, b) =>
+            (useCounts.get(b.rune.id)?.total ?? 0) - (useCounts.get(a.rune.id)?.total ?? 0) ||
+            (useCounts.get(b.rune.id)?.deck ?? 0) - (useCounts.get(a.rune.id)?.deck ?? 0) ||
+            b.rune.grade - a.rune.grade ||
+            b.rawScore - a.rawScore,
+        );
+    }
     return analyzeGrind(account.runes, { profile, owners, stat: onlyStat, accept, targetScore });
-  }, [account, profile, owners, stat, accept, targetScore]);
+  }, [account, profile, owners, stat, accept, targetScore, useCounts]);
 
   /** 勾選「計算持有精煉石素材」時，只留下真的能用手上磨石推到目標分數的符文 */
   const candidates = useMemo(() => {
@@ -345,6 +373,11 @@ export default function GrindPage() {
   }
 
   const shown = filtered.slice(0, take);
+  const commonDeck = profile === "common" ? candidates.filter((t) => (useCounts.get(t.rune.id)?.deck ?? 0) > 0).length : 0;
+  const commonRta = profile === "common" ? candidates.filter((t) => (useCounts.get(t.rune.id)?.rta ?? 0) > 0).length : 0;
+  const commonUses = profile === "common"
+    ? candidates.reduce((s, t) => s + (useCounts.get(t.rune.id)?.total ?? 0), 0)
+    : 0;
 
   return (
     <>
@@ -354,7 +387,9 @@ export default function GrindPage() {
             <Hammer size={15} className="gold" /> 精煉建議
           </div>
           <div className="card-sub">
-            依符文素質、套裝、裝備對象與目前精煉值排序；只考慮可用磨石精煉的屬性（速度、體力／攻擊／防禦與固定值）。
+            {profile === "common"
+              ? "列出預設隊 / 防守隊與 RTA 常用到的符文，依使用次數由多到少排列；同一顆符文可同時在一般與 RTA 使用。"
+              : "依符文素質、套裝、裝備對象與目前精煉值排序；只考慮可用磨石精煉的屬性（速度、體力／攻擊／防禦與固定值）。"}
           </div>
         </div>
         <span className="chip gold">
@@ -362,12 +397,21 @@ export default function GrindPage() {
             ? `未達 ${accept} 分 ${candidates.length} 顆`
             : profile === "score"
               ? `${stockOn ? "素材足夠" : "可達"} ${targetScore} 分 ${candidates.length} 顆`
-              : `可精煉 ${candidates.length} 顆`}
+              : profile === "common"
+                ? `常用 ${candidates.length} 顆`
+                : `可精煉 ${candidates.length} 顆`}
         </span>
       </div>
 
       <div className="grid g4" style={{ marginBottom: 14 }}>
-        {profile === "score" ? (
+        {profile === "common" ? (
+          <>
+            <Tile k="常用符文" v={String(candidates.length)} sub="預設隊 / RTA 用過" />
+            <Tile k="預設隊使用" v={String(commonDeck)} sub="含防守隊" />
+            <Tile k="RTA 使用" v={String(commonRta)} sub="世界競技場獨立配裝" />
+            <Tile k="總使用次數" v={String(commonUses)} sub="最常用排最前面" />
+          </>
+        ) : profile === "score" ? (
           <>
             <Tile
               k={`${stockOn ? "素材足夠" : "可達"} ${targetScore} 分`}
@@ -607,7 +651,7 @@ export default function GrindPage() {
           <li><b>再補百分比。</b>體力% / 防禦% 給坦與輔助，攻擊% 給輸出；固定值（+HP / +ATK / +DEF）只有在該符文其他副屬性很完美時才補。</li>
           <li><b>依套裝集中處理。</b>磨石只能用在同套裝符文，先挑數量最多的套裝（例如迅速、暴走）一次整理，避免東一顆西一顆。</li>
           <li><b>石頭等級這樣分：</b>傳說石留給「速度還差 4–5」或關鍵百分比；英雄石用在次要但會上場的符文；稀有／魔法石只用來補滿過渡裝。</li>
-          <li><b>不要精煉準備換掉的符文。</b>先確認符文已 +15、套裝與主屬正確，再投入資源；4★ 以下基本上不值得。</li>
+          <li><b>不要精煉準備換掉的符文。</b>先確認符文已 +15、套裝與主屬正確，再投入資源；4★ 以下基本上不值得。不確定哪些還在用的話，切到「常用符文」方向，它會列出預設隊 / 防守隊與 RTA 用到的符文，依使用次數由多到少排列；次數是匯出當下的快照。</li>
           <li><b>可以重複嘗試。</b>同一條副屬性再精煉會覆蓋上一次的加成，不會疊加；接近上限時再用高一級的石頭追求滿值，已經用高階石精煉過的就不要再用低階石覆蓋。</li>
           <li>暴擊率、暴擊傷害、效果命中、效果抵抗<b>不能用磨石</b>，需要用寶石轉換，這個頁面不會把它們列入精煉候選。</li>
           <li><b>分數怎麼看：</b>推薦分 = 屬性權重 × 可提升幅度，再依符文星級、效率、是否已裝備與套裝契合度調整。分數高不代表一定要精煉，還是要看該顆符文是不是你長期會用的。</li>
@@ -643,6 +687,7 @@ export default function GrindPage() {
                 showScore={profile === "score"}
                 targetScore={targetScore}
                 stock={stockOn ? stock : undefined}
+                useCount={profile === "common" ? useCounts.get(t.rune.id) : undefined}
                 locked={lockedSet.has(t.rune.id)}
                 excluded={excludedSet.has(t.rune.id)}
                 tags={tagHits.get(t.rune.id)?.map((rule) => rule.name)}

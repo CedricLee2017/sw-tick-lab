@@ -10,7 +10,7 @@ import { SET_BY_ID, STAT_TYPES } from "./constants";
 import { runeEfficiency, runeScoreRaw, scoreOfStat } from "./stats";
 import type { Grindstone, Rune } from "./types";
 
-export type GrindProfile = "speed" | "score" | "damage" | "tank" | "support";
+export type GrindProfile = "speed" | "score" | "damage" | "tank" | "support" | "common";
 
 export const GRIND_PROFILES: { key: GrindProfile; label: string; desc: string }[] = [
   { key: "speed", label: "速度優先", desc: "PVP 搶一速：速度最優先，其次體力% / 防禦%" },
@@ -18,6 +18,7 @@ export const GRIND_PROFILES: { key: GrindProfile; label: string; desc: string }[
   { key: "damage", label: "輸出", desc: "攻擊% / 暴擊 / 暴傷為主，速度次之" },
   { key: "tank", label: "坦度", desc: "體力% / 防禦% 為主，適合坦隊與據點戰" },
   { key: "support", label: "輔助", desc: "速度、體力%、防禦% 與效果命中" },
+  { key: "common", label: "常用符文", desc: "列出預設隊 / 防守隊與 RTA 常使用的符文，依使用次數由多到少" },
 ];
 
 /** 精煉接受程度：10 = 傳說精滿，9 / 8 各降一分 */
@@ -36,6 +37,7 @@ const WEIGHTS: Record<GrindProfile, Record<number, number>> = {
   damage: { 8: 55, 4: 70, 2: 20, 6: 18, 1: 3, 3: 3, 5: 3 },
   tank: { 8: 45, 2: 82, 6: 78, 4: 14, 1: 10, 5: 7, 3: 3 },
   support: { 8: 88, 2: 58, 6: 55, 4: 18, 1: 5, 5: 4, 3: 3 },
+  common: { 8: 88, 2: 58, 6: 55, 4: 18, 1: 5, 5: 4, 3: 3 },
 };
 
 /** 判斷「這顆符文有幾條好副屬性」用的權重（含不能精煉的屬性） */
@@ -45,6 +47,7 @@ const SUB_VALUE_WEIGHTS: Record<GrindProfile, Record<number, number>> = {
   damage: { 8: 55, 4: 70, 9: 60, 10: 65, 2: 20, 6: 18, 11: 10, 12: 10, 1: 3, 3: 3, 5: 3 },
   tank: { 8: 45, 2: 82, 6: 78, 11: 35, 12: 25, 4: 14, 9: 15, 10: 15, 1: 8, 3: 3, 5: 6 },
   support: { 8: 88, 2: 58, 6: 55, 12: 45, 11: 40, 4: 18, 9: 15, 10: 15, 1: 5, 3: 3, 5: 4 },
+  common: { 8: 88, 2: 58, 6: 55, 12: 45, 11: 40, 4: 18, 9: 15, 10: 15, 1: 5, 3: 3, 5: 4 },
 };
 
 /** 一般（非遠古）磨石的最大加成（磨石等級：魔法 < 稀有 < 英雄 < 傳說） */
@@ -129,6 +132,7 @@ const PROFILE_SETS: Record<GrindProfile, number[]> = {
   damage: [5, 4, 8, 13],
   tank: [1, 2, 16, 13],
   support: [13, 15, 6, 7],
+  common: [13, 15, 6, 7],
 };
 
 /** 只在這些屬性中計入「好副屬性」的數量 */

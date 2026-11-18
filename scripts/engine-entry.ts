@@ -63,6 +63,7 @@ export {
   slotAllowsStat,
   sortEnchantTargets,
 } from "../src/lib/enchant";
+export * from "../src/lib/usage";
 export * from "../src/lib/deckSetup";
 export * from "../src/lib/librarySync";
 export * from "../src/lib/siege";

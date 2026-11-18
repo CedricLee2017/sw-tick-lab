@@ -54,6 +54,41 @@ export function buildUsageIndex(account: Account | null | undefined): UsageIndex
   return { runes, artifacts };
 }
 
+/** 符文被預設隊／RTA 使用的次數 */
+export interface RuneUseCount {
+  /** 預設隊 + 防守隊中的使用次數 */
+  deck: number;
+  /** RTA 獨立配裝中的使用次數 */
+  rta: number;
+  /** 合計（用於排序：最常用 → 最不常用） */
+  total: number;
+}
+
+/**
+ * 計算每顆符文在預設隊／防守隊與 RTA 配裝中出現的次數。
+ * 同一顆符文出現在多隊或多個 RTA 配裝會累加；和 buildUsageIndex 相同，
+ * 只反映匯出當下的快照。
+ */
+export function buildRuneUseCounts(account: Account | null | undefined): Map<number, RuneUseCount> {
+  const map = new Map<number, RuneUseCount>();
+  const add = (id: number, kind: "deck" | "rta") => {
+    if (!id) return;
+    const cur = map.get(id) ?? { deck: 0, rta: 0, total: 0 };
+    cur[kind] += 1;
+    cur.total += 1;
+    map.set(id, cur);
+  };
+
+  if (!account) return map;
+  for (const deck of [...(account.decks ?? []), ...(account.defenseDecks ?? [])]) {
+    for (const equip of deck.equip ?? []) for (const id of equip.runes ?? []) add(id, "deck");
+  }
+  for (const loadout of Object.values(account.rta?.loadouts ?? {})) {
+    for (const id of loadout.runes ?? []) add(id, "rta");
+  }
+  return map;
+}
+
 /** 使用狀況的顯示文字 */
 export function usageText(usage: EquipUsage | undefined): string {
   if (!usage || (!usage.deck && !usage.rta)) return "未使用";

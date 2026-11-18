@@ -39,7 +39,7 @@ const {
   analyzeEnchant, analyzeEnchantScore, maxGrindRune, sortEnchantScoreTargets,
   ENCHANT_SCORE_SORTS, gemMaxValue, enchantGrindMax, projectRune, slotAllowsStat, sortEnchantTargets,
   gemFitsRune, matchingEnchantGems, heldGemLabel, heldMaterialsLabel,
-  gemStoneMax, gemValueFromStock, grindValueFromStock, maxScoreWithEnchantStock,
+  gemStoneMax, gemValueFromStock, grindValueFromStock, maxScoreWithEnchantStock, buildRuneUseCounts,
   filterEnchantByStock, filterEnchantScoreByStock, ENCHANT_MAIN_STATS,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
@@ -1398,6 +1398,36 @@ check("預設隊：解析 deck_list 與裝備快照", () => {
   assert.deepEqual(d.equip[0].runes, [9001]);
   assert.deepEqual(d.equip[0].artifacts, [7001]);
   assert.ok(p.warnings.some((w) => w.includes("預設隊")));
+});
+
+check("常用符文：預設隊 / 防守隊與 RTA 使用次數累加排序", () => {
+  const rune = (id) => ({
+    rune_id: id, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15,
+    pri_eff: [3, 160], prefix_eff: [0, 0], sec_eff: [],
+  });
+  const raw = {
+    unit_list: [],
+    runes: [101, 102, 103, 104].map(rune),
+    deck_list: [
+      { deck_type: 22, deck_seq: 1, unit_id_list: [501], leader_unit_id: 501,
+        equip: [{ unit_id: 501, rune_id_list: [101, 102], artifact_id_list: [] }] },
+      { deck_type: 22, deck_seq: 2, unit_id_list: [501], leader_unit_id: 501,
+        equip: [{ unit_id: 501, rune_id_list: [101], artifact_id_list: [] }] },
+    ],
+    world_arena_rune_equip_list: [
+      { rune_id: 101, occupied_id: 501 },
+      { rune_id: 103, occupied_id: 501 },
+    ],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "usage.json");
+  assert.equal(p.error, undefined, p.error);
+  const counts = buildRuneUseCounts(p.account);
+  assert.deepEqual(counts.get(101), { deck: 2, rta: 1, total: 3 }, "同時在兩隊與 RTA 使用，次數累加");
+  assert.deepEqual(counts.get(102), { deck: 1, rta: 0, total: 1 });
+  assert.deepEqual(counts.get(103), { deck: 0, rta: 1, total: 1 });
+  assert.equal(counts.get(104), undefined, "沒被用到的符文不會出現");
+  const sorted = [...counts.entries()].sort((a, b) => b[1].total - a[1].total);
+  assert.equal(sorted[0][0], 101, "最常用排最前面");
 });
 
 check("防守隊：解析競技場與據點戰防守", () => {
