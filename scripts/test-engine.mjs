@@ -36,7 +36,8 @@ const {
   runeScore, runeScoreRaw, scoreOfStat, runeEfficiency,
   grindMax, grindStoneMax, grindGradeFor, grindCapsFromStock, matchingGrindstones,
   analyzeRune, planScore, planMaterials, planWithStock, maxScoreWithStock,
-  analyzeEnchant, gemMaxValue, enchantGrindMax, projectRune, slotAllowsStat, sortEnchantTargets,
+  analyzeEnchant, analyzeEnchantScore, maxGrindRune, sortEnchantScoreTargets,
+  ENCHANT_SCORE_SORTS, gemMaxValue, enchantGrindMax, projectRune, slotAllowsStat, sortEnchantTargets,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
@@ -3209,6 +3210,112 @@ check("效率 / 分數可雙向排序", () => {
   assert.ok(scoreDesc[0].bestScore >= scoreDesc[1].bestScore);
   const scoreAsc = sortEnchantTargets(list, "score-asc");
   assert.ok(scoreAsc[0].bestScore <= scoreAsc[1].bestScore);
+});
+
+/* ── 分數模式（精魔＋精煉到上限） ── */
+
+check("maxGrindRune 只把可精煉的副屬性拉到上限", () => {
+  const rune = mkEnchantRune(8204, [
+    [8, 10],
+    [2, 13],
+    [9, 5],
+    [11, 6],
+  ]);
+  const out = maxGrindRune(rune);
+  assert.equal(out.subs[0].g, grindMax(8, false));
+  assert.equal(out.subs[1].g, grindMax(2, false));
+  assert.equal(out.subs[2].g, 0, "暴率不能精煉");
+  assert.equal(out.subs[3].g, 0, "抵抗不能精煉");
+  assert.equal(rune.subs[0].g, 0, "不會改到原本的符文");
+});
+
+check("分數模式：MAX＝精魔＋其他可精煉副屬性拉到上限", () => {
+  const rune = mkEnchantRune(8201, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [9, 10],
+  ]);
+  const list = analyzeEnchantScore([rune]);
+  assert.equal(list.length, 1);
+  const t = list[0];
+  assert.equal(t.scoreNow, 183, "目前分數（尚未精煉）");
+  assert.equal(t.maxNow, 250, "只把可精煉副屬性拉滿就 250 分");
+  // 把暴率換成攻擊力% 13＋精煉 10 = 23，分數會再往上
+  assert.ok(t.best, "應該有比純精煉更高的精魔方式");
+  assert.equal(t.best.fromT, 9);
+  assert.equal(t.best.toT, 4);
+  assert.equal(t.best.toValue, 23);
+  assert.equal(t.maxScore, 274);
+  assert.ok(
+    t.options.every((o) => o.scoreAfter > t.maxNow),
+    "選項只列出比純精煉更高的組合",
+  );
+  assert.ok(t.best.grindPlan.length > 0, "要列出其他副屬性精煉到上限");
+});
+
+check("分數模式：精魔不會更高時 best 為 undefined", () => {
+  const rune = mkEnchantRune(8203, [
+    [8, 30],
+    [2, 40],
+    [6, 40],
+    [9, 30],
+  ]);
+  const t = analyzeEnchantScore([rune])[0];
+  assert.equal(t.scoreNow, 400);
+  assert.equal(t.best, undefined);
+  assert.equal(t.maxScore, t.maxNow, "MAX 就是精煉到上限");
+});
+
+check("分數模式：遠古符文用遠古寶石，MAX 更高", () => {
+  const subs = [
+    [8, 10],
+    [2, 13],
+    [11, 10],
+    [9, 5],
+  ];
+  const normal = analyzeEnchantScore([mkEnchantRune(8202, subs)])[0];
+  const ancient = analyzeEnchantScore([mkEnchantRune(8202, subs, { ancient: true })])[0];
+  assert.ok(ancient.maxScore > normal.maxScore, "遠古寶石上限較高");
+  assert.ok(ancient.scoreNow >= normal.scoreNow);
+});
+
+check("分數模式：不會轉出該位置不可能出現的屬性", () => {
+  const rune = mkEnchantRune(8205, [
+    [8, 10],
+    [2, 13],
+    [11, 10],
+    [9, 5],
+  ], { slot: 1 });
+  const t = analyzeEnchantScore([rune])[0];
+  assert.ok(t.options.length > 0);
+  assert.ok(
+    t.options.every((o) => o.toT !== 5 && o.toT !== 6),
+    "1 號位不會出現防禦力 / 防禦力%",
+  );
+});
+
+check("分數模式：MAX 分數可排序", () => {
+  const big = mkEnchantRune(8201, [
+    [8, 15],
+    [2, 20],
+    [6, 20],
+    [9, 10],
+  ]);
+  const small = mkEnchantRune(8202, [
+    [8, 10],
+    [2, 13],
+    [11, 10],
+    [9, 5],
+  ]);
+  const list = analyzeEnchantScore([small, big]);
+  const desc = sortEnchantScoreTargets(list, "max-desc");
+  assert.equal(desc[0].rune.id, 8201);
+  const nowDesc = sortEnchantScoreTargets(list, "now-desc");
+  assert.ok(nowDesc[0].scoreNow >= nowDesc[1].scoreNow);
+  const gainDesc = sortEnchantScoreTargets(list, "gain-desc");
+  assert.ok(gainDesc[0].gain >= gainDesc[1].gain);
+  assert.equal(ENCHANT_SCORE_SORTS.length, 4);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

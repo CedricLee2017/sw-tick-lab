@@ -38,7 +38,11 @@ export {
 } from "../src/lib/grind";
 export {
   ENCHANT_SORTS,
+  ENCHANT_SCORE_SORTS,
   analyzeEnchant,
+  analyzeEnchantScore,
+  maxGrindRune,
+  sortEnchantScoreTargets,
   enchantGrindMax,
   enchantStatLabel,
   enchantStatSuffix,

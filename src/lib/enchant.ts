@@ -14,7 +14,7 @@
  */
 import { STAT_TYPES } from "./constants";
 import { grindMax } from "./grind";
-import { runeEfficiency, runeScore } from "./stats";
+import { runeEfficiency, runeScore, runeScoreRaw } from "./stats";
 import { matchesRuneTag, runeStatValue, tagRequiredMatches } from "./runeTags";
 import type { Rune, RuneTagRule } from "./types";
 
@@ -264,6 +264,202 @@ export function analyzeEnchant(
     });
   }
   return out;
+}
+
+/* ───────────────────────── 分數模式（精魔＋精煉到上限） ───────────────────────── */
+
+/** 把所有「可精煉」的副屬性拉到該星級／遠古的上限（其他屬性不動） */
+export function maxGrindRune(rune: Rune): Rune {
+  const ancient = !!rune.ancient;
+  return {
+    ...rune,
+    subs: rune.subs.map((s) => {
+      const max = grindMax(s.t, ancient);
+      return max > 0 && (s.g ?? 0) < max ? { ...s, g: max } : { ...s };
+    }),
+  };
+}
+
+/** 分數模式的一種精魔方式 */
+export interface EnchantScoreOption {
+  /** 被換掉的副屬性在 rune.subs 的索引 */
+  fromIndex: number;
+  fromT: number;
+  fromLabel: string;
+  /** 原本的實際數值（含精煉） */
+  fromValue: number;
+  /** 這條是不是之前用寶石轉出來的（遊戲只允許再轉同一條） */
+  alreadyGem: boolean;
+  toT: number;
+  toLabel: string;
+  /** 6★ 傳說寶石（遠古用遠古上限）的數值 */
+  toGem: number;
+  /** 精魔後可再精煉的上限（不可精煉為 0） */
+  toGrind: number;
+  /** 寶石＋精煉的合計估算值 */
+  toValue: number;
+  /** 精魔後、其他可精煉副屬性也拉到上限的遊戲分數 */
+  scoreAfter: number;
+  /** 這個選項能讓分數增加多少（相對目前分數） */
+  gain: number;
+  /** 精魔後的符文效率（同樣假設精煉到上限） */
+  effAfter: number;
+  /** 精魔後仍有精煉空間的副屬性（不含新轉出來的那條） */
+  grindPlan: { t: number; label: string; from: number; to: number }[];
+}
+
+export interface EnchantScoreTarget {
+  rune: Rune;
+  owner?: EnchantOwner;
+  /** 目前遊戲分數（含目前精煉） */
+  scoreNow: number;
+  /** 不精魔、只把現有可精煉副屬性拉到上限的分數 */
+  maxNow: number;
+  /** 精魔＋精煉到上限後能達到的最高分數 */
+  maxScore: number;
+  /** 達到 maxScore 的精魔方式；不需要精魔（maxNow 已是最佳）時為 undefined */
+  best?: EnchantScoreOption;
+  /** 所有精魔方式，依精魔後分數排序 */
+  options: EnchantScoreOption[];
+  /** maxScore − scoreNow */
+  gain: number;
+}
+
+/** 精魔後的分數（新屬性用寶石上限，其餘副屬性精煉到上限） */
+function scoreAfterEnchant(
+  rune: Rune,
+  index: number,
+  toT: number,
+  toGem: number,
+  toGrind: number,
+): { rune: Rune; score: number; eff: number } {
+  const projected = maxGrindRune(projectRune(rune, index, toT, toGem, toGrind));
+  return {
+    rune: projected,
+    score: Math.round(runeScoreRaw(projected, true)),
+    eff: runeEfficiency(projected, true).current,
+  };
+}
+
+/**
+ * 分數模式：找出「精魔一次＋精煉到上限」後能達到目標分數的符文。
+ *
+ * 和分類模式不同，這裡不要求符合任何自行分類，會枚舉所有合法的
+ * 「換掉一條副屬性 → 轉成另一個屬性」（位置限制、重複屬性、只能再轉同一條等規則都照遊戲）。
+ * 分數＝副屬性＋固有屬性（含精煉），不含主屬性與套裝；MAX 假設其他可精煉副屬性也拉滿。
+ */
+export function analyzeEnchantScore(
+  runes: Rune[],
+  owners?: Map<number, EnchantOwner>,
+): EnchantScoreTarget[] {
+  const stats = Object.keys(STAT_TYPES).map(Number);
+  const out: EnchantScoreTarget[] = [];
+
+  for (const rune of runes) {
+    const sources = sortedGemSources(rune);
+    if (sources.length === 0) continue;
+    const hasMain = rune.main?.t > 0;
+    const ancient = !!rune.ancient;
+
+    const maxed = maxGrindRune(rune);
+    const scoreNow = Math.round(runeScoreRaw(rune, true));
+    const maxNow = Math.round(runeScoreRaw(maxed, true));
+
+    const byKey = new Map<string, EnchantScoreOption>();
+    for (const index of sources) {
+      const source = rune.subs[index];
+      if (!source) continue;
+      for (const t of stats) {
+        if (t === source.t) continue;
+        // 新屬性不能和其他副屬性、主屬性、固有屬性重複
+        if (rune.subs.some((s, i) => i !== index && s.t === t)) continue;
+        if (hasMain && rune.main.t === t) continue;
+        if (rune.prefix?.t === t) continue;
+        if (!slotAllowsStat(rune.slot, t)) continue;
+        const toGem = gemMaxValue(t, ancient);
+        if (toGem <= 0) continue;
+        const toGrind = enchantGrindMax(t, ancient);
+        const key = `${index}:${t}`;
+        if (byKey.has(key)) continue;
+
+        const after = scoreAfterEnchant(rune, index, t, toGem, toGrind);
+        // 精魔後不會比「只精煉到上限」更高，就不列為精魔選項
+        if (after.score <= maxNow) continue;
+
+        const grindPlan = rune.subs
+          .map((s, i) => ({ s, i }))
+          .filter(({ s, i }) => i !== index && grindMax(s.t, ancient) > 0 && (s.g ?? 0) < grindMax(s.t, ancient))
+          .map(({ s }) => ({
+            t: s.t,
+            label: enchantStatLabel(s.t),
+            from: s.v + (s.g ?? 0),
+            to: s.v + grindMax(s.t, ancient),
+          }));
+
+        byKey.set(key, {
+          fromIndex: index,
+          fromT: source.t,
+          fromLabel: enchantStatLabel(source.t),
+          fromValue: source.v + (source.g ?? 0),
+          alreadyGem: (source.gem ?? 0) > 0,
+          toT: t,
+          toLabel: enchantStatLabel(t),
+          toGem,
+          toGrind,
+          toValue: toGem + toGrind,
+          scoreAfter: after.score,
+          gain: after.score - scoreNow,
+          effAfter: after.eff,
+          grindPlan,
+        });
+      }
+    }
+
+    const options = [...byKey.values()].sort(
+      (a, b) => b.scoreAfter - a.scoreAfter || b.gain - a.gain || a.fromIndex - b.fromIndex,
+    );
+    const top = options[0];
+    const maxScore = Math.max(maxNow, top?.scoreAfter ?? 0);
+    out.push({
+      rune,
+      owner: owners?.get(rune.id),
+      scoreNow,
+      maxNow,
+      maxScore,
+      best: top && top.scoreAfter > maxNow ? top : undefined,
+      options,
+      gain: maxScore - scoreNow,
+    });
+  }
+
+  return out;
+}
+
+export type EnchantScoreSort = "max-desc" | "now-desc" | "gain-desc" | "eff-desc";
+
+export const ENCHANT_SCORE_SORTS: { key: EnchantScoreSort; label: string; desc: string }[] = [
+  { key: "max-desc", label: "MAX 分數 高→低", desc: "精魔＋精煉到上限後的分數由高到低" },
+  { key: "now-desc", label: "目前分數 高→低", desc: "目前遊戲分數由高到低" },
+  { key: "gain-desc", label: "提升幅度 大→小", desc: "精魔後能增加的分數由多到少" },
+  { key: "eff-desc", label: "精魔後效率 高→低", desc: "精魔後符文效率由高到低" },
+];
+
+export function sortEnchantScoreTargets(
+  list: EnchantScoreTarget[],
+  sort: EnchantScoreSort,
+): EnchantScoreTarget[] {
+  return [...list].sort((a, b) => {
+    if (sort === "now-desc") return b.scoreNow - a.scoreNow || b.maxScore - a.maxScore;
+    if (sort === "gain-desc") return b.gain - a.gain || b.maxScore - a.maxScore;
+    if (sort === "eff-desc") {
+      return (
+        (b.best?.effAfter ?? 0) - (a.best?.effAfter ?? 0) ||
+        b.maxScore - a.maxScore ||
+        b.scoreNow - a.scoreNow
+      );
+    }
+    return b.maxScore - a.maxScore || b.scoreNow - a.scoreNow || b.gain - a.gain;
+  });
 }
 
 export type EnchantSort = "eff-desc" | "eff-asc" | "score-desc" | "score-asc" | "ready-desc";
