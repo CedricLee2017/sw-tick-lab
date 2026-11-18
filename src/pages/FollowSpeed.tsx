@@ -172,20 +172,20 @@ export default function FollowSpeedPage() {
 
   const { results, safeExtra, openerPanel, opponentSpeed, openerNotFastest, openerNeed } = computed;
 
-  /** 只補每隻自己的接速下限；起手本來就沒有下限，不會被改動。 */
+  /** 直接套用每隻後排的接速最低要求（可升可降）；起手沒有下限，維持原值。 */
   const applyFloor = () => {
     const next = rows.map((row, i) => {
       if (i >= size || !row.monsterId || i === 0) return row;
       const floor = results[i]?.minExtra;
-      if (typeof floor !== "number" || !Number.isFinite(floor) || floor <= row.extra) return row;
+      if (typeof floor !== "number" || !Number.isFinite(floor) || floor === row.extra) return row;
       return { ...row, extra: floor };
     });
     const changed = next.reduce((count, row, i) => count + (row !== rows[i] ? 1 : 0), 0);
     if (changed > 0) setRows(next);
     notify(
       changed > 0
-        ? `已補足 ${changed} 隻的接速最低速度（起手不變）`
-        : "目前額外速度都已達到接速最低值",
+        ? `已把 ${changed} 隻設為最低接速要求（起手維持原值）`
+        : "目前數值已是最低接速要求",
       changed > 0 ? "ok" : "err",
     );
   };
@@ -450,9 +450,9 @@ export default function FollowSpeedPage() {
               className="btn btn-sm"
               onClick={applyFloor}
               disabled={selectedCount === 0}
-              title="只把低於自己接速下限的後排補到下限；起手不會被改動"
+              title="直接把每隻後排設成自己的接速最低額外（原本比較快的也會降下來）；起手沒有下限，維持原值"
             >
-              <Wand2 size={13} /> 補足接速最低
+              <Wand2 size={13} /> 計算最低接速要求
             </button>
             <button
               type="button"
@@ -521,7 +521,7 @@ export default function FollowSpeedPage() {
             ※ 順序安全最低額外＝以目前輸入的面板速度為底，把前面不足的成員往上推，確保第 2 隻比第 3 隻快、第 3 隻比第 4 隻快；不會自動調低已經比較快的成員。
           </div>
           <div>
-            ※「補足接速最低」只補每隻自己的接速下限，起手不會被改動；要讓起手真的先出手，請按「維持攻擊順序」或上方衝突提示的動作。
+            ※「計算最低接速要求」會把每隻後排的額外速度直接設成自己的接速最低額外（比下限高的也會被降下來），起手沒有下限所以維持原值；要讓起手真的先出手，請按「維持攻擊順序」或上方衝突提示的動作。
           </div>
           <div>※ 速度強化假設從起手後生效，每隻自己勾選是否吃到；提條角自己不會吃到自己的提條。鏡像對手速度 0＝和起手同速。</div>
           <div>※ 目前起手：{openerPanel > 0 ? `面板 ${openerPanel}` : "尚未選擇"}；對手速度：{opponentSpeed > 0 ? opponentSpeed : "—"}。</div>
