@@ -28,6 +28,8 @@ import {
 import type { Grindstone } from "../lib/types";
 import { buildRuneUseCounts, type RuneUseCount } from "../lib/usage";
 
+const SLOTS = [1, 2, 3, 4, 5, 6];
+
 const STAT_FILTERS = [
   { value: 0, label: "全部副屬性" },
   { value: 8, label: "速度" },
@@ -242,11 +244,15 @@ export default function GrindPage() {
   const [onlySix, setOnlySix] = useState(false);
   const [onlyHigh, setOnlyHigh] = useState(false);
   const [setId, setSetId] = useState(0);
+  const [slots, setSlots] = useState<number[]>([]);
   const [stat, setStat] = useState(0);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [sort, setSort] = useState<GrindSort>("default");
   const [q, setQ] = useState("");
   const [take, setTake] = useState(40);
+
+  const toggleSlot = (n: number) =>
+    setSlots((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)));
 
   /** 預設隊 / 防守隊與 RTA 的符文使用次數（常用符文方向用） */
   const useCounts = useMemo(() => buildRuneUseCounts(account), [account]);
@@ -259,7 +265,7 @@ export default function GrindPage() {
 
   useEffect(() => {
     setTake(40);
-  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, stat, sort, q, tagFilter]);
+  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, slots, stat, sort, q, tagFilter]);
 
   const owners = useMemo(() => {
     const map = new Map<number, GrindOwner>();
@@ -332,6 +338,7 @@ export default function GrindPage() {
       if (onlySix && t.rune.grade !== 6) return false;
       if (onlyHigh && t.tier !== "high") return false;
       if (setId && t.rune.set !== setId) return false;
+      if (slots.length > 0 && !slots.includes(t.rune.slot)) return false;
       if (tagFilter.length > 0) {
         const hit = tagHits.get(t.rune.id);
         if (!hit || !hit.some((rule) => tagFilter.includes(rule.id))) return false;
@@ -344,7 +351,7 @@ export default function GrindPage() {
       );
     });
     return sortGrindTargets(list, sort);
-  }, [candidates, onlyEquipped, onlySix, onlyHigh, setId, sort, q, tagFilter, tagHits]);
+  }, [candidates, onlyEquipped, onlySix, onlyHigh, setId, slots, sort, q, tagFilter, tagHits]);
 
   const summary = useMemo(() => {
     const high = candidates.filter((t) => t.tier === "high").length;
@@ -555,6 +562,32 @@ export default function GrindPage() {
           </div>
         </div>
 
+        <div className="row wrap" style={{ gap: 6, marginTop: 10, alignItems: "center" }}>
+          <span className="tiny dim">位置</span>
+          <button
+            type="button"
+            className={`chip ${slots.length === 0 ? "gold" : "muted"}`}
+            style={{ cursor: "pointer" }}
+            aria-pressed={slots.length === 0}
+            onClick={() => setSlots([])}
+          >
+            全部
+          </button>
+          {SLOTS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className={`chip ${slots.includes(n) ? "gold" : "muted"}`}
+              style={{ cursor: "pointer", minWidth: 34, justifyContent: "center" }}
+              aria-pressed={slots.includes(n)}
+              title={`位置 ${n}（可多選）`}
+              onClick={() => toggleSlot(n)}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+
         {activeTags.length > 0 && (
           <div className="row wrap" style={{ gap: 6, marginTop: 10, alignItems: "center" }}>
             <span className="tiny dim" title="在「符文 → 自行分類」設定的分類，符合條件的符文會自動掛上">
@@ -597,7 +630,7 @@ export default function GrindPage() {
             <input type="checkbox" checked={onlyHigh} onChange={(e) => setOnlyHigh(e.target.checked)} /> 只看高優先
           </label>
           <span className="tiny dim">顯示 {filtered.length} / {candidates.length} 顆</span>
-          {(onlyEquipped || onlySix || onlyHigh || setId || stat !== 0 || q || useStock || tagFilter.length > 0) && (
+          {(onlyEquipped || onlySix || onlyHigh || setId || slots.length > 0 || stat !== 0 || q || useStock || tagFilter.length > 0) && (
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -606,6 +639,7 @@ export default function GrindPage() {
                 setOnlySix(false);
                 setOnlyHigh(false);
                 setSetId(0);
+                setSlots([]);
                 setStat(0);
                 setQ("");
                 setUseStock(false);
@@ -649,7 +683,7 @@ export default function GrindPage() {
         <ol>
           <li><b>先看速度。</b>速度磨石最稀有，只留給 6★、套裝正確、而且你確定會長期使用的符文；不要為了湊效率浪費在 5★ 以下。</li>
           <li><b>再補百分比。</b>體力% / 防禦% 給坦與輔助，攻擊% 給輸出；固定值（+HP / +ATK / +DEF）只有在該符文其他副屬性很完美時才補。</li>
-          <li><b>依套裝集中處理。</b>磨石只能用在同套裝符文，先挑數量最多的套裝（例如迅速、暴走）一次整理，避免東一顆西一顆。</li>
+          <li><b>依套裝集中處理。</b>磨石只能用在同套裝符文，先挑數量最多的套裝（例如迅速、暴走）一次整理，避免東一顆西一顆；也可用「位置 1–6」多選，只看特定位置的符文。</li>
           <li><b>石頭等級這樣分：</b>傳說石留給「速度還差 4–5」或關鍵百分比；英雄石用在次要但會上場的符文；稀有／魔法石只用來補滿過渡裝。</li>
           <li><b>不要精煉準備換掉的符文。</b>先確認符文已 +15、套裝與主屬正確，再投入資源；4★ 以下基本上不值得。不確定哪些還在用的話，切到「常用符文」方向，它會列出預設隊 / 防守隊與 RTA 用到的符文，依使用次數由多到少排列；次數是匯出當下的快照。</li>
           <li><b>可以重複嘗試。</b>同一條副屬性再精煉會覆蓋上一次的加成，不會疊加；接近上限時再用高一級的石頭追求滿值，已經用高階石精煉過的就不要再用低階石覆蓋。</li>

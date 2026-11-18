@@ -38,6 +38,8 @@ function Tile({ k, v, sub }: { k: string; v: string; sub?: string }) {
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const fmtGain = (n: number) => `${n >= 0 ? "+" : ""}${round1(n)}`;
+const SLOTS = [1, 2, 3, 4, 5, 6];
+
 const excludeRuneLabel = (r: Rune) =>
   `#${r.slot} ${SET_BY_ID[r.set]?.name ?? `套裝${r.set}`} · ${STAT_TYPES[r.main.t]?.label ?? "?"} +${r.main.v}`;
 
@@ -306,6 +308,7 @@ export default function EnchantPage() {
   const [onlyReady, setOnlyReady] = useState(true);
   const [assumeGrind, setAssumeGrind] = useState(true);
   const [setId, setSetId] = useState(0);
+  const [slots, setSlots] = useState<number[]>([]);
   const [mainStat, setMainStat] = useState(0);
   const [onlyHaveStock, setOnlyHaveStock] = useState(false);
   const [excludedSets, setExcludedSets] = useState<number[]>([]);
@@ -317,6 +320,9 @@ export default function EnchantPage() {
   const [targetScore, setTargetScore] = useState(250);
   const [onlyUnmet, setOnlyUnmet] = useState(true);
   const [take, setTake] = useState(40);
+
+  const toggleSlot = (n: number) =>
+    setSlots((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)));
 
   /** 持有的精魔石（寶石）＋精煉石（磨石）；舊存檔缺少任一欄位時不能啟用素材篩選 */
   const stock = useMemo<EnchantStock>(
@@ -431,11 +437,12 @@ export default function EnchantPage() {
         if (onlyEquipped && !t.owner) return false;
         if (onlySix && t.rune.grade !== 6) return false;
         if (setId && t.rune.set !== setId) return false;
+        if (slots.length > 0 && !slots.includes(t.rune.slot)) return false;
         if (mainStat && t.rune.main.t !== mainStat) return false;
         if (excludedSetSet.has(t.rune.set) || excludedRuneSet.has(t.rune.id)) return false;
         return true;
       }),
-    [all, onlyReady, onlyEquipped, onlySix, setId, mainStat, excludedSetSet, excludedRuneSet],
+    [all, onlyReady, onlyEquipped, onlySix, setId, slots, mainStat, excludedSetSet, excludedRuneSet],
   );
 
   /** 勾選「持有精煉石和精魔石素材」時，只留下素材齊全的候選 */
@@ -478,6 +485,7 @@ export default function EnchantPage() {
       if (onlyEquipped && !t.owner) return false;
       if (onlySix && t.rune.grade !== 6) return false;
       if (setId && t.rune.set !== setId) return false;
+      if (slots.length > 0 && !slots.includes(t.rune.slot)) return false;
       if (mainStat && t.rune.main.t !== mainStat) return false;
       if (excludedSetSet.has(t.rune.set) || excludedRuneSet.has(t.rune.id)) return false;
       if (!term) return true;
@@ -489,7 +497,7 @@ export default function EnchantPage() {
         )
       );
     });
-  }, [scoreAll, onlyReady, onlyEquipped, onlySix, setId, mainStat, q, excludedSetSet, excludedRuneSet]);
+  }, [scoreAll, onlyReady, onlyEquipped, onlySix, setId, slots, mainStat, q, excludedSetSet, excludedRuneSet]);
 
   /** 常用符文沿用上面所有的基本篩選，只換成依使用次數排序的來源 */
   const commonFiltered = useMemo(
@@ -517,7 +525,7 @@ export default function EnchantPage() {
 
   useEffect(() => {
     setTake(40);
-  }, [mode, tagFilter, onlyEquipped, onlySix, onlyReady, assumeGrind, setId, mainStat, onlyHaveStock, excludedSets, excludedRuneIds, q, sort, scoreSort, targetScore, onlyUnmet]);
+  }, [mode, tagFilter, onlyEquipped, onlySix, onlyReady, assumeGrind, setId, slots, mainStat, onlyHaveStock, excludedSets, excludedRuneIds, q, sort, scoreSort, targetScore, onlyUnmet]);
 
   const summary = useMemo(() => {
     const six = gemReady.filter((t) => t.rune.grade === 6).length;
@@ -795,6 +803,32 @@ export default function EnchantPage() {
           </div>
         </div>
 
+        <div className="row wrap" style={{ gap: 6, marginTop: 10, alignItems: "center" }}>
+          <span className="tiny dim">位置</span>
+          <button
+            type="button"
+            className={`chip ${slots.length === 0 ? "gold" : "muted"}`}
+            style={{ cursor: "pointer" }}
+            aria-pressed={slots.length === 0}
+            onClick={() => setSlots([])}
+          >
+            全部
+          </button>
+          {SLOTS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className={`chip ${slots.includes(n) ? "gold" : "muted"}`}
+              style={{ cursor: "pointer", minWidth: 34, justifyContent: "center" }}
+              aria-pressed={slots.includes(n)}
+              title={`位置 ${n}（可多選）`}
+              onClick={() => toggleSlot(n)}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+
         <div className="row wrap" style={{ gap: 14, marginTop: 10, alignItems: "center" }}>
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }} title="遊戲規定符文要 +12 以上才能使用精魔寶石">
             <input type="checkbox" checked={onlyReady} onChange={(e) => setOnlyReady(e.target.checked)} /> 只看 +12 以上（可精魔）
@@ -835,7 +869,7 @@ export default function EnchantPage() {
                 ? `顯示 ${commonFiltered.length} / ${commonAll.length} 顆`
                 : `顯示 ${scoreList.length} / ${scoreGemReady.length} 顆`}
           </span>
-          {(onlyEquipped || onlySix || !onlyReady || setId || mainStat || onlyHaveStock || excludedSets.length > 0 || excludedRuneIds.length > 0 || q || tagFilter.length > 0 || (!onlyUnmet && mode === "score")) && (
+          {(onlyEquipped || onlySix || !onlyReady || setId || slots.length > 0 || mainStat || onlyHaveStock || excludedSets.length > 0 || excludedRuneIds.length > 0 || q || tagFilter.length > 0 || (!onlyUnmet && mode === "score")) && (
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -844,6 +878,7 @@ export default function EnchantPage() {
                 setOnlySix(false);
                 setOnlyReady(true);
                 setSetId(0);
+                setSlots([]);
                 setMainStat(0);
                 setOnlyHaveStock(false);
                 setExcludedSets([]);
@@ -978,7 +1013,7 @@ export default function EnchantPage() {
           <li><b>依分數。</b>不需要自行分類，直接用遊戲分數（副屬性＋固有屬性，含精煉；不含主屬性與套裝）當標準。輸入目標分數（例如 250）後，頁面會枚舉所有合法精魔方式，只列出「精魔一次＋其他可精煉副屬性都拉到上限」能達到該分數的符文，並列出要換哪一條、換成什麼、還要不要再精煉。MAX 是最理想值：只看分數高低，不管換出來的屬性你會不會用（例如把抵抗換成體力% 只為了墊分），實際也會依寶石與磨石等級、骰值而較低。</li>
           <li><b>已達標與精煉即可達標。</b>「已達標」代表目前分數就夠；「精煉即可達標」代表不用精魔，只要把現有可精煉副屬性拉滿就到目標。想看這兩類可以取消「只看還沒達標」。</li>
           <li><b>持有精煉石和精魔石素材。</b>勾選後只列出「換成你手上真的有的寶石」、而且「精魔後要用來精煉的磨石也真的持有」的符文；素材要比照套裝（遠古符文用遠古素材、無形素材不限套裝）且屬性正確。暴率 / 暴傷 / 抵抗 / 命中不能精煉，不需要磨石；在「依分類」關閉「假設精魔後精煉滿」時也不需要磨石。<b>分數會改以持有素材的等級計算</b>：卡片顯示「持有素材精滿 X 分」，而不是 6★ 傳說上限的 MAX；是否達標也用這個分數判斷。卡片會列出用到的素材、等級、可加數值與持有數量。舊存檔若沒有素材資料，請重新匯入一次 JSON；素材數量不會跨符文扣除。</li>
-          <li><b>主屬篩選。</b>可依符文主屬性（例如 2 號速度、4 號暴傷、6 號體力%）縮小清單；下拉只列出這份存檔實際擁有的主屬性。</li>
+          <li><b>主屬 / 位置篩選。</b>可依符文主屬性（例如 2 號速度、4 號暴傷、6 號體力%）縮小清單；下拉只列出這份存檔實際擁有的主屬性。位置 1–6 可多選，和套裝、主屬、持有素材等條件一起生效。</li>
           <li><b>排除符文 / 排除套裝。</b>在「排除符文 / 排除套裝」卡片點套裝即可排除整套，或搜尋符文 ID / 套裝 / 主屬 / 擁有者加入單顆排除；兩者可疊加，也和上面的套裝、主屬、持有素材等條件一起生效。這些排除只影響精魔建議這一頁，不會改到全域「符文限制」的排除清單（卡片上的「排除」標記仍來自全域設定）。</li>
           <li><b>常用符文。</b>切到這個方向會列出預設隊 / 防守隊與 RTA 配裝用到的符文，依使用次數由多到少排序；卡片會顯示「常用 N 次」與預設隊 / RTA 的細項，方便先處理你真的在用的符文。次數是匯出當下的快照，同一顆符文可同時在一般與 RTA 使用；仍可搭配上面的套裝、主屬、搜尋與排除篩選。</li>
         </ol>
