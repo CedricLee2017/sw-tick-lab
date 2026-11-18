@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, Gauge, RotateCcw, Wand2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
+  Check,
+  Gauge,
+  RotateCcw,
+  Wand2,
+} from "lucide-react";
 import { MonsterPickerField } from "../components/MonsterPicker";
 import { NumberInput } from "../components/ui";
 import { MONSTERS, monsterOf, useStore } from "../store";
@@ -153,11 +161,36 @@ export default function FollowSpeedPage() {
           .map(({ i }) => i)
       : [];
 
-    return { results, safeExtra, openerPanel, openerTick, opponentSpeed, openerNotFastest };
+    // 起手要壓過所有後排所需的面板速度（只有明確按下順序修正時才會用到）
+    const openerNeed = openerNotFastest.reduce(
+      (max, i) => Math.max(max, (results[i]?.panel ?? 0) + 1),
+      0,
+    );
+
+    return { results, safeExtra, openerPanel, openerTick, opponentSpeed, openerNotFastest, openerNeed };
   }, [members, leadPct, rate, oppSpd]);
 
-  const { results, safeExtra, openerPanel, opponentSpeed, openerNotFastest } = computed;
+  const { results, safeExtra, openerPanel, opponentSpeed, openerNotFastest, openerNeed } = computed;
 
+  /** 只補每隻自己的接速下限；起手本來就沒有下限，不會被改動。 */
+  const applyFloor = () => {
+    const next = rows.map((row, i) => {
+      if (i >= size || !row.monsterId || i === 0) return row;
+      const floor = results[i]?.minExtra;
+      if (typeof floor !== "number" || !Number.isFinite(floor) || floor <= row.extra) return row;
+      return { ...row, extra: floor };
+    });
+    const changed = next.reduce((count, row, i) => count + (row !== rows[i] ? 1 : 0), 0);
+    if (changed > 0) setRows(next);
+    notify(
+      changed > 0
+        ? `已補足 ${changed} 隻的接速最低速度（起手不變）`
+        : "目前額外速度都已達到接速最低值",
+      changed > 0 ? "ok" : "err",
+    );
+  };
+
+  /** 保留目前輸入的速度，只把前面不足的成員往上推，確保攻擊順序。 */
   const applySafe = () => {
     const next = rows.map((row, i) => {
       if (i >= size || !row.monsterId) return row;
@@ -171,6 +204,44 @@ export default function FollowSpeedPage() {
       changed > 0
         ? `已補足 ${changed} 隻的順序安全最低速度`
         : "目前額外速度都已達到順序安全最低值",
+      changed > 0 ? "ok" : "err",
+    );
+  };
+
+  /** 以起手為準，把後排降到起手以下；不會低於該隻自己的接速下限。 */
+  const applyLowerFollowers = () => {
+    if (!(openerPanel > 0)) {
+      notify("請先選擇起手，才能用起手速度校正後排", "err");
+      return;
+    }
+    const next = rows.map((row, i) => {
+      if (i >= size || !row.monsterId || i === 0) return row;
+      const r = results[i];
+      if (!r) return row;
+      // 起手 404 → 順序 2 最高 403、順序 3 最高 402、順序 4 最高 401
+      const cap = openerPanel - i;
+      const floor = typeof r.minSpeed === "number" && Number.isFinite(r.minSpeed) ? r.minSpeed : 0;
+      const extra = Math.max(0, Math.max(cap, floor) - r.base - r.leadFlat);
+      return extra < row.extra ? { ...row, extra } : row;
+    });
+    const changed = next.reduce((count, row, i) => count + (row !== rows[i] ? 1 : 0), 0);
+    if (changed > 0) setRows(next);
+    // 有些後排的接速下限本身就高於起手，降到下限還是會超車，這裡要講清楚。
+    const stillTooFast: number[] = [];
+    next.forEach((row, i) => {
+      if (i === 0 || i >= size || !row.monsterId) return;
+      const base = baseSpeedOf(row.monsterId);
+      if (base + leadBonus(base, leadPct) + Math.max(0, row.extra) >= openerPanel) stillTooFast.push(i);
+    });
+    if (stillTooFast.length > 0) {
+      notify(
+        `已調整 ${changed} 隻；第 ${stillTooFast.map((i) => i + 1).join("、")} 隻的接速下限高於起手，無法再降`,
+        "err",
+      );
+      return;
+    }
+    notify(
+      changed > 0 ? `已把 ${changed} 隻後排降到起手速度以下` : "後排速度都已經低於起手",
       changed > 0 ? "ok" : "err",
     );
   };
@@ -189,7 +260,7 @@ export default function FollowSpeedPage() {
     if (!r || !members[index]?.monsterId) return { text: "未選魔靈", cls: "muted" };
     if (index === 0) {
       const need = safeExtra[0];
-      if (need != null && need > members[0].extra) return { text: `提條角需再 +${need - members[0].extra}`, cls: "gold" };
+      if (need != null && need > members[0].extra) return { text: `起手需再 +${need - members[0].extra}`, cls: "gold" };
       return { text: "起手", cls: "green" };
     }
     if (r.minExtra == null || !Number.isFinite(r.minExtra)) return { text: "無法計算", cls: "muted" };
@@ -373,9 +444,26 @@ export default function FollowSpeedPage() {
             <div className="card-title">計算結果</div>
             <div className="card-sub">起手 1 隻；後面每隻收到前面所有提條的總和</div>
           </div>
-          <button type="button" className="btn btn-sm" onClick={applySafe} disabled={selectedCount === 0}>
-            <Wand2 size={13} /> 補足順序安全最低
-          </button>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={applyFloor}
+              disabled={selectedCount === 0}
+              title="只把低於自己接速下限的後排補到下限；起手不會被改動"
+            >
+              <Wand2 size={13} /> 補足接速最低
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={applySafe}
+              disabled={selectedCount === 0}
+              title="保留目前輸入，把前面不足的成員往上推，確保第 2 隻比第 3 隻快、第 3 隻比第 4 隻快"
+            >
+              <ArrowUpNarrowWide size={13} /> 維持攻擊順序
+            </button>
+          </div>
         </div>
 
         <div className="table-scroll">
@@ -389,7 +477,7 @@ export default function FollowSpeedPage() {
                 <th className="num">面板</th>
                 <th className="num">收到提條</th>
                 <th className="num">接速最低額外</th>
-                <th className="num" title="以目前輸入的面板速度為底，只補足不足的成員；不會自動調低已經比較快的成員">順序安全最低額外</th>
+                <th className="num" title="以目前輸入的面板速度為底，只補足不足的成員；按「維持攻擊順序」才會套用">順序安全最低額外</th>
                 <th>狀態</th>
               </tr>
             </thead>
@@ -432,6 +520,9 @@ export default function FollowSpeedPage() {
           <div>
             ※ 順序安全最低額外＝以目前輸入的面板速度為底，把前面不足的成員往上推，確保第 2 隻比第 3 隻快、第 3 隻比第 4 隻快；不會自動調低已經比較快的成員。
           </div>
+          <div>
+            ※「補足接速最低」只補每隻自己的接速下限，起手不會被改動；要讓起手真的先出手，請按「維持攻擊順序」或上方衝突提示的動作。
+          </div>
           <div>※ 速度強化假設從起手後生效，每隻自己勾選是否吃到；提條角自己不會吃到自己的提條。鏡像對手速度 0＝和起手同速。</div>
           <div>※ 目前起手：{openerPanel > 0 ? `面板 ${openerPanel}` : "尚未選擇"}；對手速度：{opponentSpeed > 0 ? opponentSpeed : "—"}。</div>
         </div>
@@ -442,9 +533,26 @@ export default function FollowSpeedPage() {
           <div className="row" style={{ gap: 8, color: "var(--red)" }}>
             <AlertTriangle size={15} />
             <span style={{ fontSize: 12.5 }}>
-              第 {openerNotFastest.map((i) => i + 1).join("、")} 隻的面板速度不低於提條角，會比提條角先出手，接速前提不成立。
-              請提高提條角的速度，或降低這幾隻的額外速度。
+              第 {openerNotFastest.map((i) => i + 1).join("、")} 隻的面板速度不低於起手，會比起手先出手：
+              {openerNotFastest
+                .map((i) => {
+                  const name = monsterOf(members[i].monsterId)?.name ?? `第 ${i + 1} 隻`;
+                  const panel = results[i]?.panel ?? 0;
+                  return `${name} ${panel}（+${panel - openerPanel}）`;
+                })
+                .join("、")}
+              ；起手 {monsterOf(members[0].monsterId)?.name ?? "第 1 隻"} {openerPanel}。
+              接速下限本身都達標，要不要為此改速度由你決定。
             </span>
+          </div>
+          <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+            <button type="button" className="btn btn-sm" onClick={applySafe}>
+              <ArrowUpNarrowWide size={13} /> 起手補到 {openerNeed}（+{Math.max(0, openerNeed - openerPanel)}）
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={applyLowerFollowers}>
+              <ArrowDownNarrowWide size={13} /> 後排降到起手以下
+            </button>
+            <span className="tiny dim">降後排只會動到高於起手的那幾隻，且不會低於各自的接速下限。</span>
           </div>
         </div>
       )}
