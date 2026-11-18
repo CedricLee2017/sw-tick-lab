@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { FlaskConical, Search } from "lucide-react";
+import { Ban, FlaskConical, Search, X } from "lucide-react";
 import { MONSTER_MAP, useStore } from "../store";
-import { SET_BY_ID } from "../lib/constants";
+import { SET_BY_ID, STAT_TYPES } from "../lib/constants";
 import { describeRuneTag, matchesRuneTag } from "../lib/runeTags";
 import { EmptyState, NumberInput, RuneCard, statSuffix } from "../components/ui";
 import {
@@ -23,7 +23,7 @@ import {
   type EnchantStock,
   type EnchantTarget,
 } from "../lib/enchant";
-import type { RuneTagRule } from "../lib/types";
+import type { Rune, RuneTagRule } from "../lib/types";
 
 function Tile({ k, v, sub }: { k: string; v: string; sub?: string }) {
   return (
@@ -37,6 +37,8 @@ function Tile({ k, v, sub }: { k: string; v: string; sub?: string }) {
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const fmtGain = (n: number) => `${n >= 0 ? "+" : ""}${round1(n)}`;
+const excludeRuneLabel = (r: Rune) =>
+  `#${r.slot} ${SET_BY_ID[r.set]?.name ?? `套裝${r.set}`} · ${STAT_TYPES[r.main.t]?.label ?? "?"} +${r.main.v}`;
 
 type EnchantMode = "tag" | "score";
 
@@ -283,6 +285,9 @@ export default function EnchantPage() {
   const [setId, setSetId] = useState(0);
   const [mainStat, setMainStat] = useState(0);
   const [onlyHaveStock, setOnlyHaveStock] = useState(false);
+  const [excludedSets, setExcludedSets] = useState<number[]>([]);
+  const [excludedRuneIds, setExcludedRuneIds] = useState<number[]>([]);
+  const [excludeQ, setExcludeQ] = useState("");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<EnchantSort>("eff-desc");
   const [scoreSort, setScoreSort] = useState<EnchantScoreSort>("max-desc");
@@ -347,6 +352,22 @@ export default function EnchantPage() {
     return ENCHANT_MAIN_STATS.filter((t) => present.has(t)).map((t) => ({ t, label: enchantStatLabel(t) }));
   }, [account]);
 
+  /** 排除篩選只影響本頁清單，不會改到全域的符文限制 */
+  const excludedSetSet = useMemo(() => new Set(excludedSets), [excludedSets]);
+  const excludedRuneSet = useMemo(() => new Set(excludedRuneIds), [excludedRuneIds]);
+  const runeMap = useMemo(() => new Map((account?.runes ?? []).map((r) => [r.id, r])), [account]);
+  const excludeMatches = useMemo(() => {
+    const term = excludeQ.trim().toLowerCase();
+    if (!term) return [];
+    return (account?.runes ?? [])
+      .filter((r) =>
+        `${r.id} ${SET_BY_ID[r.set]?.name ?? ""} ${STAT_TYPES[r.main.t]?.label ?? ""} ${owners.get(r.id)?.name ?? ""}`
+          .toLowerCase()
+          .includes(term),
+      )
+      .slice(0, 8);
+  }, [account, excludeQ, owners]);
+
   /** 寶石只能用同套裝；遠古符文要用遠古寶石 */
   const gemNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -371,9 +392,10 @@ export default function EnchantPage() {
         if (onlySix && t.rune.grade !== 6) return false;
         if (setId && t.rune.set !== setId) return false;
         if (mainStat && t.rune.main.t !== mainStat) return false;
+        if (excludedSetSet.has(t.rune.set) || excludedRuneSet.has(t.rune.id)) return false;
         return true;
       }),
-    [all, onlyReady, onlyEquipped, onlySix, setId, mainStat],
+    [all, onlyReady, onlyEquipped, onlySix, setId, mainStat, excludedSetSet, excludedRuneSet],
   );
 
   /** 勾選「持有精煉石和精魔石素材」時，只留下素材齊全的候選 */
@@ -417,6 +439,7 @@ export default function EnchantPage() {
       if (onlySix && t.rune.grade !== 6) return false;
       if (setId && t.rune.set !== setId) return false;
       if (mainStat && t.rune.main.t !== mainStat) return false;
+      if (excludedSetSet.has(t.rune.set) || excludedRuneSet.has(t.rune.id)) return false;
       if (!term) return true;
       return (
         (t.owner?.name ?? "").toLowerCase().includes(term) ||
@@ -426,7 +449,7 @@ export default function EnchantPage() {
         )
       );
     });
-  }, [scoreAll, onlyReady, onlyEquipped, onlySix, setId, mainStat, q]);
+  }, [scoreAll, onlyReady, onlyEquipped, onlySix, setId, mainStat, q, excludedSetSet, excludedRuneSet]);
 
   /** 勾選「持有精煉石和精魔石素材」時，分數模式也只留下素材齊全的候選 */
   const scoreGemReady = useMemo(() => {
@@ -448,7 +471,7 @@ export default function EnchantPage() {
 
   useEffect(() => {
     setTake(40);
-  }, [mode, tagFilter, onlyEquipped, onlySix, onlyReady, assumeGrind, setId, mainStat, onlyHaveStock, q, sort, scoreSort, targetScore, onlyUnmet]);
+  }, [mode, tagFilter, onlyEquipped, onlySix, onlyReady, assumeGrind, setId, mainStat, onlyHaveStock, excludedSets, excludedRuneIds, q, sort, scoreSort, targetScore, onlyUnmet]);
 
   const summary = useMemo(() => {
     const six = gemReady.filter((t) => t.rune.grade === 6).length;
@@ -737,7 +760,7 @@ export default function EnchantPage() {
               ? `顯示 ${filtered.length} / ${gemReady.length} 顆`
               : `顯示 ${scoreList.length} / ${scoreGemReady.length} 顆`}
           </span>
-          {(onlyEquipped || onlySix || !onlyReady || setId || mainStat || onlyHaveStock || q || tagFilter.length > 0 || (!onlyUnmet && mode === "score")) && (
+          {(onlyEquipped || onlySix || !onlyReady || setId || mainStat || onlyHaveStock || excludedSets.length > 0 || excludedRuneIds.length > 0 || q || tagFilter.length > 0 || (!onlyUnmet && mode === "score")) && (
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -748,6 +771,9 @@ export default function EnchantPage() {
                 setSetId(0);
                 setMainStat(0);
                 setOnlyHaveStock(false);
+                setExcludedSets([]);
+                setExcludedRuneIds([]);
+                setExcludeQ("");
                 setQ("");
                 setTagFilter([]);
                 setOnlyUnmet(true);
@@ -757,6 +783,110 @@ export default function EnchantPage() {
             </button>
           )}
         </div>
+      </div>
+
+      {(excludedSets.length > 0 || excludedRuneIds.length > 0) && (
+        <div className="row wrap tiny" style={{ gap: 8, margin: "0 0 12px", alignItems: "center" }}>
+          <Ban size={13} className="gold" />
+          <span className="dim">
+            已排除 {excludedSets.length} 個套裝、{excludedRuneIds.length} 顆符文（只影響這頁的精魔建議清單）
+          </span>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setExcludedSets([]); setExcludedRuneIds([]); }}>
+            清除排除
+          </button>
+        </div>
+      )}
+
+      <div className="card card-pad" style={{ marginBottom: 14 }}>
+        <div className="row between wrap" style={{ gap: 8 }}>
+          <div className="card-title row" style={{ gap: 7 }}>
+            <Ban size={15} className="gold" /> 排除符文 / 排除套裝
+          </div>
+          <span className="tiny dim">點一下加入或移除；只影響這頁的清單，不會改到全域的符文限制</span>
+        </div>
+        <div className="row wrap" style={{ gap: 6, marginTop: 10, alignItems: "center" }}>
+          <span className="tiny dim">排除套裝</span>
+          {sets.map((s) => {
+            const on = excludedSetSet.has(s.id);
+            return (
+              <button
+                key={s.id}
+                type="button"
+                className={`chip ${on ? "gold" : "muted"}`}
+                style={{ cursor: "pointer" }}
+                aria-pressed={on}
+                title={on ? `取消排除 ${s.name}` : `排除 ${s.name} 的符文`}
+                onClick={() =>
+                  setExcludedSets((prev) => (prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]))
+                }
+              >
+                {on ? "− " : ""}{s.name}
+              </button>
+            );
+          })}
+        </div>
+        <div className="row wrap" style={{ gap: 8, marginTop: 10, alignItems: "flex-start" }}>
+          <span className="tiny dim" style={{ alignSelf: "center" }}>排除符文</span>
+          <div style={{ position: "relative", minWidth: 230 }}>
+            <Search size={13} style={{ position: "absolute", left: 9, top: 10, color: "var(--muted-2)" }} />
+            <input
+              className="input"
+              style={{ width: "100%", paddingLeft: 28 }}
+              placeholder="搜尋符文 ID / 套裝 / 主屬 / 擁有者"
+              value={excludeQ}
+              onChange={(e) => setExcludeQ(e.target.value)}
+            />
+            {excludeQ.trim() && (
+              <div className="rune-search-pop">
+                {excludeMatches.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => {
+                      setExcludedRuneIds((prev) => (prev.includes(r.id) ? prev : [...prev, r.id]));
+                      setExcludeQ("");
+                    }}
+                  >
+                    <span>{excludeRuneLabel(r)}</span>
+                    <span className="tiny dim">{owners.get(r.id)?.name ?? "未裝備"} · ID {r.id}</span>
+                  </button>
+                ))}
+                {excludeMatches.length === 0 && <div className="empty tiny" style={{ padding: 12 }}>找不到符文</div>}
+              </div>
+            )}
+          </div>
+          {excludedRuneIds.length > 0 && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setExcludedRuneIds([])}>
+              <X size={12} /> 清除排除符文
+            </button>
+          )}
+          {excludedRunes.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              title="把全域「符文限制」排除的符文加入這頁的排除清單"
+              onClick={() => setExcludedRuneIds((prev) => [...new Set([...prev, ...excludedRunes])])}
+            >
+              <Ban size={12} /> 加入全域排除（{excludedRunes.length}）
+            </button>
+          )}
+        </div>
+        {excludedRuneIds.length > 0 && (
+          <div className="rune-chip-list" style={{ marginTop: 8 }}>
+            {excludedRuneIds.map((id) => {
+              const r = runeMap.get(id);
+              return (
+                <span key={id} className="rune-chip">
+                  {r ? excludeRuneLabel(r) : `符文 ${id}`}
+                  <span className="dim tiny">{r ? owners.get(id)?.name ?? "未裝備" : ""}</span>
+                  <button type="button" title="移除" onClick={() => setExcludedRuneIds((prev) => prev.filter((x) => x !== id))}>
+                    <X size={10} />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <details className="card card-pad grind-guide" style={{ marginBottom: 14 }}>
@@ -774,6 +904,7 @@ export default function EnchantPage() {
           <li><b>已達標與精煉即可達標。</b>「已達標」代表目前分數就夠；「精煉即可達標」代表不用精魔，只要把現有可精煉副屬性拉滿就到目標。想看這兩類可以取消「只看還沒達標」。</li>
           <li><b>持有精煉石和精魔石素材。</b>勾選後只列出「換成你手上真的有的寶石」、而且「精魔後要用來精煉的磨石也真的持有」的符文；素材要比照套裝（遠古符文用遠古素材、無形素材不限套裝）且屬性正確。暴率 / 暴傷 / 抵抗 / 命中不能精煉，不需要磨石；關閉「假設精魔後精煉滿」時也不需要磨石。卡片會列出用到的素材、等級與持有數量。舊存檔若沒有素材資料，請重新匯入一次 JSON；素材數量不會跨符文扣除。</li>
           <li><b>主屬篩選。</b>可依符文主屬性（例如 2 號速度、4 號暴傷、6 號體力%）縮小清單；下拉只列出這份存檔實際擁有的主屬性。</li>
+          <li><b>排除符文 / 排除套裝。</b>在「排除符文 / 排除套裝」卡片點套裝即可排除整套，或搜尋符文 ID / 套裝 / 主屬 / 擁有者加入單顆排除；兩者可疊加，也和上面的套裝、主屬、持有素材等條件一起生效。這些排除只影響精魔建議這一頁，不會改到全域「符文限制」的排除清單（卡片上的「排除」標記仍來自全域設定）。</li>
         </ol>
       </details>
 
