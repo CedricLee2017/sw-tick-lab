@@ -36,7 +36,7 @@ const {
   runeScore, runeScoreRaw, scoreOfStat, runeEfficiency,
   grindMax, grindStoneMax, grindGradeFor, grindCapsFromStock, matchingGrindstones,
   analyzeRune, planScore, planMaterials, planWithStock, maxScoreWithStock,
-  analyzeEnchant, gemMaxValue, enchantGrindMax, projectRune, sortEnchantTargets,
+  analyzeEnchant, gemMaxValue, enchantGrindMax, projectRune, slotAllowsStat, sortEnchantTargets,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
@@ -3003,6 +3003,50 @@ check("不能蓋掉數值不足的同一條副屬性，也不能換成主屬性"
     { prefix: { t: 8, v: 5 } },
   );
   assert.equal(analyzeEnchant([prefixSpd], [speedRule]).length, 0);
+});
+
+check("位置不可能出現的屬性不會建議：1 號位沒有防禦%、3 號位沒有攻擊%", () => {
+  // 輔助符需要防禦% 12；1 號位即使只差這一條也不能精魔
+  const slot1 = mkEnchantRune(8116, [[8, 15], [2, 20], [11, 10], [9, 10]], {
+    slot: 1,
+    main: { t: 3, v: 160 },
+  });
+  assert.equal(slotAllowsStat(1, 6), false);
+  assert.equal(slotAllowsStat(1, 5), false);
+  assert.equal(slotAllowsStat(1, 4), true, "1 號位可以有攻擊力%");
+  assert.equal(analyzeEnchant([slot1], [SUPPORT_RULE]).length, 0);
+
+  // 同樣的副屬性放在 2 號位，就可以把暴率換成防禦%
+  const slot2 = mkEnchantRune(8117, [[8, 15], [2, 20], [11, 10], [9, 10]]);
+  const list = analyzeEnchant([slot2], [SUPPORT_RULE]);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].options[0].toT, 6);
+
+  // 3 號位沒有攻擊力 / 攻擊力%，1 號位可以
+  const atkRule = {
+    id: "tag-atk-slot-test",
+    name: "攻擊符",
+    sets: [],
+    stats: [
+      { t: 4, min: 12 },
+      { t: 2, min: 12 },
+    ],
+    minMatch: 2,
+    enabled: true,
+  };
+  assert.equal(slotAllowsStat(3, 4), false);
+  assert.equal(slotAllowsStat(3, 3), false);
+  assert.equal(slotAllowsStat(3, 6), true, "3 號位可以有防禦力%");
+  const slot3 = mkEnchantRune(8118, [[2, 20], [11, 10], [8, 10], [9, 10]], {
+    slot: 3,
+    main: { t: 5, v: 160 },
+  });
+  assert.equal(analyzeEnchant([slot3], [atkRule]).length, 0);
+  const slot1Atk = mkEnchantRune(8119, [[2, 20], [11, 10], [8, 10], [9, 10]], {
+    slot: 1,
+    main: { t: 3, v: 160 },
+  });
+  assert.equal(analyzeEnchant([slot1Atk], [atkRule]).length, 1, "1 號位可以有攻擊力%");
 });
 
 check("已用寶石轉過的符文，只能再轉同一條副屬性", () => {

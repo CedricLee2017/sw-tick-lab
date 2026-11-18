@@ -44,6 +44,7 @@ export {
   enchantStatSuffix,
   gemMaxValue,
   projectRune,
+  slotAllowsStat,
   sortEnchantTargets,
 } from "../src/lib/enchant";
 export * from "../src/lib/deckSetup";

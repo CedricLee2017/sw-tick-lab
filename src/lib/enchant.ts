@@ -6,6 +6,7 @@
  *   2. 被換掉的副屬性不能是目前算進分類門檻的那一條，否則換完仍然少一條。
  *   3. 新屬性不能是主屬性、不能和現有副屬性／固有屬性重複，也不能用低於門檻的寶石硬湊。
  *   4. 已經用寶石轉過一次的符文，只能再轉同一條副屬性（遊戲規則）。
+ *   5. 位置不可能出現的屬性也不能轉：1 號位沒有防禦力／防禦力%、3 號位沒有攻擊力／攻擊力%。
  *
  * 數值以「6★ 傳說寶石最大值」估算；預設再假設精魔後會把新副屬性精煉到傳說上限
  * （體攻防% / 速度可精煉，暴率 / 暴傷 / 抵抗 / 命中不可精煉）。
@@ -55,6 +56,20 @@ export function gemMaxValue(t: number, ancient = false): number {
 /** 精魔後新副屬性可再精煉的上限；不能精煉的屬性（暴率 / 暴傷 / 抵抗 / 命中）回傳 0 */
 export function enchantGrindMax(t: number, ancient = false): number {
   return grindMax(t, ancient);
+}
+
+/**
+ * 各位置「不會出現」的屬性：1 號位沒有防禦力 / 防禦力%，3 號位沒有攻擊力 / 攻擊力%。
+ * 這是符文的掉落規則，寶石也無法轉出這些組合，所以精魔建議要先排除。
+ */
+const SLOT_BLOCKED_STATS: Record<number, readonly number[]> = {
+  1: [5, 6], // 防禦力、防禦力%
+  3: [3, 4], // 攻擊力、攻擊力%
+};
+
+/** 這個位置能不能有某條屬性（主屬性、副屬性、固有屬性、精魔都一樣） */
+export function slotAllowsStat(slot: number, t: number): boolean {
+  return !(SLOT_BLOCKED_STATS[slot] ?? []).includes(t);
 }
 
 export function enchantStatLabel(t: number): string {
@@ -190,6 +205,8 @@ export function analyzeEnchant(
         if (rune.subs.some((s) => s.t === target.t)) continue;
         if (rune.prefix?.t === target.t) continue;
         if (hasMain && rune.main.t === target.t) continue;
+        // 1 號位沒有防禦力／防禦%、3 號位沒有攻擊力／攻擊力%，寶石也轉不出來
+        if (!slotAllowsStat(rune.slot, target.t)) continue;
         const toGem = gemMaxValue(target.t, rune.ancient);
         const toGrind = includeGrind ? enchantGrindMax(target.t, rune.ancient) : 0;
         const toValue = toGem + toGrind;
