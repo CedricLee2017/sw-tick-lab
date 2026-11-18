@@ -26,7 +26,7 @@ import {
   type GrindTarget,
 } from "../lib/grind";
 import type { Grindstone } from "../lib/types";
-import { buildRuneUseCounts, type RuneUseCount } from "../lib/usage";
+import { buildRuneUseCounts, COMMON_SORTS, type CommonSort, type RuneUseCount } from "../lib/usage";
 
 const SLOTS = [1, 2, 3, 4, 5, 6];
 
@@ -248,6 +248,9 @@ export default function GrindPage() {
   const [stat, setStat] = useState(0);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [sort, setSort] = useState<GrindSort>("default");
+  const [commonSort, setCommonSort] = useState<CommonSort>("uses-desc");
+  const [minUses, setMinUses] = useState(1);
+  const [maxUses, setMaxUses] = useState(0);
   const [q, setQ] = useState("");
   const [take, setTake] = useState(40);
 
@@ -265,7 +268,7 @@ export default function GrindPage() {
 
   useEffect(() => {
     setTake(40);
-  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, slots, stat, sort, q, tagFilter]);
+  }, [profile, accept, targetScore, useStock, onlyEquipped, onlySix, onlyHigh, setId, slots, stat, sort, commonSort, minUses, maxUses, q, tagFilter]);
 
   const owners = useMemo(() => {
     const map = new Map<number, GrindOwner>();
@@ -281,19 +284,29 @@ export default function GrindPage() {
     if (!account) return [];
     const onlyStat = stat === 0 ? null : stat === -1 ? [1, 3, 5] : stat;
     if (profile === "common") {
-      // 常用符文：只保留預設隊 / RTA 用過的，依使用次數由多到少
+      // 常用符文：只保留預設隊 / RTA 用過、且使用次數在設定範圍內的符文
+      const usesOf = (id: number) => useCounts.get(id)?.total ?? 0;
+      const tie = (a: GrindTarget, b: GrindTarget) =>
+        usesOf(b.rune.id) - usesOf(a.rune.id) ||
+        (useCounts.get(b.rune.id)?.deck ?? 0) - (useCounts.get(a.rune.id)?.deck ?? 0) ||
+        b.rune.grade - a.rune.grade ||
+        b.rawScore - a.rawScore;
       return analyzeGrind(account.runes, { profile: "support", owners, stat: onlyStat, accept, targetScore })
-        .filter((t) => (useCounts.get(t.rune.id)?.total ?? 0) > 0)
-        .sort(
-          (a, b) =>
-            (useCounts.get(b.rune.id)?.total ?? 0) - (useCounts.get(a.rune.id)?.total ?? 0) ||
-            (useCounts.get(b.rune.id)?.deck ?? 0) - (useCounts.get(a.rune.id)?.deck ?? 0) ||
-            b.rune.grade - a.rune.grade ||
-            b.rawScore - a.rawScore,
-        );
+        .filter((t) => {
+          const n = usesOf(t.rune.id);
+          return n >= minUses && (maxUses <= 0 || n <= maxUses);
+        })
+        .sort((a, b) => {
+          if (commonSort === "uses-asc") return usesOf(a.rune.id) - usesOf(b.rune.id) || b.rawScore - a.rawScore;
+          if (commonSort === "now-asc") return a.gameScore - b.gameScore || tie(a, b);
+          if (commonSort === "now-desc") return b.gameScore - a.gameScore || tie(a, b);
+          if (commonSort === "target-desc") return b.maxGameScore - a.maxGameScore || tie(a, b);
+          if (commonSort === "target-asc") return a.maxGameScore - b.maxGameScore || tie(a, b);
+          return tie(a, b);
+        });
     }
     return analyzeGrind(account.runes, { profile, owners, stat: onlyStat, accept, targetScore });
-  }, [account, profile, owners, stat, accept, targetScore, useCounts]);
+  }, [account, profile, owners, stat, accept, targetScore, useCounts, commonSort, minUses, maxUses]);
 
   /** 勾選「計算持有精煉石素材」時，只留下真的能用手上磨石推到目標分數的符文 */
   const candidates = useMemo(() => {
@@ -350,7 +363,8 @@ export default function GrindPage() {
         grindStatLabel(t.best.t).includes(term)
       );
     });
-    return sortGrindTargets(list, sort);
+    // 常用符文已依使用次數 / 分數排好，不再被一般排序覆蓋
+    return profile === "common" ? list : sortGrindTargets(list, sort);
   }, [candidates, onlyEquipped, onlySix, onlyHigh, setId, slots, sort, q, tagFilter, tagHits]);
 
   const summary = useMemo(() => {
@@ -395,7 +409,7 @@ export default function GrindPage() {
           </div>
           <div className="card-sub">
             {profile === "common"
-              ? "列出預設隊 / 防守隊與 RTA 常用到的符文，依使用次數由多到少排列；同一顆符文可同時在一般與 RTA 使用。"
+              ? "列出預設隊 / 防守隊與 RTA 常用到的符文；可自訂順序（使用次數 / 目前分數 / 目標分數）與使用次數上下限。同一顆符文可同時在一般與 RTA 使用。"
               : "依符文素質、套裝、裝備對象與目前精煉值排序；只考慮可用磨石精煉的屬性（速度、體力／攻擊／防禦與固定值）。"}
           </div>
         </div>
@@ -503,6 +517,28 @@ export default function GrindPage() {
               </span>
             </div>
           </>
+        )}
+
+        {profile === "common" && (
+          <div className="row wrap" style={{ gap: 8, marginTop: 10, alignItems: "center" }}>
+            <span className="tiny dim">順序</span>
+            <select
+              className="select"
+              style={{ width: 165 }}
+              value={commonSort}
+              onChange={(e) => setCommonSort(e.target.value as CommonSort)}
+              title={COMMON_SORTS.find((s) => s.key === commonSort)?.desc}
+            >
+              {COMMON_SORTS.map((s) => (
+                <option key={s.key} value={s.key}>{s.label}</option>
+              ))}
+            </select>
+            <span className="tiny dim">使用次數</span>
+            <NumberInput className="input mono" style={{ width: 68 }} min={1} max={999} step={1} value={minUses} onChange={setMinUses} />
+            <span className="tiny dim">～</span>
+            <NumberInput className="input mono" style={{ width: 68 }} min={0} max={999} step={1} value={maxUses} onChange={setMaxUses} />
+            <span className="tiny dim">次（上限 0 = 不限）</span>
+          </div>
         )}
 
         {profile === "speed" && (
@@ -630,7 +666,7 @@ export default function GrindPage() {
             <input type="checkbox" checked={onlyHigh} onChange={(e) => setOnlyHigh(e.target.checked)} /> 只看高優先
           </label>
           <span className="tiny dim">顯示 {filtered.length} / {candidates.length} 顆</span>
-          {(onlyEquipped || onlySix || onlyHigh || setId || slots.length > 0 || stat !== 0 || q || useStock || tagFilter.length > 0) && (
+          {(onlyEquipped || onlySix || onlyHigh || setId || slots.length > 0 || stat !== 0 || q || useStock || tagFilter.length > 0 || commonSort !== "uses-desc" || minUses !== 1 || maxUses !== 0) && (
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -644,6 +680,9 @@ export default function GrindPage() {
                 setQ("");
                 setUseStock(false);
                 setTagFilter([]);
+                setCommonSort("uses-desc");
+                setMinUses(1);
+                setMaxUses(0);
               }}
             >
               清除篩選
@@ -685,7 +724,7 @@ export default function GrindPage() {
           <li><b>再補百分比。</b>體力% / 防禦% 給坦與輔助，攻擊% 給輸出；固定值（+HP / +ATK / +DEF）只有在該符文其他副屬性很完美時才補。</li>
           <li><b>依套裝集中處理。</b>磨石只能用在同套裝符文，先挑數量最多的套裝（例如迅速、暴走）一次整理，避免東一顆西一顆；也可用「位置 1–6」多選，只看特定位置的符文。</li>
           <li><b>石頭等級這樣分：</b>傳說石留給「速度還差 4–5」或關鍵百分比；英雄石用在次要但會上場的符文；稀有／魔法石只用來補滿過渡裝。</li>
-          <li><b>不要精煉準備換掉的符文。</b>先確認符文已 +15、套裝與主屬正確，再投入資源；4★ 以下基本上不值得。不確定哪些還在用的話，切到「常用符文」方向，它會列出預設隊 / 防守隊與 RTA 用到的符文，依使用次數由多到少排列；次數是匯出當下的快照。</li>
+          <li><b>不要精煉準備換掉的符文。</b>先確認符文已 +15、套裝與主屬正確，再投入資源；4★ 以下基本上不值得。不確定哪些還在用的話，切到「常用符文」方向，它會列出預設隊 / 防守隊與 RTA 用到的符文；順序可選使用次數、目前分數或目標分數的高低，也能設使用次數下限／上限（上限 0 = 不限）；次數是匯出當下的快照。</li>
           <li><b>可以重複嘗試。</b>同一條副屬性再精煉會覆蓋上一次的加成，不會疊加；接近上限時再用高一級的石頭追求滿值，已經用高階石精煉過的就不要再用低階石覆蓋。</li>
           <li>暴擊率、暴擊傷害、效果命中、效果抵抗<b>不能用磨石</b>，需要用寶石轉換，這個頁面不會把它們列入精煉候選。</li>
           <li><b>分數怎麼看：</b>推薦分 = 屬性權重 × 可提升幅度，再依符文星級、效率、是否已裝備與套裝契合度調整。分數高不代表一定要精煉，還是要看該顆符文是不是你長期會用的。</li>

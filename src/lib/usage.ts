@@ -89,6 +89,18 @@ export function buildRuneUseCounts(account: Account | null | undefined): Map<num
   return map;
 }
 
+/** 「常用符文」方向的排序方式 */
+export type CommonSort = "uses-desc" | "uses-asc" | "now-asc" | "now-desc" | "target-desc" | "target-asc";
+
+export const COMMON_SORTS: { key: CommonSort; label: string; desc: string }[] = [
+  { key: "uses-desc", label: "使用次數 多→少", desc: "依預設隊 / RTA 使用次數由多到少（預設）" },
+  { key: "uses-asc", label: "使用次數 少→多", desc: "使用次數由少到多" },
+  { key: "now-asc", label: "目前分數 低→高", desc: "目前遊戲分數由低到高" },
+  { key: "now-desc", label: "目前分數 高→低", desc: "目前遊戲分數由高到低" },
+  { key: "target-desc", label: "目標分數 高→低", desc: "精煉 / 精魔＋精煉後可達分數由高到低" },
+  { key: "target-asc", label: "目標分數 低→高", desc: "精煉 / 精魔＋精煉後可達分數由低到高" },
+];
+
 /** 使用狀況的顯示文字 */
 export function usageText(usage: EquipUsage | undefined): string {
   if (!usage || (!usage.deck && !usage.rta)) return "未使用";
