@@ -104,6 +104,22 @@ export interface Grindstone {
   amount: number;
 }
 
+/** 持有的精魔石（寶石）素材；格式與磨石相同，但 craft_type 為 1 / 3 / 5 */
+export interface EnchantGem {
+  /** 套裝 id；99 = 無形（可用在任何一般符文，不限套裝） */
+  set: number;
+  /** 可精魔出的屬性 type id */
+  stat: number;
+  /** 稀有度：1 普通 / 2 魔法 / 3 稀有 / 4 英雄 / 5 傳說 */
+  grade: number;
+  /** 遠古寶石：只能用在遠古符文 */
+  ancient: boolean;
+  /** 無形寶石：可用在任何一般符文 */
+  immemorial: boolean;
+  /** 持有數量 */
+  amount: number;
+}
+
 /** 神器副效果（200–226 / 300–309 / 400–411） */
 export interface ArtifactSub {
   /** 效果 id */
@@ -238,6 +254,8 @@ export interface Account {
   summons?: SummonRecord[];
   /** 持有的精煉石（磨石）素材（舊存檔可能沒有；需重新匯入） */
   grindstones?: Grindstone[];
+  /** 持有的精魔石（寶石）素材（舊存檔可能沒有；需重新匯入） */
+  gems?: EnchantGem[];
   /**
    * 魔靈分類名稱（遊戲內 markers type 3，sub_type = 分類編號）。
    * 只有玩家自行改過名稱的分類才會有值，例如 { 5: "世界王" }。

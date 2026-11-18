@@ -38,6 +38,7 @@ const {
   analyzeRune, planScore, planMaterials, planWithStock, maxScoreWithStock,
   analyzeEnchant, analyzeEnchantScore, maxGrindRune, sortEnchantScoreTargets,
   ENCHANT_SCORE_SORTS, gemMaxValue, enchantGrindMax, projectRune, slotAllowsStat, sortEnchantTargets,
+  gemFitsRune, matchingEnchantGems, heldGemLabel, filterEnchantByGems, filterEnchantScoreByGems, ENCHANT_MAIN_STATS,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
@@ -408,6 +409,42 @@ check("精煉石素材：解析一般 / 無形 / 遠古磨石並合併數量", (
   assert.deepEqual(
     { set: ancient.set, stat: ancient.stat, grade: ancient.grade, amount: ancient.amount },
     { set: 1, stat: 2, grade: 4, amount: 5 },
+  );
+});
+
+check("精魔石素材：解析一般 / 無形 / 遠古寶石並合併數量", () => {
+  const raw = {
+    unit_list: [],
+    runes: [{
+      rune_id: 1, slot_no: 1, set_id: 1, class: 6, rank: 5, upgrade_curr: 15,
+      pri_eff: [3, 160], prefix_eff: [0, 0], sec_eff: [],
+    }],
+    rune_craft_item_list: [
+      { craft_type: 1, craft_type_id: 210905, amount: 3 }, // 一般：set 21 / 暴擊率 / 傳說
+      { craft_type: 1, craft_type_id: 210905, amount: 2 }, // 同種合併
+      { craft_type: 3, craft_type_id: 990305, amount: 8 }, // 無形：固定攻擊 / 傳說
+      { craft_type: 5, craft_type_id: 10114, amount: 5 },  // 遠古：set 1 / 固定體力 / 英雄
+      { craft_type: 2, craft_type_id: 210805, amount: 9 }, // 磨石，不列入寶石
+    ],
+  };
+  const p = parseAccountJSON(JSON.stringify(raw), "gems.json");
+  assert.equal(p.error, undefined, p.error);
+  const list = p.account.gems;
+  assert.equal(list.length, 3);
+  const normal = list.find((g) => !g.ancient && !g.immemorial);
+  assert.deepEqual(
+    { set: normal.set, stat: normal.stat, grade: normal.grade, amount: normal.amount },
+    { set: 21, stat: 9, grade: 5, amount: 5 },
+  );
+  const immemorial = list.find((g) => g.immemorial);
+  assert.deepEqual(
+    { set: immemorial.set, stat: immemorial.stat, grade: immemorial.grade, ancient: immemorial.ancient },
+    { set: 99, stat: 3, grade: 5, ancient: false },
+  );
+  const ancient = list.find((g) => g.ancient);
+  assert.deepEqual(
+    { set: ancient.set, stat: ancient.stat, grade: ancient.grade, amount: ancient.amount },
+    { set: 1, stat: 1, grade: 4, amount: 5 },
   );
 });
 
@@ -3316,6 +3353,74 @@ check("分數模式：MAX 分數可排序", () => {
   const gainDesc = sortEnchantScoreTargets(list, "gain-desc");
   assert.ok(gainDesc[0].gain >= gainDesc[1].gain);
   assert.equal(ENCHANT_SCORE_SORTS.length, 4);
+});
+
+/* ── 持有精魔石素材（寶石） ── */
+
+check("寶石素材：同套裝 / 無形 / 遠古的使用規則", () => {
+  const rune = mkEnchantRune(8301, [[8, 15], [2, 20], [6, 20], [9, 10]]);
+  const ancient = mkEnchantRune(8301, [[8, 15], [2, 20], [6, 20], [9, 10]], { ancient: true });
+  const normal = { set: 3, stat: 11, grade: 5, ancient: false, immemorial: false, amount: 1 };
+  const wrongSet = { ...normal, set: 15 };
+  const immemorial = { ...normal, immemorial: true, set: 99 };
+  const ancientGem = { ...normal, ancient: true };
+  assert.equal(gemFitsRune(rune, normal), true, "同套裝一般寶石可用");
+  assert.equal(gemFitsRune(rune, wrongSet), false, "不同套裝不可用");
+  assert.equal(gemFitsRune(rune, immemorial), true, "無形寶石可用在任何一般符文");
+  assert.equal(gemFitsRune(rune, ancientGem), false, "一般符文不能用遠古寶石");
+  assert.equal(gemFitsRune(ancient, ancientGem), true, "遠古符文用遠古寶石");
+  assert.equal(gemFitsRune(ancient, immemorial), false, "遠古符文不能用無形寶石");
+  assert.equal(gemFitsRune(ancient, normal), false, "遠古符文不能用一般寶石");
+  assert.equal(gemFitsRune(rune, { ...normal, amount: 0 }), false, "數量為 0 不算持有");
+});
+
+check("寶石素材：只比對屬性，等級高的優先並顯示持有文字", () => {
+  const rune = mkEnchantRune(8302, [[8, 15], [2, 20], [6, 20], [9, 10]]);
+  const gems = [
+    { set: 3, stat: 8, grade: 2, ancient: false, immemorial: false, amount: 4 },
+    { set: 3, stat: 11, grade: 3, ancient: false, immemorial: false, amount: 1 },
+    { set: 3, stat: 11, grade: 5, ancient: false, immemorial: false, amount: 2 },
+  ];
+  assert.equal(matchingEnchantGems(rune, 11, gems).length, 2);
+  assert.equal(matchingEnchantGems(rune, 11, gems)[0].grade, 5, "傳說排在稀有前面");
+  assert.equal(matchingEnchantGems(rune, 12, gems).length, 0, "命中寶石不在手上");
+  assert.match(heldGemLabel(rune, 11, gems), /效果抵抗寶石 ×2（傳說）/);
+  assert.equal(heldGemLabel(rune, 12, gems), "");
+});
+
+check("持有素材：分類模式只留下有寶石可精魔的方式", () => {
+  const rune = mkEnchantRune(8303, [[8, 15], [2, 20], [6, 20], [9, 10]]);
+  const list = analyzeEnchant([rune], [SUPPORT_RULE]);
+  assert.equal(list.length, 1);
+  const t = list[0];
+  assert.equal(t.options[0].toT, 11);
+  const wrong = [{ set: 3, stat: 12, grade: 5, ancient: false, immemorial: false, amount: 1 }];
+  assert.equal(filterEnchantByGems(t, wrong), null, "手上只有命中寶石，不能用於抵抗候選");
+  const right = [{ set: 3, stat: 11, grade: 4, ancient: false, immemorial: false, amount: 3 }];
+  const kept = filterEnchantByGems(t, right);
+  assert.ok(kept, "有同套裝抵抗寶石就保留");
+  assert.equal(kept.options.length, 1);
+  assert.equal(kept.bestEff, t.bestEff);
+  assert.deepEqual(kept.ruleIds, t.ruleIds);
+});
+
+check("持有素材：分數模式只留下有寶石可精魔、且仍高於純精煉的候選", () => {
+  const rune = mkEnchantRune(8304, [[8, 15], [2, 20], [6, 20], [9, 10]]);
+  const t = analyzeEnchantScore([rune])[0];
+  assert.ok(t.best);
+  const gems = [{ set: 3, stat: t.best.toT, grade: 5, ancient: false, immemorial: false, amount: 2 }];
+  const kept = filterEnchantScoreByGems(t, gems);
+  assert.ok(kept);
+  assert.equal(kept.maxScore, t.best.scoreAfter);
+  assert.equal(kept.gain, kept.maxScore - kept.scoreNow);
+  const wrong = [{ set: 3, stat: 11, grade: 5, ancient: false, immemorial: false, amount: 2 }];
+  assert.equal(filterEnchantScoreByGems(t, wrong), null, "最佳方式沒有對應寶石就排除");
+  const noEnchant = analyzeEnchantScore([mkEnchantRune(8305, [[8, 30], [2, 40], [6, 40], [9, 30]])])[0];
+  assert.equal(filterEnchantScoreByGems(noEnchant, gems), null, "不用精魔的候選不列入素材清單");
+});
+
+check("主屬篩選選項涵蓋所有可能的主屬性", () => {
+  assert.deepEqual(ENCHANT_MAIN_STATS, [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]);
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);

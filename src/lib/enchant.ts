@@ -12,11 +12,11 @@
  * （體攻防% / 速度可精煉，暴率 / 暴傷 / 抵抗 / 命中不可精煉）。
  * 實際數值會依寶石與磨石等級、骰值而較低。
  */
-import { STAT_TYPES } from "./constants";
+import { SET_BY_ID, STAT_TYPES } from "./constants";
 import { grindMax } from "./grind";
 import { runeEfficiency, runeScore, runeScoreRaw } from "./stats";
 import { matchesRuneTag, runeStatValue, tagRequiredMatches } from "./runeTags";
-import type { Rune, RuneTagRule } from "./types";
+import type { EnchantGem, Rune, RuneTagRule } from "./types";
 
 /** 6★ 傳說寶石的最大值（一般符文） */
 const GEM_MAX: Record<number, number> = {
@@ -485,4 +485,77 @@ export function sortEnchantTargets(list: EnchantTarget[], sort: EnchantSort): En
     }
     return b.bestEff - a.bestEff || b.bestScore - a.bestScore;
   });
+}
+
+/* ───────────────────────── 持有精魔石（寶石）素材 ───────────────────────── */
+
+/** 主屬性篩選的選項順序（1/3/5 固定值，2/4/6 百分比，8 速度，9–12 特殊） */
+export const ENCHANT_MAIN_STATS = [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12];
+
+export const GEM_GRADE_LABEL: Record<number, string> = {
+  1: "普通",
+  2: "魔法",
+  3: "稀有",
+  4: "英雄",
+  5: "傳說",
+};
+
+/** 這顆寶石能不能用在這顆符文上（遠古 / 無形 / 同套裝規則，和磨石一致） */
+export function gemFitsRune(rune: Rune, gem: EnchantGem): boolean {
+  if (gem.amount <= 0) return false;
+  if (rune.ancient) return gem.ancient && !gem.immemorial && gem.set === rune.set;
+  return !gem.ancient && (gem.immemorial || gem.set === rune.set);
+}
+
+/** 持有、可用於這顆符文、且能精魔出指定屬性的寶石；等級高的優先 */
+export function matchingEnchantGems(rune: Rune, stat: number, gems: EnchantGem[]): EnchantGem[] {
+  return gems
+    .filter((gem) => gem.stat === stat && gemFitsRune(rune, gem))
+    .sort(
+      (a, b) =>
+        b.grade - a.grade ||
+        Number(b.immemorial) - Number(a.immemorial) ||
+        b.amount - a.amount ||
+        a.set - b.set,
+    );
+}
+
+/** 卡片上顯示的持有素材文字，例如「迅速 效果抵抗寶石 ×2（傳說）」 */
+export function heldGemLabel(rune: Rune, stat: number, gems: EnchantGem[]): string {
+  const gem = matchingEnchantGems(rune, stat, gems)[0];
+  if (!gem) return "";
+  const set = gem.immemorial ? "無形" : SET_BY_ID[gem.set]?.name ?? `套裝 ${gem.set}`;
+  const grade = GEM_GRADE_LABEL[gem.grade] ?? `${gem.grade} 級`;
+  return `${set} ${enchantStatLabel(stat)}寶石 ×${gem.amount}（${grade}${gem.ancient ? "・遠古" : ""}）`;
+}
+
+/** 分類模式：只保留「真的持有可用寶石」的精魔方式；沒有素材時回傳 null */
+export function filterEnchantByGems(target: EnchantTarget, gems: EnchantGem[]): EnchantTarget | null {
+  const options = target.options.filter((o) => matchingEnchantGems(target.rune, o.toT, gems).length > 0);
+  if (options.length === 0) return null;
+  return {
+    ...target,
+    options,
+    ruleIds: [...new Set(options.flatMap((o) => o.rules.map((r) => r.id)))],
+    bestEff: Math.max(...options.map((o) => o.effAfter)),
+    bestScore: Math.max(...options.map((o) => o.scoreAfter)),
+  };
+}
+
+/** 分數模式：只保留有持有寶石、且精魔後分數仍高於純精煉的候選 */
+export function filterEnchantScoreByGems(
+  target: EnchantScoreTarget,
+  gems: EnchantGem[],
+): EnchantScoreTarget | null {
+  const options = target.options.filter((o) => matchingEnchantGems(target.rune, o.toT, gems).length > 0);
+  const top = options[0];
+  // 沒有可用寶石（或只精煉就已是最佳）的符文不需要素材，不列入「持有素材」清單
+  if (!top || top.scoreAfter <= target.maxNow) return null;
+  return {
+    ...target,
+    options,
+    best: top,
+    maxScore: top.scoreAfter,
+    gain: top.scoreAfter - target.scoreNow,
+  };
 }
