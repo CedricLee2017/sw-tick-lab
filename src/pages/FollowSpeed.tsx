@@ -6,6 +6,7 @@ import {
   Check,
   Gauge,
   RotateCcw,
+  Swords,
   Wand2,
 } from "lucide-react";
 import { MonsterPickerField } from "../components/MonsterPicker";
@@ -30,6 +31,47 @@ const EMPTY_ROW: Row = { monsterId: 0, extra: 0, boost: 0, speedBuff: false };
 const emptyRows = () => Array.from({ length: 5 }, () => ({ ...EMPTY_ROW }));
 
 const STORAGE_KEY = "swtick:follow-speed";
+const DUEL_KEY = "swtick:follow-speed-duel";
+
+type Mode = "team" | "duel";
+
+/** 進攻防守（3v3）：只比較雙方跑最快的那一隻 */
+interface DuelState {
+  defId: number;
+  defLead: number;
+  defExtra: number;
+  atkId: number;
+  atkLead: number;
+  atkExtra: number;
+}
+
+const EMPTY_DUEL: DuelState = {
+  defId: 0,
+  defLead: 0,
+  defExtra: 0,
+  atkId: 0,
+  atkLead: 0,
+  atkExtra: 0,
+};
+
+function loadDuel(): DuelState {
+  try {
+    const raw = localStorage.getItem(DUEL_KEY);
+    if (!raw) return { ...EMPTY_DUEL };
+    const p = JSON.parse(raw) as Partial<DuelState>;
+    const num = (v: unknown) => (Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0);
+    return {
+      defId: num(p.defId),
+      defLead: num(p.defLead),
+      defExtra: num(p.defExtra),
+      atkId: num(p.atkId),
+      atkLead: num(p.atkLead),
+      atkExtra: num(p.atkExtra),
+    };
+  } catch {
+    return { ...EMPTY_DUEL };
+  }
+}
 
 interface SavedState {
   size: Size;
@@ -37,6 +79,7 @@ interface SavedState {
   leadPct: number;
   rta: boolean;
   oppSpd: number;
+  mode: Mode;
 }
 
 function loadSaved(): SavedState | null {
@@ -53,6 +96,7 @@ function loadSaved(): SavedState | null {
       leadPct: Number(parsed.leadPct) || 0,
       rta: Boolean(parsed.rta),
       oppSpd: Number(parsed.oppSpd) || 0,
+      mode: parsed.mode === "duel" ? "duel" : "team",
     };
   } catch {
     return null;
@@ -69,27 +113,42 @@ const baseSpeedOf = (monsterId: number) => monsterOf(monsterId)?.spd ?? 0;
 export default function FollowSpeedPage() {
   const notify = useStore((s) => s.notify);
   const [initial] = useState(loadSaved);
+  const [mode, setMode] = useState<Mode>(initial?.mode ?? "team");
   const [size, setSize] = useState<Size>(initial?.size ?? 4);
   const [rows, setRows] = useState<Row[]>(() => initial?.rows ?? emptyRows());
   const [leadPct, setLeadPct] = useState(initial?.leadPct ?? 0);
   const [rta, setRta] = useState(initial?.rta ?? false);
   const [oppSpd, setOppSpd] = useState(initial?.oppSpd ?? 0);
+  const [duel, setDuel] = useState<DuelState>(loadDuel);
 
   // 和其他計算頁一樣，設定留在這台裝置，切去別頁再回來不會不見。
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ size, rows, leadPct, rta, oppSpd }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ size, rows, leadPct, rta, oppSpd, mode }));
     } catch {
       /* 瀏覽器儲存空間不足時忽略 */
     }
-  }, [size, rows, leadPct, rta, oppSpd]);
+  }, [size, rows, leadPct, rta, oppSpd, mode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DUEL_KEY, JSON.stringify(duel));
+    } catch {
+      /* 瀏覽器儲存空間不足時忽略 */
+    }
+  }, [duel]);
 
   const rate = rta ? 1.5 : 7;
   const members = rows.slice(0, size);
 
+  /** 進攻防守模式固定用一般 7% */
+  const duelRate = 7;
+
   const patch = (index: number, next: Partial<Row>) => {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...next } : row)));
   };
+
+  const patchDuel = (next: Partial<DuelState>) => setDuel((prev) => ({ ...prev, ...next }));
 
   const computed = useMemo(() => {
     const baseOf = (row: Row) => baseSpeedOf(row.monsterId);
@@ -172,6 +231,58 @@ export default function FollowSpeedPage() {
 
   const { results, safeExtra, openerPanel, opponentSpeed, openerNotFastest, openerNeed } = computed;
 
+  /**
+   * 進攻防守（3v3）：只有一隻防守、一隻進攻，比的是「誰先滿攻擊條」。
+   * 面板 = 基礎 + ceil(基礎 × 隊長技%) + 額外；同速時進攻方先手（與接速頁一致）。
+   */
+  const duelCalc = useMemo(() => {
+    const dBase = baseSpeedOf(duel.defId);
+    const dLead = leadBonus(dBase, duel.defLead);
+    const dPanel = duel.defId ? dBase + dLead + Math.max(0, duel.defExtra) : 0;
+
+    const aBase = baseSpeedOf(duel.atkId);
+    const aLead = leadBonus(aBase, duel.atkLead);
+    const aPanel = duel.atkId ? aBase + aLead + Math.max(0, duel.atkExtra) : 0;
+
+    const ready = dPanel > 0 && aBase > 0;
+    const needExtra = ready ? Math.max(0, dPanel - aBase - aLead) : null;
+    const diff = ready ? aPanel - dPanel : null;
+    // 你目前的速度可以壓過多少「防守方額外速度」（含平手，因為同速進攻先手）
+    const maxDefExtra = aPanel > 0 && dBase > 0 ? Math.max(0, aPanel - dBase - dLead) : null;
+
+    const dTick = dPanel > 0 ? tickForSpeed({ speed: dPanel, ratePct: duelRate }) : null;
+    const aTick = aPanel > 0 ? tickForSpeed({ speed: aPanel, ratePct: duelRate }) : null;
+
+    // 少 1 速時通常還是在同一個 Tick 滿條，只是變成後手，這點要寫出來。
+    const almostExtra = needExtra != null ? Math.max(0, needExtra - 1) : null;
+    const almostPanel = almostExtra != null && aBase > 0 ? aBase + aLead + almostExtra : 0;
+    const almostTick =
+      almostPanel > 0 && almostPanel < dPanel ? tickForSpeed({ speed: almostPanel, ratePct: duelRate }) : null;
+
+    return {
+      dBase,
+      dLead,
+      dPanel,
+      aBase,
+      aLead,
+      aPanel,
+      ready,
+      needExtra,
+      diff,
+      maxDefExtra,
+      dTick,
+      aTick,
+      almostExtra,
+      almostPanel,
+      almostTick,
+    };
+  }, [duel, duelRate]);
+
+  const afterDuelChange = (next: Partial<DuelState>, msg: string) => {
+    setDuel((prev) => ({ ...prev, ...next }));
+    notify(msg, "ok");
+  };
+
   /** 直接套用每隻後排的接速最低要求（可升可降）；起手沒有下限，維持原值。 */
   const applyFloor = () => {
     const next = rows.map((row, i) => {
@@ -247,6 +358,11 @@ export default function FollowSpeedPage() {
   };
 
   const reset = () => {
+    if (mode === "duel") {
+      setDuel({ ...EMPTY_DUEL });
+      notify("已清空進攻防守速度");
+      return;
+    }
     setRows(emptyRows());
     setLeadPct(0);
     setOppSpd(0);
@@ -277,10 +393,13 @@ export default function FollowSpeedPage() {
       <div className="row between wrap" style={{ gap: 10, marginBottom: 14 }}>
         <div>
           <div className="card-title row" style={{ gap: 7 }}>
-            <Gauge size={15} className="gold" /> 接速最低速度
+            {mode === "team" ? <Gauge size={15} className="gold" /> : <Swords size={15} className="gold" />}
+            {mode === "team" ? "接速最低速度" : "進攻防守速度（3v3）"}
           </div>
           <div className="card-sub">
-            選魔靈後只輸入額外速度；系統用基礎速度、提條、速度強化與隊長技算出每隻的接速需求，不顯示 Tick。
+            {mode === "team"
+              ? "選魔靈後只輸入額外速度；系統用基礎速度、提條、速度強化與隊長技算出每隻的接速需求，不顯示 Tick。"
+              : "輸入防守方與進攻方的基礎速度、速度隊長技與額外速度，直接算出進攻方要跑贏所需的額外速度。"}
           </div>
         </div>
         <button type="button" className="btn btn-sm btn-ghost" onClick={reset}>
@@ -288,7 +407,310 @@ export default function FollowSpeedPage() {
         </button>
       </div>
 
-      <div className="card card-pad">
+      <div className="row wrap" style={{ gap: 8, marginBottom: 14 }}>
+        <button
+          type="button"
+          className={`chip ${mode === "team" ? "gold" : "muted"}`}
+          style={{ cursor: "pointer" }}
+          onClick={() => setMode("team")}
+        >
+          隊伍接速
+        </button>
+        <button
+          type="button"
+          className={`chip ${mode === "duel" ? "gold" : "muted"}`}
+          style={{ cursor: "pointer" }}
+          onClick={() => setMode("duel")}
+        >
+          進攻防守（3v3）
+        </button>
+        <span className="tiny dim" style={{ alignSelf: "center" }}>
+          {mode === "team" ? "一隊 3～5 隻的接速需求" : "兩隻比速度，算跑贏防守所需的最低速度"}
+        </span>
+      </div>
+
+      {mode === "duel" && (
+        <>
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}
+          >
+            <div className="card card-pad" style={{ borderColor: "rgba(255,107,107,.3)" }}>
+              <div className="row between wrap" style={{ gap: 6 }}>
+                <span className="chip red">防守方</span>
+                <span className="tiny dim">填 3 隻裡跑最快的那隻</span>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <MonsterPickerField
+                  value={duel.defId}
+                  options={MONSTERS}
+                  onChange={(id) => patchDuel({ defId: id })}
+                  title="防守方跑最快的魔靈"
+                  placeholder="選擇防守方魔靈"
+                />
+              </div>
+              <div className="grid g2" style={{ gap: 8, marginTop: 10 }}>
+                <label className="col" style={{ gap: 3 }}>
+                  <span className="tiny dim">基礎速度</span>
+                  <div className="input mono" style={{ opacity: 0.75 }}>
+                    {duelCalc.dBase || "—"}
+                  </div>
+                </label>
+                <label className="col" style={{ gap: 3 }}>
+                  <span className="tiny dim">速度隊長技 %</span>
+                  <NumberInput
+                    className="input mono"
+                    min={0}
+                    max={50}
+                    value={duel.defLead}
+                    onChange={(v) => patchDuel({ defLead: Math.max(0, Math.min(50, v)) })}
+                    title="以防守方自己的基礎速度計算，加成向上取整"
+                  />
+                </label>
+                <label className="col" style={{ gap: 3 }}>
+                  <span className="tiny dim">額外速度</span>
+                  <NumberInput
+                    className="input mono"
+                    min={0}
+                    max={600}
+                    value={duel.defExtra}
+                    onChange={(v) => patchDuel({ defExtra: Math.max(0, v) })}
+                    title="符文與其他來源的額外速度，例如對方 +238"
+                  />
+                </label>
+                <label className="col" style={{ gap: 3 }}>
+                  <span className="tiny dim">面板速度</span>
+                  <div className="input mono" style={{ fontWeight: 700 }}>
+                    {duelCalc.dPanel || "—"}
+                  </div>
+                </label>
+              </div>
+              <div className="tiny dim" style={{ marginTop: 8 }}>
+                {duelCalc.dBase > 0
+                  ? `${duelCalc.dBase} + ${duelCalc.dLead}（${duel.defLead}% 向上取整） + ${duel.defExtra} = ${duelCalc.dPanel}`
+                  : "選好魔靈後自動帶入基礎速度"}
+                {duelCalc.dTick != null && Number.isFinite(duelCalc.dTick) ? ` · T${duelCalc.dTick} 滿條` : ""}
+              </div>
+            </div>
+
+            <div className="card card-pad" style={{ borderColor: "rgba(110,231,183,.3)" }}>
+              <div className="row between wrap" style={{ gap: 6 }}>
+                <span className="chip green">進攻方（我方）</span>
+                <span className="tiny dim">隊長技以這隻的基礎速度計算</span>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <MonsterPickerField
+                  value={duel.atkId}
+                  options={MONSTERS}
+                  onChange={(id) => patchDuel({ atkId: id })}
+                  title="我方要跑贏的那隻（通常是提條角）"
+                  placeholder="選擇進攻方魔靈"
+                />
+              </div>
+              <div className="grid g2" style={{ gap: 8, marginTop: 10 }}>
+                <label className="col" style={{ gap: 3 }}>
+                  <span className="tiny dim">基礎速度</span>
+                  <div className="input mono" style={{ opacity: 0.75 }}>
+                    {duelCalc.aBase || "—"}
+                  </div>
+                </label>
+                <label className="col" style={{ gap: 3 }}>
+                  <span className="tiny dim">速度隊長技 %</span>
+                  <NumberInput
+                    className="input mono"
+                    min={0}
+                    max={50}
+                    value={duel.atkLead}
+                    onChange={(v) => patchDuel({ atkLead: Math.max(0, Math.min(50, v)) })}
+                    title="我方隊長技；就算隊長是別隻，只要全隊生效就填這裡"
+                  />
+                </label>
+                <label className="col" style={{ gap: 3 }}>
+                  <span className="tiny dim">額外速度</span>
+                  <NumberInput
+                    className="input mono"
+                    min={0}
+                    max={600}
+                    value={duel.atkExtra}
+                    onChange={(v) => patchDuel({ atkExtra: Math.max(0, v) })}
+                    title="你目前能配出的額外速度"
+                  />
+                </label>
+                <label className="col" style={{ gap: 3 }}>
+                  <span className="tiny dim">面板速度</span>
+                  <div className="input mono" style={{ fontWeight: 700 }}>
+                    {duelCalc.aPanel || "—"}
+                  </div>
+                </label>
+              </div>
+              <div className="tiny dim" style={{ marginTop: 8 }}>
+                {duelCalc.aBase > 0
+                  ? `${duelCalc.aBase} + ${duelCalc.aLead}（${duel.atkLead}% 向上取整） + ${duel.atkExtra} = ${duelCalc.aPanel}`
+                  : "選好魔靈後自動帶入基礎速度"}
+                {duelCalc.aTick != null && Number.isFinite(duelCalc.aTick) ? ` · T${duelCalc.aTick} 滿條` : ""}
+              </div>
+            </div>
+          </div>
+
+          <div className="card card-pad" style={{ marginTop: 14 }}>
+            <div className="row between wrap" style={{ gap: 10 }}>
+              <div>
+                <div className="card-title">進攻需要額外速度</div>
+                <div className="card-sub">同速時進攻方先手，所以打平就算跑贏</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={!duelCalc.ready || duelCalc.needExtra == null}
+                onClick={() => {
+                  const need = duelCalc.needExtra;
+                  if (need == null) return;
+                  afterDuelChange(
+                    { atkExtra: need },
+                    `已把進攻方額外速度設為 ${need}（面板 ${duelCalc.dPanel}）`,
+                  );
+                }}
+                title="直接把進攻方的額外速度填成最低需求"
+              >
+                <Wand2 size={13} /> 套用 {duelCalc.needExtra ?? "—"}
+              </button>
+            </div>
+
+            <div
+              className="row wrap"
+              style={{ gap: 26, marginTop: 14, alignItems: "flex-end" }}
+            >
+              <div>
+                <div className="tiny dim">需要額外速度</div>
+                <div className="mono" style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.15 }}>
+                  {duelCalc.needExtra != null ? `+${duelCalc.needExtra}` : "—"}
+                </div>
+                <div className="tiny dim">需求面板 {duelCalc.dPanel || "—"}</div>
+              </div>
+              <div>
+                <div className="tiny dim">你目前</div>
+                <div
+                  className="mono"
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    lineHeight: 1.3,
+                    color:
+                      duelCalc.diff == null
+                        ? undefined
+                        : duelCalc.diff >= 0
+                          ? "var(--green)"
+                          : "var(--red)",
+                  }}
+                >
+                  +{duel.atkExtra}
+                </div>
+                <div className="tiny dim">進攻面板 {duelCalc.aPanel || "—"}</div>
+              </div>
+              <div style={{ paddingBottom: 2 }}>
+                <span
+                  className={`chip ${
+                    duelCalc.diff == null ? "muted" : duelCalc.diff > 0 ? "green" : duelCalc.diff === 0 ? "gold" : "red"
+                  }`}
+                >
+                  {duelCalc.diff == null
+                    ? "尚未選擇"
+                    : duelCalc.diff > 0
+                      ? `跑贏 ${duelCalc.diff} 速`
+                      : duelCalc.diff === 0
+                        ? "同速 · 進攻先手"
+                        : `還差 ${-duelCalc.diff} 速`}
+                </span>
+              </div>
+            </div>
+
+            {duelCalc.almostTick != null && duelCalc.almostExtra != null && (
+              <div className="tiny dim" style={{ marginTop: 8 }}>
+                只到 +{duelCalc.almostExtra}（面板 {duelCalc.almostPanel}）時仍會在 T
+                {duelCalc.almostTick} 滿條，但會變成後手；同速要絕對保險就再多 +1。
+              </div>
+            )}
+
+            {duelCalc.maxDefExtra != null && (
+              <div className="row wrap" style={{ gap: 8, marginTop: 14 }}>
+                <span className="chip muted">反推</span>
+                <span className="tiny">
+                  以你目前 +{duel.atkExtra}（面板 {duelCalc.aPanel}），能跑贏「額外 ≤{" "}
+                  <b className="mono gold">{duelCalc.maxDefExtra}</b>」的防守（含平手）。
+                </span>
+              </div>
+            )}
+
+            <div className="table-scroll" style={{ marginTop: 14 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>魔靈</th>
+                    <th className="num">基礎</th>
+                    <th className="num">隊長技</th>
+                    <th className="num">額外</th>
+                    <th className="num">面板</th>
+                    <th className="num">出手 Tick</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <span className="chip red">防守</span>
+                    </td>
+                    <td style={{ fontWeight: 600 }}>
+                      {monsterOf(duel.defId)?.name ?? <span className="dim">尚未選擇</span>}
+                    </td>
+                    <td className="num mono">{duelCalc.dBase || "—"}</td>
+                    <td className="num mono">
+                      {duel.defLead > 0 ? `${duelCalc.dLead}（${duel.defLead}%）` : "—"}
+                    </td>
+                    <td className="num mono">{duel.defId ? duel.defExtra : "—"}</td>
+                    <td className="num mono">{duelCalc.dPanel || "—"}</td>
+                    <td className="num mono">
+                      {duelCalc.dTick != null && Number.isFinite(duelCalc.dTick) ? `T${duelCalc.dTick}` : "—"}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <span className="chip green">進攻</span>
+                    </td>
+                    <td style={{ fontWeight: 600 }}>
+                      {monsterOf(duel.atkId)?.name ?? <span className="dim">尚未選擇</span>}
+                    </td>
+                    <td className="num mono">{duelCalc.aBase || "—"}</td>
+                    <td className="num mono">
+                      {duel.atkLead > 0 ? `${duelCalc.aLead}（${duel.atkLead}%）` : "—"}
+                    </td>
+                    <td className="num mono">{duel.atkId ? duel.atkExtra : "—"}</td>
+                    <td className="num mono">{duelCalc.aPanel || "—"}</td>
+                    <td className="num mono">
+                      {duelCalc.aTick != null && Number.isFinite(duelCalc.aTick) ? `T${duelCalc.aTick}` : "—"}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div
+              className="card-pad tiny dim"
+              style={{ borderTop: "1px solid var(--line-soft)", lineHeight: 1.8, marginTop: 4 }}
+            >
+              <div>
+                ※ 面板速度＝基礎＋ceil(基礎 × 隊長技%)＋額外；例：Fiona 106、28% → 106 + 30 + 238 = 374。
+              </div>
+              <div>※ 3v3 只要贏防守方「跑最快」的那隻；隊長技角不是最快時，請填真正最快的那隻。</div>
+              <div>※ 同速時進攻方先手，所以「需要額外」是打平即可；要絕對保險（或對手有額外加成）再多 +1～2。</div>
+              <div>※ Tick 以一般 7% 計算；實際滿條後攻擊條會溢出，所以差 1 速常常還是同一個 Tick，只是變成後手。</div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {mode === "team" && (
+        <>
+          <div className="card card-pad">
         <div className="row between wrap" style={{ gap: 10 }}>
           <div className="row wrap" style={{ gap: 8 }}>
             <span className="tiny dim">隊伍</span>
@@ -555,6 +977,8 @@ export default function FollowSpeedPage() {
             <span className="tiny dim">降後排只會動到高於起手的那幾隻，且不會低於各自的接速下限。</span>
           </div>
         </div>
+      )}
+        </>
       )}
     </>
   );
