@@ -510,7 +510,7 @@ export default function EnchantPage() {
     });
   }, [scoreAll, onlyReady, onlyEquipped, onlySix, setId, slots, mainStat, q, excludedSetSet, excludedRuneSet]);
 
-  /** 常用符文沿用上面所有的基本篩選，只換成依使用次數排序的來源 */
+  /** 常用符文沿用上面所有的基本篩選，只換成常用符文的來源（排序由「排列」控制） */
   const commonFiltered = useMemo(
     () => commonAll.filter((t) => scoreFiltered.some((s) => s.rune.id === t.rune.id)),
     [commonAll, scoreFiltered],
@@ -616,7 +616,7 @@ export default function EnchantPage() {
             {mode === "tag"
               ? "找出「換掉一條副屬性後，就會符合自行分類」的符文；只列出目前不符合、而且只差一條屬性的符文。"
               : mode === "common"
-                ? "列出預設隊 / 防守隊與 RTA 常用到的符文；可自訂順序（使用次數 / 目前分數 / 目標分數）與使用次數上下限，卡片仍顯示精魔建議。"
+                ? "列出預設隊 / 防守隊與 RTA 常用到的符文；可用「排列」自訂使用次數 / 目前分數 / 目標分數，並設定使用次數上下限，卡片仍顯示精魔建議。"
                 : "不需要自行分類：直接算出「精魔一次＋精煉到上限」後能達到目標分數的符文。"}
             數值以 6★ 傳說寶石＋精煉上限估算，實際會依寶石與磨石等級、骰值較低；效率不設上限，超過 100% 會照實顯示。
           </div>
@@ -693,7 +693,7 @@ export default function EnchantPage() {
             {mode === "tag"
               ? "找出精魔後能符合自行分類的符文"
               : mode === "common"
-                ? "列出預設隊 / RTA 常用符文，可自訂順序與使用次數範圍"
+                ? "列出預設隊 / RTA 常用符文，可用「排列」自訂排序方式與使用次數範圍"
                 : "以遊戲分數為標準，找精魔＋精煉後能達標的符文"}
           </span>
         </div>
@@ -722,18 +722,6 @@ export default function EnchantPage() {
 
         {mode === "common" && (
           <div className="row wrap" style={{ gap: 8, marginTop: 10, alignItems: "center" }}>
-            <span className="tiny dim">順序</span>
-            <select
-              className="select"
-              style={{ width: 165 }}
-              value={commonSort}
-              onChange={(e) => setCommonSort(e.target.value as CommonSort)}
-              title={COMMON_SORTS.find((s) => s.key === commonSort)?.desc}
-            >
-              {COMMON_SORTS.map((s) => (
-                <option key={s.key} value={s.key}>{s.label}</option>
-              ))}
-            </select>
             <span className="tiny dim">使用次數</span>
             <NumberInput className="input mono" style={{ width: 68 }} min={1} max={999} step={1} value={minUses} onChange={setMinUses} />
             <span className="tiny dim">～</span>
@@ -817,6 +805,18 @@ export default function EnchantPage() {
                 title={ENCHANT_SORTS.find((s) => s.key === sort)?.desc}
               >
                 {ENCHANT_SORTS.map((s) => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
+                ))}
+              </select>
+            ) : mode === "common" ? (
+              <select
+                className="select"
+                style={{ width: 165 }}
+                value={commonSort}
+                onChange={(e) => setCommonSort(e.target.value as CommonSort)}
+                title={COMMON_SORTS.find((s) => s.key === commonSort)?.desc}
+              >
+                {COMMON_SORTS.map((s) => (
                   <option key={s.key} value={s.key}>{s.label}</option>
                 ))}
               </select>
@@ -1051,7 +1051,7 @@ export default function EnchantPage() {
           <li><b>持有精煉石和精魔石素材。</b>勾選後只列出「換成你手上真的有的寶石」、而且「精魔後要用來精煉的磨石也真的持有」的符文；素材要比照套裝（遠古符文用遠古素材、無形素材不限套裝）且屬性正確。暴率 / 暴傷 / 抵抗 / 命中不能精煉，不需要磨石；在「依分類」關閉「假設精魔後精煉滿」時也不需要磨石。<b>分數會改以持有素材的等級計算</b>：卡片顯示「持有素材精滿 X 分」，而不是 6★ 傳說上限的 MAX；是否達標也用這個分數判斷。卡片會列出用到的素材、等級、可加數值與持有數量。舊存檔若沒有素材資料，請重新匯入一次 JSON；素材數量不會跨符文扣除。</li>
           <li><b>主屬 / 位置篩選。</b>可依符文主屬性（例如 2 號速度、4 號暴傷、6 號體力%）縮小清單；下拉只列出這份存檔實際擁有的主屬性。位置 1–6 可多選，和套裝、主屬、持有素材等條件一起生效。</li>
           <li><b>排除符文 / 排除套裝。</b>在「排除符文 / 排除套裝」卡片點套裝即可排除整套，或搜尋符文 ID / 套裝 / 主屬 / 擁有者加入單顆排除；兩者可疊加，也和上面的套裝、主屬、持有素材等條件一起生效。這些排除只影響精魔建議這一頁，不會改到全域「符文限制」的排除清單（卡片上的「排除」標記仍來自全域設定）。</li>
-          <li><b>常用符文。</b>切到這個方向會列出預設隊 / 防守隊與 RTA 配裝用到的符文；順序可選使用次數、目前分數或目標分數的高低，也能設使用次數下限／上限（上限 0 = 不限）。卡片會顯示「常用 N 次」與預設隊 / RTA 的細項。次數是匯出當下的快照，同一顆符文可同時在一般與 RTA 使用；仍可搭配上面的套裝、主屬、搜尋與排除篩選。</li>
+          <li><b>常用符文。</b>切到這個方向會列出預設隊 / 防守隊與 RTA 配裝用到的符文；「排列」可選使用次數、目前分數或目標分數的高低，也能設使用次數下限／上限（上限 0 = 不限）。卡片會顯示「常用 N 次」與預設隊 / RTA 的細項。次數是匯出當下的快照，同一顆符文可同時在一般與 RTA 使用；仍可搭配上面的套裝、主屬、搜尋與排除篩選。</li>
         </ol>
       </details>
 
