@@ -561,7 +561,28 @@ export function optimize(req: OptRequest): OptResult {
     for (const id of softIds) addTop(scored.filter((x) => x.r.set === id), 2);
     if (speedTarget > 0) addTop([...scored].sort((a, b) => b.spd - a.spd), 5);
     addTop(scored, maxCand);
-    const picked = [...keep.values()].slice(0, maxCand);
+
+    // 速度主屬性（2 號）：有速度目標時一定要留在候選池。
+    // 只按「符文提供的速度」排序時，主屬性速度但副屬性沒有速度的符文會被
+    // 副屬性速度更高的符文擠掉，造成「明明配得出來卻回報找不到」的假失敗。
+    const priority: Rune[] = [];
+    const pushUnique = (rune?: Rune) => {
+      if (rune && !priority.some((x) => x.id === rune.id)) priority.push(rune);
+    };
+    if (speedTarget > 0) {
+      const spdMains = scored
+        .filter((x) => x.r.main.t === SPD_TYPE)
+        .sort((a, b) => b.spd - a.spd);
+      if (requiredIds.size > 0) {
+        for (const id of requiredIds) {
+          spdMains.filter((x) => x.r.set === id).slice(0, 2).forEach((x) => pushUnique(x.r));
+        }
+      } else {
+        spdMains.slice(0, 3).forEach((x) => pushUnique(x.r));
+      }
+    }
+    for (const rune of keep.values()) pushUnique(rune);
+    const picked = priority.slice(0, maxCand);
     if (speedTarget > 0) {
       // 先搜尋速度最高的組合，較早找到可行解，後續剪枝才有效
       const speedOf = new Map(scored.map((x) => [x.r.id, x.spd]));

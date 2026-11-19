@@ -390,6 +390,11 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
         gap: slot.gap,
         speedChain: chainIds.has(slot.id),
         objective: roleObjective(slot.role),
+        // 目前遊戲中的 RTA 配裝：搜尋失敗時可直接沿用（並把神器固定值計入）
+        seedRunes: account.rta?.loadouts?.[unit.id]?.runes ?? [],
+        seedArtifacts: (account.rta?.loadouts?.[unit.id]?.artifacts ?? [])
+          .map((id) => artifactMap.get(id))
+          .filter((a): a is Artifact => !!a),
       };
     });
     // 把速度串接的成員排前面，其餘接在後面且不受速度差限制

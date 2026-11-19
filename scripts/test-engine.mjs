@@ -2645,6 +2645,48 @@ check("RTA Deck：速度隊長會提高配出來的速度", () => {
   );
 });
 
+check("RTA Deck：搜尋失敗時沿用目前 RTA 配裝（神器固定值計入）", () => {
+  const bySlot = new Map();
+  for (const r of teamRuneList) if (!bySlot.has(r.slot)) bySlot.set(r.slot, r);
+  const seedRunes = [1, 2, 3, 4, 5, 6].map((slot) => bySlot.get(slot));
+  const bonus = { ...teamBonus, leadSpd: 0, useGuild: false, grind: true };
+  const plain = statsForRunes(rtaDeckCaseBase, seedRunes, bonus, true, false);
+  const artifact = {
+    id: 1, type: 1, attr: 1, style: 0, occupied: 0,
+    main: { t: 100, v: 1000 }, subs: [], level: 15, rank: 5,
+  };
+  const out = planRtaDeck({
+    members: [
+      rtaDeckCaseMember(900, {
+        sets: [],
+        mains: {},
+        // 體力下限＝符文提供的體力 + 神器固定 1000
+        min: { spd: plain.spd, hp: plain.hp + 1000 },
+        seedRunes: seedRunes.map((r) => r.id),
+        seedArtifacts: [artifact],
+      }),
+    ],
+    runes: teamRuneList,
+    bonus: teamBonus,
+    leaderPct: 0,
+    gapMode: "at-least",
+    pool: 7,
+    topK: 5,
+    // 節點上限 0＝不進行搜尋，只能用目前配裝
+    maxNodes: 0,
+    excludeRunes: [],
+    lockedRunes: [],
+  });
+  assert.equal(out.ok, true, out.ok ? "" : out.error);
+  const got = [...out.members[0].runeIds].sort((a, b) => a - b);
+  const want = seedRunes.map((r) => r.id).sort((a, b) => a - b);
+  assert.deepEqual(got, want, "應回傳目前的 RTA 符文");
+  assert.ok(
+    out.members[0].notes.some((n) => n.includes("沿用目前 RTA 配裝")),
+    "結果應標註沿用目前配裝",
+  );
+});
+
 /* ── 14. 儲存庫跨裝置合併 ─────────────────────── */
 console.log("\n[14] 儲存庫跨裝置合併");
 const libItem = (id, name, updatedAt) => ({ id, name, createdAt: 100, updatedAt });

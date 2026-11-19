@@ -10,11 +10,12 @@
  * mainAlternatives 一次搜尋多個主屬性，不需要為每個組合分開跑。
  */
 import type { StatKey } from "./constants";
+import { ARTIFACT_MAIN } from "./artifacts";
 import { optimize, type OptObjective, type TopBuild } from "./optimizer";
 import { roleObjective, type TeamRole } from "./teamOptimizer";
 import { deckSlotSets } from "./rtaDeck";
-import type { BaseStats } from "./stats";
-import type { BonusConfig, Rune, Stats } from "./types";
+import { effectiveSetCounts, statsForRunes, type BaseStats } from "./stats";
+import type { Artifact, BonusConfig, Rune, Stats } from "./types";
 
 export interface RtaDeckPlanMember {
   slotId: string;
@@ -34,7 +35,16 @@ export interface RtaDeckPlanMember {
   /** 是否參與速度串接；false = 不受前一隻速度差限制 */
   speedChain: boolean;
   objective?: OptObjective;
+  /**
+   * 目前遊戲中的 RTA 配裝（符文 id）。
+   * 搜尋找不到符合條件的組合時，會先檢查這組配裝；
+   * 若它本來就達標就直接沿用，避免「明明遊戲配得出來卻說配不到」。
+   */
+  seedRunes?: number[];
+  /** 目前 RTA 神器（提供固定體力 / 攻擊 / 防禦加成） */
+  seedArtifacts?: Artifact[];
 }
+
 
 export interface RtaDeckPlanRequest {
   members: RtaDeckPlanMember[];
@@ -113,6 +123,73 @@ export function planRtaDeck(
   /** 前一隻的實戰速度（速度順序較快的那隻） */
   let prevSpeed: number | null = null;
 
+  /** 神器提供的固定體力 / 攻擊 / 防禦（與遊戲面板一致） */
+  const artifactFlatOf = (member: RtaDeckPlanMember) => {
+    const flat = { hp: 0, atk: 0, def: 0 };
+    for (const art of member.seedArtifacts ?? []) {
+      const key = ARTIFACT_MAIN[art.main.t]?.key;
+      if (key) flat[key] += art.main.v;
+    }
+    return flat.hp || flat.atk || flat.def ? flat : undefined;
+  };
+
+  /**
+   * 目前 RTA 配裝是否可以直接沿用。
+   * 搜尋用「每位置取前 N 顆」的方式剪枝；遇到很緊的多項數值下限時，
+   * 可能找不到任何組合，但玩家現在穿的這套其實就達標。
+   * 這時先驗證現有配裝，符合就回傳，避免誤報「配不到」。
+   */
+  const seedResultOf = (
+    member: RtaDeckPlanMember,
+    min: Partial<Record<StatKey, number>>,
+    max: Partial<Record<StatKey, number>>,
+  ): RtaDeckPlanResult | null => {
+    const ids = member.seedRunes ?? [];
+    if (ids.length !== 6) return null;
+    const byId = new Map(req.runes.map((r) => [r.id, r]));
+    const list = ids.map((id) => byId.get(id)).filter((r): r is Rune => !!r);
+    if (list.length !== 6) return null;
+    if (new Set(list.map((r) => r.slot)).size !== 6) return null;
+    for (const r of list) {
+      if (used.has(r.id)) return null;
+      if (lockedSet.has(r.id) && r.occupied !== member.unitId) return null;
+    }
+    // 指定的套裝與主屬性也要符合，不能偷偷換成別的配置
+    const sets = (member.sets ?? []).filter((s) => s.set > 0 && s.count > 0);
+    if (sets.length > 0) {
+      const counts: Record<number, number> = {};
+      for (const r of list) counts[r.set] = (counts[r.set] ?? 0) + 1;
+      const eff = effectiveSetCounts(counts);
+      if (sets.some((s) => (eff[s.set] ?? 0) < s.count)) return null;
+    }
+    for (const [slot, allowed] of Object.entries(member.mains ?? {})) {
+      if (!allowed || allowed.length === 0) continue;
+      const rune = list.find((r) => r.slot === Number(slot));
+      if (!rune || !allowed.includes(rune.main.t)) return null;
+    }
+
+    const bonus = { ...req.bonus, leadSpd: req.leaderPct, useGuild: false, grind: true };
+    const artifacts = member.seedArtifacts ?? [];
+    const battle = statsForRunes(member.base, list, bonus, true, true, artifacts);
+    for (const [k, v] of Object.entries(min) as [StatKey, number][]) if (battle[k] < v) return null;
+    for (const [k, v] of Object.entries(max) as [StatKey, number][]) if (battle[k] > v) return null;
+
+    const stats = statsForRunes(member.base, list, bonus, true, false, artifacts);
+    const eff = list.reduce((sum, r) => sum + r.eff, 0) / 6;
+    return {
+      slotId: member.slotId,
+      unitId: member.unitId,
+      runeIds: list.map((r) => r.id),
+      stats,
+      ehp: stats.ehp,
+      score: 0,
+      eff,
+      focusFit: 0,
+      objective: member.objective ?? roleObjective(member.role),
+      notes: [`${member.label}：搜尋不到更好的組合，沿用目前 RTA 配裝（已符合條件）。`],
+    };
+  };
+
   for (let i = 0; i < req.members.length; i++) {
     const member = req.members[i];
     onProgress?.({ index: i, total: req.members.length, slotId: member.slotId, label: member.label });
@@ -159,9 +236,10 @@ export function planRtaDeck(
     const objective = member.objective ?? roleObjective(member.role);
     let chosen: TopBuild | undefined;
     let chosenNote: string | null = null;
+    let seedChosen: RtaDeckPlanResult | null = null;
     let lastCandidates: number[] = [];
 
-    for (const step of LADDER) {
+    for (const [stepIndex, step] of LADDER.entries()) {
       // 使用者原本就沒有限制主屬性時，不必重複跑「不限主屬性」那一階
       if (!step.useMains && !Object.keys(member.mains ?? {}).length) continue;
       const res = optimize({
@@ -183,6 +261,7 @@ export function planRtaDeck(
         lockedRunes: [...lockedSet],
         topK: Math.max(1, req.topK),
         objective,
+        artifactFlat: artifactFlatOf(member),
       });
       nodes += res.nodes;
       truncated = truncated || res.truncated;
@@ -192,6 +271,19 @@ export function planRtaDeck(
         chosenNote = step.note;
         break;
       }
+      // 完整條件找不到時，先看目前的 RTA 配裝是否本來就達標；
+      // 這樣就不會為了硬湊而先放寬套裝 / 主屬性。
+      if (stepIndex === 0) {
+        seedChosen = seedResultOf(member, min, max);
+        if (seedChosen) break;
+      }
+    }
+
+    if (seedChosen) {
+      for (const id of seedChosen.runeIds) used.add(id);
+      if (member.speedChain) prevSpeed = seedChosen.stats.spd;
+      out.push(seedChosen);
+      continue;
     }
 
     if (!chosen) {
