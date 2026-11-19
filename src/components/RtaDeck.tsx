@@ -18,6 +18,7 @@ import { accountGameKey, MONSTER_MAP, unitLabel, useStore } from "../store";
 import { ELEMENTS, RUNE_SETS, SET_BY_ID, STAT_KEYS, STAT_META, type StatKey } from "../lib/constants";
 import { rtaStats, rtaView } from "../lib/rta";
 import {
+  RTA_DECK_OBJECTIVES,
   RTA_DECK_STORAGE_PREFIX,
   RTA_MAIN_OPTIONS,
   RTA_POOL_MAX,
@@ -31,6 +32,7 @@ import {
   orderedSlots,
   removeSlotFromDeck,
   saveRtaDeck,
+  type RtaDeckObjective,
   type RtaDeckResult,
   type RtaDeckSlot,
   type RtaDeckState,
@@ -43,7 +45,7 @@ import {
   type RtaDeckPlanProgress,
   type RtaDeckPlanRequest,
 } from "../lib/rtaDeckPlan";
-import { TEAM_ROLE_LABELS, roleObjective, type TeamRole } from "../lib/teamOptimizer";
+import { TEAM_ROLE_LABELS, type TeamRole } from "../lib/teamOptimizer";
 import { baseStats, effectiveSetCounts, setSummary } from "../lib/stats";
 import type { Account, Artifact, Rune, Unit } from "../lib/types";
 import { MonsterPickerModal, sortMonsterEntries, type MonsterEntry } from "./MonsterPicker";
@@ -62,6 +64,9 @@ import {
 const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
 const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25 && s.id !== 99);
 const ROLE_OPTIONS: TeamRole[] = ["speed", "booster", "dps", "tank", "support", "free"];
+const OBJECTIVE_LABEL: Record<string, string> = Object.fromEntries(
+  RTA_DECK_OBJECTIVES.map((o) => [o.value, o.label]),
+);
 const MIN_LABEL: Record<StatKey, string> = {
   hp: "體力",
   atk: "攻擊",
@@ -389,7 +394,7 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
         weight: slot.weight,
         gap: slot.gap,
         speedChain: chainIds.has(slot.id),
-        objective: roleObjective(slot.role),
+        objective: deck.objective,
         // 目前遊戲中的 RTA 配裝：搜尋失敗時可直接沿用（並把神器固定值計入）
         seedRunes: account.rta?.loadouts?.[unit.id]?.runes ?? [],
         seedArtifacts: (account.rta?.loadouts?.[unit.id]?.artifacts ?? [])
@@ -530,6 +535,20 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
     ? detailResult.runeIds.map((id) => runeMap.get(id)).filter((r): r is Rune => !!r)
     : [];
 
+  // 已配好的整體水準：平均符文效率 / 平均評分 / 平均速度
+  const doneRows = deck.slots
+    .filter((slot) => slot.unitId != null && deck.results[slot.id])
+    .map((slot) => ({ slot, result: deck.results[slot.id], unit: unitOf(slot.unitId) }));
+  const avgOf = (pick: (r: RtaDeckResult) => number) =>
+    doneRows.length > 0 ? doneRows.reduce((sum, row) => sum + pick(row.result), 0) / doneRows.length : 0;
+  const avgEff = avgOf((r) => r.eff);
+  const avgScore = avgOf((r) => r.score);
+  const avgSpd = avgOf((r) => r.stats.spd);
+  const usedRunes = new Set(doneRows.flatMap((row) => row.result.runeIds)).size;
+  const ranked = [...doneRows].sort((a, b) => b.result.eff - a.result.eff);
+  const bestRow = ranked[0];
+  const worstRow = ranked.length > 1 ? ranked[ranked.length - 1] : undefined;
+
   return (
     <div className="col rta-deck" style={{ gap: 14 }}>
       {/* ── 常用魔靈池 ───────────────────────────── */}
@@ -596,10 +615,23 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
           <div>
             <div className="card-title">RTA Deck · 配裝與速度順序</div>
             <div className="card-sub">
-              最多 {RTA_SLOTS_MAX} 隻。每隻可設定套裝、2/4/6 主屬性（每個位置最多 2 個）與面板數值下限；速度順序可指定角色之間的差距。
+              最多 {RTA_SLOTS_MAX} 隻。速度順序與數值下限是「限制條件」，預設在符合條件下把符文評分（水準）最大化。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
+            <select
+              className="select"
+              style={{ width: 150 }}
+              value={deck.objective}
+              onChange={(e) => update((prev) => ({ ...prev, objective: e.target.value as RtaDeckObjective }))}
+              title={RTA_DECK_OBJECTIVES.find((o) => o.value === deck.objective)?.hint}
+            >
+              {RTA_DECK_OBJECTIVES.map((o) => (
+                <option key={o.value} value={o.value}>
+                  目標：{o.label}
+                </option>
+              ))}
+            </select>
             <select className="select" style={{ width: 130 }} value={budgetKey} onChange={(e) => setBudgetKey(e.target.value as BudgetKey)}>
               {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => (
                 <option key={k} value={k}>
@@ -689,6 +721,49 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
               <button type="button" className="btn btn-sm btn-ghost" onClick={() => setError(null)} style={{ marginLeft: 8 }}>
                 關閉
               </button>
+            </div>
+          )}
+
+          {/* 整體水準：30 隻平均 */}
+          {doneRows.length > 0 && (
+            <div className="rta-deck-stats">
+              <div className="rta-deck-stat">
+                <span className="tiny dim">已配好</span>
+                <b>{doneRows.length} 隻</b>
+              </div>
+              <div className="rta-deck-stat">
+                <span className="tiny dim">平均水準（效率）</span>
+                <b className="gold">{Math.round(avgEff * 10) / 10}%</b>
+              </div>
+              <div className="rta-deck-stat">
+                <span className="tiny dim">平均面板評分</span>
+                <b>{Math.round(avgScore * 10) / 10}</b>
+              </div>
+              <div className="rta-deck-stat">
+                <span className="tiny dim">平均速度</span>
+                <b>{Math.round(avgSpd * 10) / 10}</b>
+              </div>
+              <div className="rta-deck-stat">
+                <span className="tiny dim">使用符文</span>
+                <b>{usedRunes} 顆</b>
+              </div>
+              {gapIssues.length > 0 && (
+                <div className="rta-deck-stat">
+                  <span className="tiny dim">速度差符合</span>
+                  <b style={{ color: gapIssues.every((g) => g.ok) ? "var(--green)" : "var(--red)" }}>
+                    {gapIssues.filter((g) => g.ok).length} / {gapIssues.length}
+                  </b>
+                </div>
+              )}
+              {bestRow && (
+                <div className="rta-deck-stat">
+                  <span className="tiny dim">最高 / 最低</span>
+                  <b className="tiny">
+                    {labelOf(bestRow.unit)} {Math.round(bestRow.result.eff * 10) / 10}%
+                    {worstRow && ` · ${labelOf(worstRow.unit)} ${Math.round(worstRow.result.eff * 10) / 10}%`}
+                  </b>
+                </div>
+              )}
             </div>
           )}
 
@@ -835,7 +910,9 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
                           <b className="mono gold">{result.stats.spd}</b>
                           <span className="tiny dim">速</span>
                           <TickBadge spd={result.stats.spd} rta />
-                          <span className="tiny dim">{result.objective}</span>
+                          <span className="tiny dim">
+                            效率 {Math.round(result.eff * 10) / 10}% · {OBJECTIVE_LABEL[result.objective] ?? result.objective}
+                          </span>
                         </>
                       ) : (
                         <span className="tiny dim">尚未配符</span>

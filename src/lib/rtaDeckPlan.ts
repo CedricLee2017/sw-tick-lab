@@ -11,7 +11,7 @@
  */
 import type { StatKey } from "./constants";
 import { ARTIFACT_MAIN } from "./artifacts";
-import { optimize, type OptObjective, type TopBuild } from "./optimizer";
+import { optimize, scoreOf, type OptObjective, type TopBuild } from "./optimizer";
 import { roleObjective, type TeamRole } from "./teamOptimizer";
 import { deckSlotSets } from "./rtaDeck";
 import { effectiveSetCounts, statsForRunes, type BaseStats } from "./stats";
@@ -117,11 +117,8 @@ export function planRtaDeck(
   const t0 = Date.now();
   const used = new Set<number>(req.excludeRunes);
   const lockedSet = new Set<number>(req.lockedRunes);
-  const out: RtaDeckPlanResult[] = [];
   let nodes = 0;
   let truncated = false;
-  /** 前一隻的實戰速度（速度順序較快的那隻） */
-  let prevSpeed: number | null = null;
 
   /** 神器提供的固定體力 / 攻擊 / 防禦（與遊戲面板一致） */
   const artifactFlatOf = (member: RtaDeckPlanMember) => {
@@ -182,7 +179,7 @@ export function planRtaDeck(
       runeIds: list.map((r) => r.id),
       stats,
       ehp: stats.ehp,
-      score: 0,
+      score: scoreOf(stats),
       eff,
       focusFit: 0,
       objective: member.objective ?? roleObjective(member.role),
@@ -190,46 +187,28 @@ export function planRtaDeck(
     };
   };
 
-  for (let i = 0; i < req.members.length; i++) {
-    const member = req.members[i];
-    onProgress?.({ index: i, total: req.members.length, slotId: member.slotId, label: member.label });
+  type PlanOne = { ok: true; result: RtaDeckPlanResult } | { ok: false; error: string };
 
+  /** 為單一配裝格找配裝；spdMin / spdMax 是速度順序額外給的區間 */
+  const buildMember = (
+    member: RtaDeckPlanMember,
+    spdMin: number | null = null,
+    spdMax: number | null = null,
+  ): PlanOne => {
     const min: Partial<Record<StatKey, number>> = { ...(member.min ?? {}) };
     const max: Partial<Record<StatKey, number>> = { ...(member.max ?? {}) };
-    const targetGap = Math.max(0, Math.round(member.gap || 0));
-
-    // 不參與速度串接的格子：不繼承前一隻的速度上限
-    if (!member.speedChain) prevSpeed = null;
-
-    if (member.speedChain && prevSpeed != null) {
-      const cap = prevSpeed - targetGap;
-      if (cap <= 0) {
-        return {
-          ok: false,
-          slotId: member.slotId,
-          label: member.label,
-          error: `「${member.label}」需要比前一隻慢 ${targetGap} 速，但前一隻只有 ${prevSpeed} 速，速度會變成 ${cap}。請降低速度差、提高前一隻的速度，或取消這隻的速度順序。`,
-        };
-      }
-      // 後面的魔靈一定要比前一隻慢指定的速度差
+    if (spdMin != null) min.spd = Math.max(min.spd ?? 0, Math.round(spdMin));
+    if (spdMax != null) {
+      const cap = Math.round(spdMax);
       max.spd = max.spd == null ? cap : Math.min(max.spd, cap);
-      if (req.gapMode === "exact") {
-        min.spd = cap;
-      }
     }
 
-    // 自己的速度下限不可高於上限
     const loSpd = min.spd ?? 0;
     const hiSpd = max.spd;
     if (hiSpd != null && loSpd > hiSpd) {
       return {
         ok: false,
-        slotId: member.slotId,
-        label: member.label,
-        error:
-          req.gapMode === "exact"
-            ? `「${member.label}」的速度下限是 ${loSpd}，但依速度順序只能到 ${hiSpd} 速（前一隻 ${prevSpeed} 速 − ${targetGap}）。請降低下限或改用「至少差 N 速」。`
-            : `「${member.label}」的速度下限 ${loSpd} 高於速度上限 ${hiSpd}，請調整速度下限或速度差。`,
+        error: `「${member.label}」依速度順序需要 ${loSpd}～${hiSpd} 速，這個區間沒有可用的速度。請降低速度差或調整速度下限。`,
       };
     }
 
@@ -281,40 +260,91 @@ export function planRtaDeck(
 
     if (seedChosen) {
       for (const id of seedChosen.runeIds) used.add(id);
-      if (member.speedChain) prevSpeed = seedChosen.stats.spd;
-      out.push(seedChosen);
-      continue;
+      return { ok: true, result: seedChosen };
     }
 
     if (!chosen) {
-      const lowHint = prevSpeed != null ? `目前速度上限是 ${max.spd} 速（前一隻 ${prevSpeed} 速 − ${targetGap}）。` : "";
-      const ownHint = member.min.spd ? `速度下限是 ${member.min.spd} 速。` : "";
+      const rangeHint =
+        loSpd > 0 && hiSpd != null
+          ? `速度需求是 ${loSpd}～${hiSpd} 速。`
+          : loSpd > 0
+            ? `速度下限是 ${loSpd} 速。`
+            : hiSpd != null
+              ? `速度上限是 ${hiSpd} 速。`
+              : "";
       return {
         ok: false,
-        slotId: member.slotId,
-        label: member.label,
-        error: `無法為「${member.label}」找到符合條件的配裝。${lowHint}${ownHint}請放寬數值下限 / 速度差、改回「至少差 N 速」，或確認符文庫每個位置都有足夠符文。${
+        error: `無法為「${member.label}」找到符合條件的配裝。${rangeHint}請放寬數值下限 / 速度差，或確認符文庫每個位置都有足夠符文。${
           lastCandidates.length > 0 ? `（最後一次搜尋找到的速度：${lastCandidates.slice(0, 5).join("、")}）` : ""
         }`,
       };
     }
 
     for (const id of chosen.runeIds) used.add(id);
-    if (member.speedChain) prevSpeed = chosen.stats.spd;
-    out.push({
-      slotId: member.slotId,
-      unitId: member.unitId,
-      runeIds: chosen.runeIds,
-      stats: chosen.stats,
-      ehp: chosen.ehp,
-      score: chosen.objective,
-      eff: chosen.eff,
-      focusFit: chosen.focusFit,
-      objective,
-      notes: chosenNote ? [`${member.label}：找不到原本的條件，已改為${chosenNote}。`] : [],
-    });
+    return {
+      ok: true,
+      result: {
+        slotId: member.slotId,
+        unitId: member.unitId,
+        runeIds: chosen.runeIds,
+        stats: chosen.stats,
+        ehp: chosen.ehp,
+        score: chosen.score,
+        eff: chosen.eff,
+        focusFit: chosen.focusFit,
+        objective,
+        notes: chosenNote ? [`${member.label}：找不到原本的條件，已改為${chosenNote}。`] : [],
+      },
+    };
+  };
+
+  const results = new Map<number, RtaDeckPlanResult>();
+  const chainIdx = req.members.map((_, i) => i).filter((i) => req.members[i].speedChain);
+  const looseIdx = req.members.map((_, i) => i).filter((i) => !req.members[i].speedChain);
+  let processed = 0;
+
+  const runOne = (i: number, spdMin: number | null, spdMax: number | null): PlanOne => {
+    const member = req.members[i];
+    onProgress?.({ index: processed, total: req.members.length, slotId: member.slotId, label: member.label });
+    processed++;
+    return buildMember(member, spdMin, spdMax);
+  };
+
+  // 速度順序：由快到慢配。若符文真的湊不出指定速度差，仍然配裝並標註，
+  // 讓使用者看得到實際差距（比整批失敗更有用）。
+  let prevSpeed: number | null = null;
+  for (const i of chainIdx) {
+    const member = req.members[i];
+    const gap = Math.max(0, Math.round(member.gap || 0));
+    const cap = prevSpeed == null ? null : prevSpeed - gap;
+    const exact = req.gapMode === "exact" && cap != null;
+    let one = runOne(i, exact ? cap : null, cap);
+    let relaxed = false;
+    if (!one.ok) {
+      // 「剛好差 N 速」找不到就照錯誤回報；「至少差 N 速」才放寬上限繼續配。
+      if (exact) return { ok: false, slotId: member.slotId, label: member.label, error: one.error };
+      one = runOne(i, null, null);
+      relaxed = true;
+    }
+    if (!one.ok) return { ok: false, slotId: member.slotId, label: member.label, error: one.error };
+    if (relaxed) {
+      one.result.notes.push(
+        `${member.label}：符文不足以維持指定的速度差，這個角色沒有套用速度上限。`,
+      );
+    }
+    results.set(i, one.result);
+    prevSpeed = one.result.stats.spd;
   }
 
+  for (const i of looseIdx) {
+    const one = runOne(i, null, null);
+    if (!one.ok) return { ok: false, slotId: req.members[i].slotId, label: req.members[i].label, error: one.error };
+    results.set(i, one.result);
+  }
+
+  const out = req.members
+    .map((_, i) => results.get(i))
+    .filter((r): r is RtaDeckPlanResult => !!r);
   return { ok: true, members: out, nodes, truncated, ms: Date.now() - t0 };
 }
 

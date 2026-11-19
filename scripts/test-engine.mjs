@@ -2687,6 +2687,37 @@ check("RTA Deck：搜尋失敗時沿用目前 RTA 配裝（神器固定值計入
   );
 });
 
+check("RTA Deck：符文水準（eff）目標會挑效率最高的組合", () => {
+  const run = (objective) =>
+    optimize({
+      base: rtaDeckCaseBase,
+      runes: teamRuneList,
+      required: [],
+      min: {},
+      max: {},
+      bonus: teamBonus,
+      pool: 8,
+      allowEquipped: true,
+      rta: true,
+      maxNodes: 400_000,
+      topK: 6,
+      objective,
+    });
+  const bestEff = run("eff");
+  assert.ok(bestEff.topBuilds.length > 0, "應找到配裝");
+  for (let i = 1; i < bestEff.topBuilds.length; i++) {
+    assert.ok(
+      bestEff.topBuilds[i - 1].eff >= bestEff.topBuilds[i].eff,
+      "eff 目標應依符文效率由高到低排序",
+    );
+  }
+  const bestScore = run("score");
+  assert.ok(
+    bestEff.topBuilds[0].eff >= bestScore.topBuilds[0].eff,
+    "eff 目標的最佳效率不應低於面板評分目標",
+  );
+});
+
 /* ── 14. 儲存庫跨裝置合併 ─────────────────────── */
 console.log("\n[14] 儲存庫跨裝置合併");
 const libItem = (id, name, updatedAt) => ({ id, name, createdAt: 100, updatedAt });

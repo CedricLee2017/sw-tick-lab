@@ -37,7 +37,7 @@ export const TEAM_ROLE_LABELS: Record<TeamRole, string> = {
 };
 
 /** 預設目標：一速看速度、打手看期望傷害、坦克看 EHP、輔助看綜合，自由＝符文評分 */
-export function roleObjective(role: TeamRole): OptObjective {
+export function roleObjective(role: TeamRole): Exclude<OptObjective, "eff"> {
   switch (role) {
     case "speed":
     case "booster":

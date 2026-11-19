@@ -69,7 +69,7 @@ export function focusFitOf(stats: Stats, focus: FocusEntry[] | undefined): numbe
 }
 
 /** 隊伍配符使用的搜尋目標（必須可序列化，才能傳進 Worker） */
-export type OptObjective = "score" | "spd" | "atk" | "def" | "hp" | "dps" | "tank" | "support" | "skill";
+export type OptObjective = "score" | "eff" | "spd" | "atk" | "def" | "hp" | "dps" | "tank" | "support" | "skill";
 
 /** 以指定技能傷害作為搜尋目標（技能與傷害選項都是純資料，可傳進 Worker） */
 export interface SkillObjective {
@@ -569,6 +569,11 @@ export function optimize(req: OptRequest): OptResult {
     const pushUnique = (rune?: Rune) => {
       if (rune && !priority.some((x) => x.id === rune.id)) priority.push(rune);
     };
+    // 速度上限（速度順序的下一隻）：保留幾顆最慢的，否則候選池全是快符文，
+    // 會出現「上限 278 但每組都超過 278」的假失敗。
+    if (max.spd != null) {
+      [...scored].sort((a, b) => a.spd - b.spd).slice(0, 3).forEach((x) => pushUnique(x.r));
+    }
     if (speedTarget > 0) {
       const spdMains = scored
         .filter((x) => x.r.main.t === SPD_TYPE)
@@ -618,6 +623,8 @@ export function optimize(req: OptRequest): OptResult {
   for (const k of [...FLAT_KEYS, ...PCT_KEYS]) suf[k] = new Array(7).fill(0);
   const sufSet: Record<number, number[]> = {};
   for (const id of requiredIds) sufSet[id] = new Array(7).fill(0);
+  /** 剩餘位置的最大符文效率合（"eff" 目標的樂觀上界） */
+  const sufEff = new Array(7).fill(0);
 
   for (let d = 5; d >= 0; d--) {
     const mx: Record<string, number> = {};
@@ -626,6 +633,8 @@ export function optimize(req: OptRequest): OptResult {
     }
     for (const k of [...FLAT_KEYS, ...PCT_KEYS]) suf[k][d] = suf[k][d + 1] + (mx[k] ?? 0);
     for (const id of requiredIds) sufSet[id][d] = sufSet[id][d + 1] + (seq[d].list.some((c) => c.rune.set === id) ? 1 : 0);
+    const mxEff = seq[d].list.reduce((m, c) => Math.max(m, c.eff), 0);
+    sufEff[d] = sufEff[d + 1] + mxEff;
   }
 
   // 樂觀套裝加成（上界）
@@ -808,7 +817,7 @@ export function optimize(req: OptRequest): OptResult {
           idx: [...chosenIdx],
           stats,
           ehp,
-          objective: objectiveOf(battleStats, objective, skillObjective),
+          objective: objective === "eff" ? eff : objectiveOf(battleStats, objective, skillObjective),
           score,
           eff,
           fit,
@@ -836,12 +845,12 @@ export function optimize(req: OptRequest): OptResult {
       for (const [k, v] of maxEntries) if (lowStats[k] > v) return;
     }
     // topK 模式：樂觀上界仍達不到目前第 K 名（最差的一組）就直接剪掉
-    if (
-      topLimit > 0 &&
-      top.length >= topLimit &&
-      objectiveOf(optStats, objective) < top[top.length - 1].objective
-    ) {
-      return;
+    if (topLimit > 0 && top.length >= topLimit) {
+      const bound =
+        objective === "eff"
+          ? (accEff + sufEff[depth]) / 6
+          : objectiveOf(optStats, objective, skillObjective);
+      if (bound < top[top.length - 1].objective) return;
     }
     // 一般模式保留所有可行組合，不做分數上界剪枝。
 

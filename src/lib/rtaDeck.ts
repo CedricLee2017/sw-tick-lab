@@ -56,6 +56,18 @@ export interface RtaDeckResult {
   notes: string[];
 }
 
+/** RTA Deck 的配裝目標：速度是限制條件，預設用「符文水準」把效率最大化 */
+export type RtaDeckObjective = "eff" | "score" | "spd" | "support" | "dps" | "tank";
+
+export const RTA_DECK_OBJECTIVES: { value: RtaDeckObjective; label: string; hint: string }[] = [
+  { value: "eff", label: "符文水準", hint: "在速度順序與下限內，挑符文效率（水準）最高的組合" },
+  { value: "score", label: "面板評分", hint: "綜合面板評分（速度權重較高）" },
+  { value: "spd", label: "速度優先", hint: "盡量配快，再用速度差限制後面的角色" },
+  { value: "support", label: "綜合", hint: "體力、防禦、速度、命中等綜合表現" },
+  { value: "dps", label: "傷害", hint: "攻擊、暴擊與暴傷的期望傷害" },
+  { value: "tank", label: "坦度", hint: "體力與防禦的 EHP" },
+];
+
 export interface RtaDeckState {
   version: number;
   /** 常用魔靈池（unit id，最多 80） */
@@ -70,6 +82,8 @@ export interface RtaDeckState {
   leaderPct: number;
   /** 速度差模式：至少差 N 速 / 剛好差 N 速 */
   gapMode: "at-least" | "exact";
+  /** 配裝目標；預設符文評分（速度只當限制條件） */
+  objective: RtaDeckObjective;
   /** 最近一次的配符結果（依 slot id） */
   results: Record<string, RtaDeckResult>;
   updatedAt: number;
@@ -113,6 +127,7 @@ export function createEmptyDeck(): RtaDeckState {
     leaderOn: false,
     leaderPct: 24,
     gapMode: "at-least",
+    objective: "eff",
     results: {},
     updatedAt: Date.now(),
   };
@@ -262,6 +277,9 @@ export function loadRtaDeck(storageKey: string): RtaDeckState {
       leaderOn: raw.leaderOn === true,
       leaderPct: int(raw.leaderPct, 0, 50, 24),
       gapMode: raw.gapMode === "exact" ? "exact" : "at-least",
+      objective: RTA_DECK_OBJECTIVES.some((o) => o.value === raw.objective)
+        ? (raw.objective as RtaDeckObjective)
+        : "eff",
       results,
       updatedAt: Number(raw.updatedAt) || Date.now(),
     };

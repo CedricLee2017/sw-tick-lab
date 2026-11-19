@@ -16,7 +16,7 @@ export interface TeamMemberTemplate {
   /** 目標 Tick；0 = 不限 */
   tick: number;
   focus: FocusEntry[];
-  objective?: OptObjective;
+  objective?: Exclude<OptObjective, "eff">;
   /** 攻擊順序；1 = 最先，省略時為 1 */
   order?: number;
   /** 預設會收到的提條 % */
