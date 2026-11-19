@@ -32,6 +32,8 @@ export interface RtaDeckPlanMember {
   weight: number;
   /** 與前一隻的速度差（第一隻忽略） */
   gap: number;
+  /** 這隻魔靈實際套用的速度隊長技 %（省略時用 request.leaderPct） */
+  leaderPct?: number;
   /** 是否參與速度串接；false = 不受前一隻速度差限制 */
   speedChain: boolean;
   objective?: OptObjective;
@@ -165,7 +167,7 @@ export function planRtaDeck(
       if (!rune || !allowed.includes(rune.main.t)) return null;
     }
 
-    const bonus = { ...req.bonus, leadSpd: req.leaderPct, useGuild: false, grind: true };
+    const bonus = { ...req.bonus, leadSpd: member.leaderPct ?? req.leaderPct, useGuild: false, grind: true };
     const artifacts = member.seedArtifacts ?? [];
     const battle = statsForRunes(member.base, list, bonus, true, true, artifacts);
     for (const [k, v] of Object.entries(min) as [StatKey, number][]) if (battle[k] < v) return null;
@@ -227,7 +229,7 @@ export function planRtaDeck(
         required: step.noSets ? [] : member.sets,
         min,
         max,
-        bonus: { ...req.bonus, leadSpd: req.leaderPct, useGuild: false, grind: true },
+        bonus: { ...req.bonus, leadSpd: member.leaderPct ?? req.leaderPct, useGuild: false, grind: true },
         pool: req.pool,
         allowEquipped: true,
         targetUnit: member.unitId,
