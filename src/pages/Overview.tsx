@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { Activity, ArrowUpRight, Gauge, Gem, Sparkles, Star, Users } from "lucide-react";
 import { unitLabel, useStore } from "../store";
-import { useSummary } from "../lib/accountStats";
+import { useSummary, type TopEffKey } from "../lib/accountStats";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
-import { MonsterIcon, TickBadge, fmt, setColor } from "../components/ui";
+import { MonsterIcon, TickBadge, fmt, setColor, statText } from "../components/ui";
 import { speedForTick } from "../lib/stats";
 import { EmptyState } from "../components/ui";
 
@@ -11,6 +12,7 @@ export default function OverviewPage() {
   const runeMap = useStore((s) => s.runeMap);
   const summary = useSummary();
   const rta = useStore((s) => s.settings.rta);
+  const [effTab, setEffTab] = useState<TopEffKey>("all");
 
   if (!account || !summary) {
     return <EmptyState icon={<Activity size={40} />} title="尚未匯入存檔" desc="回到匯入頁上傳 JSON 後即可看到分析。" />;
@@ -24,6 +26,13 @@ export default function OverviewPage() {
     .map(([id, c]) => ({ id: Number(id), c }))
     .sort((a, b) => b.c - a.c)
     .slice(0, 8);
+  const effTabs: { key: TopEffKey; label: string }[] = [
+    { key: "all", label: "全部" },
+    { key: "violent", label: "暴走" },
+    { key: "will", label: "意志" },
+    { key: "swift", label: "迅速" },
+  ];
+  const effRows = summary.topEff[effTab];
 
   return (
     <>
@@ -43,6 +52,77 @@ export default function OverviewPage() {
           v={fastest ? `${fastest.stats.panelSpd ?? fastest.stats.spd}` : "—"}
           sub={fastest ? `${unitLabel(fastest.unit)} · Tick ${fastest.stats.tick}` : ""}
         />
+      </div>
+
+      <div className="grid g2" style={{ marginTop: 16 }}>
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">高速符文數量</div>
+              <div className="card-sub">速度＝速度副屬性（含精煉）＋速度固有屬性；達到門檻即計入</div>
+            </div>
+            <a className="tiny" href="#/runes">符文倉庫 <ArrowUpRight size={11} /></a>
+          </div>
+          <div className="card-pad" style={{ paddingTop: 4 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>速度門檻</th>
+                  <th className="num">全部</th>
+                  {[13, 15, 3].map((id) => (
+                    <th key={id} className="num">
+                      <span className="row" style={{ gap: 5, justifyContent: "flex-end" }}>
+                        <span className="rune-dot" style={{ background: setColor(id) }} />
+                        {SET_BY_ID[id]?.name}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {summary.speedCounts.map((row) => (
+                  <tr key={row.threshold}>
+                    <td className="mono gold" style={{ fontWeight: 700 }}>≥ {row.threshold}</td>
+                    <td className="num mono" style={{ fontWeight: 700 }}>{fmt(row.all)}</td>
+                    {[13, 15, 3].map((id) => (
+                      <td key={id} className="num mono">{fmt(row.sets[id] ?? 0)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">6★ 滿等魔靈</div>
+              <div className="card-sub">所有 6 星 Lv40 魔靈，重複的也會各自列出</div>
+            </div>
+            <span className="chip gold">{fmt(summary.maxLevel6.length)} 隻</span>
+          </div>
+          <div className="card-pad scroll-y" style={{ maxHeight: 258 }}>
+            {summary.maxLevel6.length === 0 ? (
+              <div className="dim tiny">沒有資料</div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {summary.maxLevel6.map((v) => (
+                  <span
+                    key={v.unit.id}
+                    className="chip muted"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, paddingLeft: 4 }}
+                    title={`${unitLabel(v.unit)} · ${ELEMENTS[v.monster.el as 1].name} · 魔靈 ID ${v.unit.id}`}
+                  >
+                    <MonsterIcon id={v.monster.id} size={20} />
+                    {unitLabel(v.unit)}
+                    <span className={`tiny el-${v.monster.el}`}>{ELEMENTS[v.monster.el as 1].name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="grid g2" style={{ marginTop: 16 }}>
@@ -141,6 +221,64 @@ export default function OverviewPage() {
               })}
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">最高效率符文 Top 100</div>
+            <div className="card-sub">只計 6★ 符文；效率含精煉，分子與分母都不計固定體力 / 攻擊 / 防禦</div>
+          </div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            {effTabs.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className={`chip ${effTab === t.key ? "gold" : "muted"}`}
+                onClick={() => setEffTab(t.key)}
+                style={{ cursor: "pointer" }}
+              >
+                {t.key !== "all" && <span className="rune-dot" style={{ background: setColor(t.key === "violent" ? 13 : t.key === "will" ? 15 : 3), display: "inline-block", marginRight: 5 }} />}
+                {t.label} {summary.topEff[t.key].length}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="scroll-y" style={{ maxHeight: 480 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th className="num" style={{ width: 52 }}>#</th>
+                <th>套裝</th>
+                <th className="num">位置</th>
+                <th>主屬性</th>
+                <th className="num">速度</th>
+                <th className="num">效率</th>
+              </tr>
+            </thead>
+            <tbody>
+              {effRows.map((e, i) => (
+                <tr key={e.rune.id}>
+                  <td className="num mono dim">{i + 1}</td>
+                  <td>
+                    <span className="row" style={{ gap: 6 }}>
+                      <span className="rune-dot" style={{ background: setColor(e.rune.set) }} />
+                      {SET_BY_ID[e.rune.set]?.name ?? `套裝 ${e.rune.set}`}
+                      <span className="tiny dim">{e.rune.grade}★ +{e.rune.level}</span>
+                    </span>
+                  </td>
+                  <td className="num mono">{e.rune.slot}</td>
+                  <td className="tiny mono">{statText(e.rune.main.t, e.rune.main.v)}</td>
+                  <td className="num mono gold" style={{ fontWeight: 700 }}>{e.spd}</td>
+                  <td className="num mono" style={{ fontWeight: 700 }}>{e.eff.toFixed(1)}%</td>
+                </tr>
+              ))}
+              {effRows.length === 0 && (
+                <tr><td colSpan={6} className="dim tiny" style={{ textAlign: "center", padding: 20 }}>沒有符合條件的 6★ 符文</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 

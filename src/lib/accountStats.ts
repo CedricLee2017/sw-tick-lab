@@ -1,7 +1,38 @@
 import { useMemo } from "react";
 import { MONSTER_MAP, useStore } from "../store";
-import { baseStats, statsForRunes } from "./stats";
+import { baseStats, runeEfficiency, statsForRunes } from "./stats";
 import type { Account, Artifact, BonusConfig, Monster, Rune, Stats, Unit } from "./types";
+
+/** 總覽「高速符文」的速度門檻 */
+export const SPEED_THRESHOLDS = [30, 28, 27] as const;
+
+/** 總覽「最高效率符文」只看 6 星，且效率不計固定體力 / 攻擊 / 防禦 */
+export const TOP_EFF_LIMIT = 100;
+export const TOP_EFF_SET_IDS = { violent: 13, will: 15, swift: 3 } as const;
+export type TopEffKey = "all" | keyof typeof TOP_EFF_SET_IDS;
+
+export interface RuneEffEntry {
+  rune: Rune;
+  /** 效率：含精煉，分子與分母都不計固定體力 / 攻擊 / 防禦 */
+  eff: number;
+  /** 符文速度：速度副屬性（含精煉）＋ 速度固有屬性 */
+  spd: number;
+}
+
+export interface SpeedThresholdCount {
+  threshold: number;
+  all: number;
+  /** 暴走 / 意志 / 迅速各自的數量 */
+  sets: Record<number, number>;
+}
+
+/** 符文速度：速度副屬性（含精煉）＋ 速度固有屬性 */
+export function runeSpeed(rune: Rune): number {
+  let spd = 0;
+  for (const s of rune.subs) if (s.t === 8) spd += s.v + (s.g ?? 0);
+  if (rune.prefix?.t === 8) spd += rune.prefix.v;
+  return spd;
+}
 
 export interface UnitView {
   unit: Unit;
@@ -35,6 +66,12 @@ export interface AccountSummary {
   sets: Record<number, number>;
   grades: Record<number, number>;
   slots: Record<number, number>;
+  /** 速度達門檻的符文數量（全部與暴走 / 意志 / 迅速） */
+  speedCounts: SpeedThresholdCount[];
+  /** 6 星符文效率 Top 100（全部與暴走 / 意志 / 迅速） */
+  topEff: Record<TopEffKey, RuneEffEntry[]>;
+  /** 所有 6 星滿等魔靈（重複也保留） */
+  maxLevel6: UnitView[];
 }
 
 export function summarize(account: Account, bonus: BonusConfig, rta = false): AccountSummary {
@@ -70,6 +107,35 @@ export function summarize(account: Account, bonus: BonusConfig, rta = false): Ac
 
   const avgEff = account.runes.length ? account.runes.reduce((s, r) => s + r.eff, 0) / account.runes.length : 0;
 
+  // 高速符文：速度副屬性（含精煉）＋ 速度固有屬性
+  const speedCounts: SpeedThresholdCount[] = SPEED_THRESHOLDS.map((threshold) => {
+    const sets: Record<number, number> = { [TOP_EFF_SET_IDS.violent]: 0, [TOP_EFF_SET_IDS.will]: 0, [TOP_EFF_SET_IDS.swift]: 0 };
+    let all = 0;
+    for (const r of account.runes) {
+      if (runeSpeed(r) < threshold) continue;
+      all += 1;
+      if (sets[r.set] != null) sets[r.set] += 1;
+    }
+    return { threshold, all, sets };
+  });
+
+  // 6 星符文效率排行（不計固定體力 / 攻擊 / 防禦）
+  const effPool: RuneEffEntry[] = account.runes
+    .filter((r) => r.grade === 6)
+    .map((r) => ({ rune: r, eff: runeEfficiency(r, true, { ignoreFlatAll: true }).current, spd: runeSpeed(r) }));
+  const effSorted = [...effPool].sort((a, b) => b.eff - a.eff || b.rune.id - a.rune.id);
+  const topEff = {
+    all: effSorted.slice(0, TOP_EFF_LIMIT),
+    violent: effSorted.filter((e) => e.rune.set === TOP_EFF_SET_IDS.violent).slice(0, TOP_EFF_LIMIT),
+    will: effSorted.filter((e) => e.rune.set === TOP_EFF_SET_IDS.will).slice(0, TOP_EFF_LIMIT),
+    swift: effSorted.filter((e) => e.rune.set === TOP_EFF_SET_IDS.swift).slice(0, TOP_EFF_LIMIT),
+  } as Record<TopEffKey, RuneEffEntry[]>;
+
+  // 6 星滿等（Lv40）；重複的魔靈各自保留
+  const maxLevel6 = views
+    .filter((v) => v.unit.stars === 6 && v.unit.level >= 40)
+    .sort((a, b) => a.unit.master - b.unit.master || a.unit.id - b.unit.id);
+
   return {
     views,
     runeOwner,
@@ -82,6 +148,9 @@ export function summarize(account: Account, bonus: BonusConfig, rta = false): Ac
     sets,
     grades,
     slots,
+    speedCounts,
+    topEff,
+    maxLevel6,
   };
 }
 
