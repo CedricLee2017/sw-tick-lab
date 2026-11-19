@@ -12,6 +12,8 @@ export * from "../src/lib/teamSpeed";
 export * from "../src/lib/teamOptimizer";
 export * from "../src/lib/teamTemplates";
 export * from "../src/lib/teamRoles";
+export * from "../src/lib/rtaDeck";
+export * from "../src/lib/rtaDeckPlan";
 export {
   GRIND_PROFILES,
   GRIND_ACCEPT_LEVELS,

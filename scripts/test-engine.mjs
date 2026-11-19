@@ -51,6 +51,7 @@ const {
   computeFollowPlan, mirrorTimeline, followSpeedAgainstOpponent, opponentAttackBar,
   panelSpeed, panelExtraFor, battleSpeedForPanelExtra, leadBonus, speedBuffPct, tickWithBoost, tickForSpeed, tickAfterBoost, orderSafeFloorSpeeds, followFloor,
   optimizeTeam, runeSupply, teamSetsOf, scoreTeam, TEAM_ROLE_LABELS,
+  planRtaDeck,
   TEAM_TEMPLATES, templateMembers, teamTemplateOf, roleObjective, objectiveOf,
   autoAssignRoles, roleSetup, hasAtbBoost,
   deckSetupFromRunes, normalizeRequiredSets, mergeLibrary,
@@ -2517,6 +2518,133 @@ check("teamSetsOf / scoreTeam 與候選配裝一致", () => {
   assert.equal(score, 500, "scoreTeam = 權重 × 角色目標值");
 });
 
+/* ── 13b. RTA Deck（主屬性雙選 / 速度差） ─────── */
+console.log("\n[13b] RTA Deck 配符（主屬性雙選、速度差）");
+
+const rtaDeckCaseBase = { hp: 12000, atk: 700, def: 600, spd: 100, cr: 15, cd: 50, res: 15, acc: 0 };
+const rtaDeckCaseMember = (unitId, over = {}) => ({
+  slotId: `rs_${unitId}`,
+  unitId,
+  master: 1000 + unitId,
+  label: `RTA 測試 ${unitId}`,
+  base: rtaDeckCaseBase,
+  role: "speed",
+  sets: [{ set: 3, count: 4 }, { set: 15, count: 2 }],
+  mains: {},
+  min: {},
+  weight: 10,
+  gap: 1,
+  speedChain: true,
+  ...over,
+});
+
+check("2/4/6 主屬性最多 2 個：mainAlternatives 會同時接受兩個主屬性", () => {
+  // 複製一顆 2 號速度符文，改成體力% 主屬性，證明兩種都能進入候選
+  const baseRune = teamRuneList.find((r) => r.slot === 2);
+  const hpRune = {
+    ...baseRune,
+    id: 9_999_001,
+    main: { t: 2, v: 63 },
+  };
+  const runes = [...teamRuneList, hpRune];
+  const res = optimize({
+    base: rtaDeckCaseBase,
+    runes,
+    required: [{ set: 3, count: 4 }, { set: 15, count: 2 }],
+    min: {},
+    max: {},
+    bonus: teamBonus,
+    pool: 8,
+    allowEquipped: true,
+    rta: true,
+    maxNodes: 400_000,
+    mainAlternatives: { 2: [8, 2] },
+    topK: 20,
+    objective: "spd",
+  });
+  assert.ok(res.topBuilds.length > 0, "應找到配裝");
+  const byId = new Map(runes.map((r) => [r.id, r]));
+  for (const build of res.topBuilds) {
+    const slot2 = build.runeIds.map((id) => byId.get(id)).find((r) => r?.slot === 2);
+    assert.ok(slot2, "每組都要有 2 號符文");
+    assert.ok([8, 2].includes(slot2.main.t), `2 號主屬性 ${slot2.main.t} 不在允許清單`);
+  }
+
+  const onlyHp = optimize({
+    base: rtaDeckCaseBase,
+    runes,
+    required: [{ set: 3, count: 4 }, { set: 15, count: 2 }],
+    min: {},
+    max: {},
+    bonus: teamBonus,
+    pool: 8,
+    allowEquipped: true,
+    rta: true,
+    maxNodes: 400_000,
+    mainAlternatives: { 2: [2] },
+    topK: 10,
+    objective: "spd",
+  });
+  assert.ok(onlyHp.topBuilds.length > 0, "指定單一主屬性時仍應找到配裝");
+  for (const build of onlyHp.topBuilds) {
+    const slot2 = build.runeIds.map((id) => byId.get(id)).find((r) => r?.slot === 2);
+    assert.equal(slot2.main.t, 2, "指定體力% 時 2 號主屬性必須是體力%");
+  }
+});
+
+check("RTA Deck：速度順序會套用速度差，且符文不重複", () => {
+  const out = planRtaDeck({
+    members: [
+      rtaDeckCaseMember(900, { gap: 0 }),
+      rtaDeckCaseMember(901, { gap: 1 }),
+      rtaDeckCaseMember(902, { gap: 1 }),
+    ],
+    runes: teamRuneList,
+    bonus: teamBonus,
+    leaderPct: 0,
+    gapMode: "at-least",
+    pool: 7,
+    topK: 20,
+    maxNodes: 400_000,
+    excludeRunes: [],
+    lockedRunes: [],
+  });
+  assert.equal(out.ok, true, out.ok ? "" : out.error);
+  const members = out.members;
+  assert.equal(members.length, 3);
+  for (let i = 1; i < members.length; i++) {
+    const diff = members[i - 1].stats.spd - members[i].stats.spd;
+    assert.ok(diff >= 1, `第 ${i + 1} 隻要比前一隻慢至少 1 速（實際差 ${diff}）`);
+  }
+  const ids = members.flatMap((m) => m.runeIds);
+  assert.equal(new Set(ids).size, ids.length, "30 隻共用符文庫時不可重複使用");
+  for (const m of members) assert.equal(new Set(m.runeIds).size, 6, "每隻 6 顆符文");
+});
+
+check("RTA Deck：速度隊長會提高配出來的速度", () => {
+  const make = (leaderPct) =>
+    planRtaDeck({
+      members: [rtaDeckCaseMember(900)],
+      runes: teamRuneList,
+      bonus: teamBonus,
+      leaderPct,
+      gapMode: "at-least",
+      pool: 7,
+      topK: 10,
+      maxNodes: 400_000,
+      excludeRunes: [],
+      lockedRunes: [],
+    });
+  const noLead = make(0);
+  const withLead = make(30);
+  assert.equal(noLead.ok, true, noLead.ok ? "" : noLead.error);
+  assert.equal(withLead.ok, true, withLead.ok ? "" : withLead.error);
+  assert.ok(
+    withLead.members[0].stats.spd > noLead.members[0].stats.spd,
+    "速度隊長 +30% 應提高戰鬥速度",
+  );
+});
+
 /* ── 14. 儲存庫跨裝置合併 ─────────────────────── */
 console.log("\n[14] 儲存庫跨裝置合併");
 const libItem = (id, name, updatedAt) => ({ id, name, createdAt: 100, updatedAt });
@@ -3537,3 +3665,5 @@ check("主屬篩選選項涵蓋所有可能的主屬性", () => {
 });
 
 console.log(`\n✅ 全部 ${passed} 項測試通過（配符耗時 ${elapsed} ms）\n`);
+
+

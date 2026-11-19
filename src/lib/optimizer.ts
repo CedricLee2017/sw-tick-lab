@@ -142,6 +142,12 @@ export interface OptRequest {
   maxNodes?: number;
   /** 指定每個位置的主屬性 type id（2/4/6），0 或未設定代表不限 */
   mainFilters?: Partial<Record<number, number>>;
+  /**
+   * 指定每個位置「可接受的主屬性」清單（2/4/6）。
+   * 例如 { 2: [8, 2] } 代表 2 號可以是速度或體力%；空陣列視為不限。
+   * 與 mainFilters 同時設定時，mainAlternatives 優先。
+   */
+  mainAlternatives?: Partial<Record<number, number[]>>;
   /** 允許破套：副套裝（2 件）只作優先，不強制剛好 2 件 */
   relaxSub?: boolean;
   /** 允許使用 1 顆無形符文補足缺少的 1 件套裝 */
@@ -431,6 +437,7 @@ export function optimize(req: OptRequest): OptResult {
     rta = false,
     maxNodes = 3_500_000,
     mainFilters = {},
+    mainAlternatives = {},
     relaxSub = false,
     intangible = false,
     focus = [],
@@ -522,8 +529,14 @@ export function optimize(req: OptRequest): OptResult {
     const fixed = includeBySlot.get(slot);
     let list = fixed ? [fixed] : req.runes.filter((r) => r.slot === slot);
     const mainT = mainFilters[slot] ?? 0;
+    const mainAlts = (mainAlternatives[slot] ?? []).filter((t) => t > 0);
     if (!fixed) {
-      if (mainT) list = list.filter((r) => r.main.t === mainT);
+      if (mainAlts.length > 0) {
+        const allowed = new Set(mainAlts);
+        list = list.filter((r) => allowed.has(r.main.t));
+      } else if (mainT) {
+        list = list.filter((r) => r.main.t === mainT);
+      }
       list = list.filter(usable);
       if (!allowEquipped) list = list.filter((r) => r.occupied === 0 || r.occupied === targetUnit);
       if (strictSets) list = list.filter((r) => requiredIds.has(r.set) || (intangible && r.set === INTANGIBLE_ID));

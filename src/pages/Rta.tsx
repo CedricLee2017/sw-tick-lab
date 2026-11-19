@@ -19,6 +19,7 @@ import {
 } from "../lib/lucksack";
 import type { Monster } from "../lib/types";
 import { ArtifactCard, Modal, MonsterIcon, MonsterPanel, NumberInput, RuneBoard, RuneCard, TickBadge, fmt } from "../components/ui";
+import { RtaDeckPanel } from "../components/RtaDeck";
 
 type RtaRow = RtaView & { monster: Monster };
 type LuckFilter = "all" | "issue" | "set" | "main" | "art" | "none";
@@ -165,6 +166,8 @@ export default function RtaPage() {
   const [el, setEl] = useState(0);
   const [onlyRta, setOnlyRta] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
+  /** 頁面分頁：RTA 最愛排行 / RTA Deck 配裝 */
+  const [tab, setTab] = useState<"favorites" | "deck">("favorites");
 
   const favorites = account?.rta?.favorites ?? [];
   const views = useMemo(() => {
@@ -296,18 +299,43 @@ export default function RtaPage() {
   const current = open !== null ? views.find((v) => v.unit.id === open) : undefined;
   const currentCheck = current ? checks.get(current.unit.id) ?? null : null;
 
+  const rtaTabs = (
+    <div className="tabs rta-page-tabs" style={{ marginBottom: 14 }}>
+      <button type="button" className={`tab ${tab === "favorites" ? "active" : ""}`} onClick={() => setTab("favorites")}>
+        <Trophy size={13} /> RTA 最愛與排行
+      </button>
+      <button type="button" className={`tab ${tab === "deck" ? "active" : ""}`} onClick={() => setTab("deck")}>
+        <Swords size={13} /> RTA Deck（30 隻配裝）
+      </button>
+    </div>
+  );
+
   if (!account) return <div className="empty"><Swords size={40} /><div>尚未匯入存檔</div></div>;
+
+  if (tab === "deck") {
+    return (
+      <>
+        {rtaTabs}
+        <RtaDeckPanel favorites={account.rta?.favorites ?? []} />
+      </>
+    );
+  }
 
   if (!account.rta || account.rta.favorites.length === 0) {
     return (
-      <div className="empty" style={{ padding: "60px 20px" }}>
-        <Trophy size={42} style={{ opacity: .35, marginBottom: 10 }} />
-        <div style={{ fontWeight: 600, color: "var(--text)" }}>這份存檔沒有 RTA 最愛資料</div>
-        <div className="tiny" style={{ marginTop: 6 }}>
-          請確認匯出的 JSON 包含 <span className="mono">favorite_unit_list</span> 與{" "}
-          <span className="mono">world_arena_rune_equip_list</span>；若為舊版快取，重新匯入即可。
+      <>
+        {rtaTabs}
+        <div className="empty" style={{ padding: "60px 20px" }}>
+          <Trophy size={42} style={{ opacity: .35, marginBottom: 10 }} />
+          <div style={{ fontWeight: 600, color: "var(--text)" }}>這份存檔沒有 RTA 最愛資料</div>
+          <div className="tiny" style={{ marginTop: 6 }}>
+            請確認匯出的 JSON 包含 <span className="mono">favorite_unit_list</span> 與{" "}
+            <span className="mono">world_arena_rune_equip_list</span>；若為舊版快取，重新匯入即可。
+            <br />
+            也可以直接切到「RTA Deck」手動挑選常用魔靈。
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -317,6 +345,7 @@ export default function RtaPage() {
 
   return (
     <>
+      {rtaTabs}
       <div className="grid g4" style={{ marginBottom: 14 }}>
         <div className="stat-tile">
           <div className="k">最愛魔靈</div>

@@ -1,0 +1,1134 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronUp,
+  GripVertical,
+  Plus,
+  RefreshCw,
+  Search,
+  Swords,
+  Timer,
+  Trash2,
+  Wand2,
+  X,
+} from "lucide-react";
+import { accountGameKey, MONSTER_MAP, unitLabel, useStore } from "../store";
+import { ELEMENTS, RUNE_SETS, SET_BY_ID, STAT_KEYS, STAT_META, type StatKey } from "../lib/constants";
+import { rtaStats, rtaView } from "../lib/rta";
+import {
+  RTA_DECK_STORAGE_PREFIX,
+  RTA_MAIN_OPTIONS,
+  RTA_POOL_MAX,
+  RTA_SLOTS_MAX,
+  applyRoleDefaults,
+  createDeckSlot,
+  createEmptyDeck,
+  deckSlotMains,
+  deckSlotSets,
+  loadRtaDeck,
+  orderedSlots,
+  removeSlotFromDeck,
+  saveRtaDeck,
+  type RtaDeckResult,
+  type RtaDeckSlot,
+  type RtaDeckState,
+} from "../lib/rtaDeck";
+import {
+  planRtaDeck,
+  speedGapIssues,
+  type RtaDeckPlanMember,
+  type RtaDeckPlanOutcome,
+  type RtaDeckPlanProgress,
+  type RtaDeckPlanRequest,
+} from "../lib/rtaDeckPlan";
+import { TEAM_ROLE_LABELS, roleObjective, type TeamRole } from "../lib/teamOptimizer";
+import { baseStats, effectiveSetCounts, setSummary } from "../lib/stats";
+import type { Account, Artifact, Rune, Unit } from "../lib/types";
+import { MonsterPickerModal, sortMonsterEntries, type MonsterEntry } from "./MonsterPicker";
+import {
+  ArtifactCard,
+  Modal,
+  MonsterIcon,
+  MonsterPanel,
+  NumberInput,
+  RuneBoard,
+  RuneCard,
+  TickBadge,
+  fmt,
+} from "./ui";
+
+const FOUR_SETS = RUNE_SETS.filter((s) => s.pieces === 4);
+const TWO_SETS = RUNE_SETS.filter((s) => s.pieces === 2 && s.id !== 25 && s.id !== 99);
+const ROLE_OPTIONS: TeamRole[] = ["speed", "booster", "dps", "tank", "support", "free"];
+const MIN_LABEL: Record<StatKey, string> = {
+  hp: "體力",
+  atk: "攻擊",
+  def: "防禦",
+  spd: "速度",
+  cr: "暴率",
+  cd: "暴傷",
+  res: "抵抗",
+  acc: "命中",
+};
+
+const BUDGETS = {
+  fast: { label: "快速", pool: 8, topK: 3, nodes: 600_000 },
+  standard: { label: "標準", pool: 10, topK: 5, nodes: 1_500_000 },
+  full: { label: "完整", pool: 12, topK: 8, nodes: 3_000_000 },
+} as const;
+type BudgetKey = keyof typeof BUDGETS;
+
+const setsOf = (runes: Rune[]) => {
+  const counts: Record<number, number> = {};
+  for (const r of runes) counts[r.set] = (counts[r.set] ?? 0) + 1;
+  return effectiveSetCounts(counts);
+};
+
+const setLabel = (id: number) => SET_BY_ID[id]?.name ?? `套裝${id}`;
+
+/** 2 / 4 / 6 主屬性清單（只保留實際會用到的選項，避免下拉太長） */
+const mainOptionsOf = (n: 2 | 4 | 6) => RTA_MAIN_OPTIONS[n];
+
+/** 依速度順序取出實際要配符的格子（速度串接的排前面） */
+function planSlots(deck: RtaDeckState): RtaDeckSlot[] {
+  return orderedSlots(deck).filter((s) => s.unitId != null);
+}
+
+/** 依速度順序的顯示用資料 */
+function speedRows(deck: RtaDeckState) {
+  return orderedSlots(deck).filter((s) => s.unitId != null && s.inOrder);
+}
+
+interface RtaDeckProps {
+  /** 從 RTA 最愛帶入常用魔靈池 */
+  favorites: number[];
+}
+
+export function RtaDeckPanel({ favorites }: RtaDeckProps) {
+  const account = useStore((s) => s.account);
+  const settings = useStore((s) => s.settings);
+  const grind = settings.bonus.grind;
+  const lockedSet = useMemo(() => new Set(settings.lockedRunes), [settings.lockedRunes]);
+  const excludedSet = useMemo(() => new Set(settings.excludedRunes), [settings.excludedRunes]);
+  const toggleRuneFlag = useStore((s) => s.toggleRuneFlag);
+  const notify = useStore((s) => s.notify);
+
+  const storageKey = useMemo(() => {
+    const key = accountGameKey(account);
+    return key ? `${RTA_DECK_STORAGE_PREFIX}${key}` : "";
+  }, [account]);
+
+  const [deck, setDeck] = useState<RtaDeckState>(() => createEmptyDeck());
+  const loadedKey = useRef("");
+  const skipSave = useRef(true);
+
+  // 帳號切換時重新載入；同一個存檔的資料才不會混在一起
+  useEffect(() => {
+    if (!storageKey) {
+      loadedKey.current = "";
+      setDeck(createEmptyDeck());
+      skipSave.current = true;
+      return;
+    }
+    loadedKey.current = storageKey;
+    setDeck(loadRtaDeck(storageKey));
+    skipSave.current = true;
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (skipSave.current) {
+      skipSave.current = false;
+      return;
+    }
+    if (loadedKey.current) saveRtaDeck(loadedKey.current, deck);
+  }, [deck]);
+
+  const update = (fn: (prev: RtaDeckState) => RtaDeckState) => {
+    setDeck((prev) => ({ ...fn(prev), updatedAt: Date.now() }));
+  };
+
+  const unitMap = useMemo(() => new Map((account?.units ?? []).map((u) => [u.id, u])), [account]);
+  const runeMap = useMemo(() => new Map((account?.runes ?? []).map((r) => [r.id, r])), [account]);
+  const artifactMap = useMemo(() => new Map((account?.artifacts ?? []).map((a) => [a.id, a])), [account]);
+
+  const unitOf = (id: number | null | undefined): Unit | undefined => (id == null ? undefined : unitMap.get(id));
+  const monsterOfUnit = (unit: Unit | undefined) => (unit ? MONSTER_MAP.get(unit.master) : undefined);
+  const labelOf = (unit: Unit | undefined) => (unit ? unitLabel(unit) : "未選擇");
+
+  /** RTA 目前配裝（點開魔靈看符文 / 神器） */
+  const [detailUnitId, setDetailUnitId] = useState<number | null>(null);
+  const detail = useMemo(() => {
+    if (!account || detailUnitId == null) return null;
+    const unit = unitMap.get(detailUnitId);
+    const monster = monsterOfUnit(unit);
+    if (!unit || !monster) return null;
+    const pct = deck.leaderOn ? Math.max(0, Math.min(50, deck.leaderPct)) : 0;
+    return { view: rtaView(account, unit, monster, pct, grind), monster, unit };
+  }, [account, detailUnitId, unitMap, deck.leaderOn, deck.leaderPct, grind]);
+
+  /** 魔靈挑選器 */
+  const [poolPicker, setPoolPicker] = useState(false);
+  const [pickerSlotId, setPickerSlotId] = useState<string | null>(null);
+  const [openSlots, setOpenSlots] = useState<Set<string>>(() => new Set());
+  const [resultSlotId, setResultSlotId] = useState<string | null>(null);
+  const [budgetKey, setBudgetKey] = useState<BudgetKey>("standard");
+  const budget = BUDGETS[budgetKey];
+
+  const allEntries = useMemo<MonsterEntry[]>(() => {
+    if (!account) return [];
+    return sortMonsterEntries(
+      account.units
+        .map((u) => ({ unit: u, monster: MONSTER_MAP.get(u.master) }))
+        .filter((x): x is { unit: Unit; monster: NonNullable<ReturnType<typeof MONSTER_MAP.get>> } => !!x.monster)
+        .map(({ unit, monster }) => ({
+          key: String(unit.id),
+          monster,
+          meta: `${unit.stars}★ Lv.${unit.level} · ${unitLabel(unit)}`,
+          title: `${monster.name} · ${ELEMENTS[monster.el as 1]?.name ?? ""} · ${unit.stars}★ Lv.${unit.level}`,
+          disabled: deck.pool.includes(unit.id),
+        })),
+    );
+  }, [account, deck.pool]);
+
+  const poolEntries = useMemo<MonsterEntry[]>(() => {
+    const entries: MonsterEntry[] = [];
+    for (const id of deck.pool) {
+      const unit = unitMap.get(id);
+      const monster = monsterOfUnit(unit);
+      if (!unit || !monster) continue;
+      entries.push({
+        key: String(unit.id),
+        monster,
+        meta: `${unit.stars}★ Lv.${unit.level} · ${unitLabel(unit)}`,
+        title: `${unitLabel(unit)} · ${monster.name} · 基礎速度 ${monster.spd}`,
+        disabled: deck.slots.some((s) => s.unitId === unit.id),
+      });
+    }
+    return entries;
+  }, [deck.pool, deck.slots, unitMap]);
+
+  const toggleSlotOpen = (id: string) =>
+    setOpenSlots((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const addPoolUnit = (unitId: number) => {
+    if (!unitMap.has(unitId)) return;
+    update((prev) => {
+      if (prev.pool.includes(unitId)) return prev;
+      if (prev.pool.length >= RTA_POOL_MAX) {
+        notify(`常用魔靈最多 ${RTA_POOL_MAX} 隻`, "err");
+        return prev;
+      }
+      return { ...prev, pool: [...prev.pool, unitId] };
+    });
+  };
+
+  const addFavoritePool = () => {
+    const ids = favorites.filter((id) => unitMap.has(id) && !deck.pool.includes(id));
+    if (ids.length === 0) return notify("RTA 最愛已經全部在常用魔靈池裡");
+    update((prev) => {
+      const room = RTA_POOL_MAX - prev.pool.length;
+      return { ...prev, pool: [...prev.pool, ...ids.slice(0, Math.max(0, room))] };
+    });
+    notify(`已加入 ${Math.min(ids.length, Math.max(0, RTA_POOL_MAX - deck.pool.length))} 隻 RTA 最愛`);
+  };
+
+  const removePoolUnit = (unitId: number) => {
+    update((prev) => ({
+      ...prev,
+      pool: prev.pool.filter((id) => id !== unitId),
+      // 從池子移除時，已設定在格子裡的同一隻也清空，避免選到池子外的魔靈
+      slots: prev.slots.map((s) => (s.unitId === unitId ? { ...s, unitId: null } : s)),
+    }));
+  };
+
+  const addSlot = (unitId: number | null = null) => {
+    if (deck.slots.length >= RTA_SLOTS_MAX) {
+      notify(`RTA Deck 最多 ${RTA_SLOTS_MAX} 格`, "err");
+      return;
+    }
+    if (unitId != null && deck.slots.some((s) => s.unitId === unitId)) {
+      notify("這隻魔靈已經在配裝格裡", "err");
+      return;
+    }
+    const slot = createDeckSlot(unitId);
+    update((prev) => ({
+      ...prev,
+      slots: [...prev.slots, slot],
+      speedOrder: [...prev.speedOrder, slot.id],
+      results: { ...prev.results },
+    }));
+    setOpenSlots((prev) => new Set(prev).add(slot.id));
+  };
+
+  const updateSlot = (id: string, patch: Partial<RtaDeckSlot>) => {
+    update((prev) => ({
+      ...prev,
+      slots: prev.slots.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+    }));
+  };
+
+  const setSlotUnit = (id: string, unitId: number | null) => {
+    if (unitId != null) {
+      if (!deck.pool.includes(unitId)) return notify("請先把魔靈加入常用魔靈池", "err");
+      if (deck.slots.some((s) => s.id !== id && s.unitId === unitId)) return notify("這隻魔靈已經在別的配裝格裡", "err");
+    }
+    updateSlot(id, { unitId });
+  };
+
+  const removeSlot = (id: string) => {
+    update((prev) => removeSlotFromDeck(prev, id));
+    setOpenSlots((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  const setRole = (slot: RtaDeckSlot, role: TeamRole) => {
+    updateSlot(slot.id, applyRoleDefaults(slot, role));
+  };
+
+  const setMain = (slot: RtaDeckSlot, n: 2 | 4 | 6, index: 0 | 1, value: number) => {
+    const cur = [slot.mains[n]?.[0] ?? 0, slot.mains[n]?.[1] ?? 0];
+    cur[index] = value;
+    const next = [...new Set(cur.filter((v) => v > 0))].slice(0, 2);
+    updateSlot(slot.id, { mains: { ...slot.mains, [n]: next } });
+  };
+
+  const setMin = (slot: RtaDeckSlot, key: StatKey, value: number) => {
+    const min = { ...slot.min };
+    if (value > 0) min[key] = value;
+    else delete min[key];
+    updateSlot(slot.id, { min });
+  };
+
+  const moveInOrder = (id: string, delta: number) => {
+    update((prev) => {
+      const order = [...prev.speedOrder];
+      const at = order.indexOf(id);
+      const to = Math.max(0, Math.min(order.length - 1, at + delta));
+      if (at < 0 || at === to) return prev;
+      order.splice(at, 1);
+      order.splice(to, 0, id);
+      return { ...prev, speedOrder: order };
+    });
+  };
+
+  const orderByCurrentSpeed = () => {
+    if (!account) return;
+    const configured = deck.slots.filter((s) => s.unitId != null);
+    const speedOf = (slot: RtaDeckSlot) => {
+      const r = deck.results[slot.id];
+      if (r) return r.stats.spd;
+      const unit = unitOf(slot.unitId);
+      const monster = monsterOfUnit(unit);
+      if (!unit || !monster) return 0;
+      return rtaStats(
+        baseStats(monster, unit.stars, unit.level),
+        [],
+        [],
+        deck.leaderOn ? deck.leaderPct : 0,
+        grind,
+      ).spd;
+    };
+    const sorted = [...configured].sort((a, b) => speedOf(b) - speedOf(a));
+    const rest = deck.slots.filter((s) => s.unitId == null).map((s) => s.id);
+    update((prev) => ({ ...prev, speedOrder: [...sorted.map((s) => s.id), ...rest] }));
+    notify("已依目前速度重新排序");
+  };
+
+  /** 進行中的配符 */
+  const workerRef = useRef<Worker | null>(null);
+  const runIdRef = useRef(0);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<RtaDeckPlanProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(
+    () => () => {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+    },
+    [],
+  );
+
+  const configured = planSlots(deck);
+  const readyMembers = configured.filter((s) => s.unitId != null);
+  const speedChain = speedRows(deck);
+
+  const runPlan = () => {
+    if (!account) return notify("請先匯入存檔", "err");
+    if (configured.length === 0) return notify("請先新增配裝格並選擇魔靈", "err");
+    const missing = deck.slots.filter((s) => s.unitId == null);
+    if (missing.length > 0) {
+      // 空白格不影響配符，但提醒使用者還有格子沒選魔靈
+      notify(`有 ${missing.length} 個空白格不會參與配符`);
+    }
+    const chainIds = new Set(speedChain.map((s) => s.id));
+    const members: RtaDeckPlanMember[] = configured.map((slot) => {
+      const unit = unitOf(slot.unitId);
+      const monster = monsterOfUnit(unit);
+      if (!unit || !monster) throw new Error("配裝格參照到不存在的魔靈");
+      return {
+        slotId: slot.id,
+        unitId: unit.id,
+        master: unit.master,
+        label: unitLabel(unit),
+        base: baseStats(monster, unit.stars, unit.level),
+        role: slot.role,
+        sets: deckSlotSets(slot),
+        mains: deckSlotMains(slot),
+        min: { ...slot.min },
+        weight: slot.weight,
+        gap: slot.gap,
+        speedChain: chainIds.has(slot.id),
+        objective: roleObjective(slot.role),
+      };
+    });
+    // 把速度串接的成員排前面，其餘接在後面且不受速度差限制
+    members.sort((a, b) => Number(b.speedChain) - Number(a.speedChain));
+
+    const req: RtaDeckPlanRequest = {
+      members,
+      runes: account.runes,
+      // RTA 只吃符文 / 套裝 / 神器與速度隊長；建築、Buff、公會技能都不計
+      bonus: {
+        ...settings.bonus,
+        towerSpd: 0,
+        towerAtk: 0,
+        towerHp: 0,
+        towerDef: 0,
+        towerCd: 0,
+        elementAtk: 0,
+        guildAtk: 0,
+        guildHp: 0,
+        guildDef: 0,
+        guildCd: 0,
+        buffSpd: 0,
+        useGuild: false,
+        useElementTower: false,
+        grind: true,
+      },
+      leaderPct: deck.leaderOn ? Math.max(0, Math.min(50, deck.leaderPct)) : 0,
+      gapMode: deck.gapMode,
+      pool: budget.pool,
+      topK: budget.topK,
+      maxNodes: budget.nodes,
+      excludeRunes: settings.excludedRunes,
+      lockedRunes: settings.lockedRunes,
+    };
+
+    workerRef.current?.terminate();
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("../lib/rtaDeck.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      return setError("瀏覽器無法啟動配符運算模組，請重新整理或改用 Chrome / Edge。");
+    }
+    workerRef.current = worker;
+    const id = ++runIdRef.current;
+    setRunning(true);
+    setError(null);
+    setProgress({ index: 0, total: members.length, slotId: "", label: "準備中…" });
+
+    const timer = window.setTimeout(() => {
+      if (workerRef.current !== worker) return;
+      worker.terminate();
+      workerRef.current = null;
+      setRunning(false);
+      setError("配符超過 3 分鐘，已停止。請改用「快速」預算、降低結果數或減少配裝格。");
+    }, 180_000);
+
+    const done = () => {
+      window.clearTimeout(timer);
+      worker.terminate();
+      if (workerRef.current === worker) workerRef.current = null;
+    };
+
+    worker.onmessage = (e: MessageEvent<{
+      id: number;
+      progress?: RtaDeckPlanProgress;
+      out?: RtaDeckPlanOutcome;
+      error?: string;
+    }>) => {
+      if (e.data.id !== id) return;
+      if (e.data.progress) setProgress(e.data.progress);
+      if (e.data.error) {
+        done();
+        setRunning(false);
+        setError(e.data.error);
+        return;
+      }
+      if (!e.data.out) return;
+      done();
+      setRunning(false);
+      if (!e.data.out.ok) {
+        setError(e.data.out.error);
+        return;
+      }
+      const results: Record<string, RtaDeckResult> = { ...deck.results };
+      for (const m of e.data.out.members) {
+        results[m.slotId] = {
+          slotId: m.slotId,
+          runeIds: m.runeIds,
+          stats: m.stats,
+          ehp: m.ehp,
+          score: m.score,
+          eff: m.eff,
+          focusFit: m.focusFit,
+          objective: m.objective,
+          notes: m.notes,
+        };
+      }
+      setDeck((prev) => ({ ...prev, results, updatedAt: Date.now() }));
+      notify(`RTA Deck 配符完成：${e.data.out.members.length} 隻（${Math.round(e.data.out.ms / 100) / 10} 秒）`);
+    };
+    worker.onerror = (ev) => {
+      console.error("rta deck worker error", ev);
+      done();
+      setRunning(false);
+      setError("配符運算模組載入失敗（可能是網站剛更新）。請按 Ctrl + F5 重新整理後再試。");
+    };
+    worker.postMessage({ id, req });
+  };
+
+  const cancelPlan = () => {
+    workerRef.current?.terminate();
+    workerRef.current = null;
+    setRunning(false);
+    setProgress(null);
+  };
+
+  if (!account) return <div className="empty">尚未匯入存檔</div>;
+
+  const gapIssues = speedGapIssues(
+    speedChain
+      .map((slot) => {
+        const result = deck.results[slot.id];
+        return { slotId: slot.id, label: labelOf(unitOf(slot.unitId)), spd: result?.stats.spd ?? 0, gap: slot.gap };
+      })
+      .filter((row) => row.spd > 0),
+    deck.gapMode,
+  );
+
+  const detailResult = resultSlotId ? deck.results[resultSlotId] : undefined;
+  const detailResultSlot = resultSlotId ? deck.slots.find((s) => s.id === resultSlotId) : undefined;
+  const detailResultUnit = detailResultSlot ? unitOf(detailResultSlot.unitId) : undefined;
+  const detailResultRunes = detailResult
+    ? detailResult.runeIds.map((id) => runeMap.get(id)).filter((r): r is Rune => !!r)
+    : [];
+
+  return (
+    <div className="col rta-deck" style={{ gap: 14 }}>
+      {/* ── 常用魔靈池 ───────────────────────────── */}
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">RTA Deck · 常用魔靈池 <span className="dim tiny">{deck.pool.length} / {RTA_POOL_MAX}</span></div>
+            <div className="card-sub">
+              最多選 {RTA_POOL_MAX} 隻常用魔靈。點小圖示可看目前的 RTA 符文與神器配置，按右上角 ＋ 直接加入配裝格。
+            </div>
+          </div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            {favorites.length > 0 && (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={addFavoritePool} title="把 RTA 最愛加入常用魔靈池">
+                <Swords size={12} /> 加入 RTA 最愛
+              </button>
+            )}
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => setPoolPicker(true)}>
+              <Search size={12} /> 選擇魔靈
+            </button>
+          </div>
+        </div>
+        <div className="card-pad">
+          {deck.pool.length === 0 ? (
+            <div className="empty" style={{ padding: "22px 16px" }}>
+              常用魔靈池是空的。可以按「加入 RTA 最愛」或「選擇魔靈」開始。
+            </div>
+          ) : (
+            <div className="rta-deck-pool">
+              {deck.pool.map((id) => {
+                const unit = unitOf(id);
+                const monster = monsterOfUnit(unit);
+                if (!unit || !monster) return null;
+                const used = deck.slots.some((s) => s.unitId === id);
+                return (
+                  <div key={id} className={`rta-pool-item ${used ? "used" : ""}`} title={`${unitLabel(unit)} · 基礎速度 ${monster.spd}`}>
+                    <button type="button" className="rta-pool-open" onClick={() => setDetailUnitId(id)}>
+                      <MonsterIcon id={monster.id} size={46} />
+                      <span className="rta-pool-name">{unitLabel(unit)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="rta-pool-add"
+                      title={used ? "已在配裝格" : "加入配裝格"}
+                      disabled={used}
+                      onClick={() => addSlot(id)}
+                    >
+                      <Plus size={11} />
+                    </button>
+                    <button type="button" className="rta-pool-del" title="從常用魔靈池移除" onClick={() => removePoolUnit(id)}>
+                      <X size={10} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 速度隊長與配符 ───────────────────────── */}
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">RTA Deck · 配裝與速度順序</div>
+            <div className="card-sub">
+              最多 {RTA_SLOTS_MAX} 隻。每隻可設定套裝、2/4/6 主屬性（每個位置最多 2 個）與面板數值下限；速度順序可指定角色之間的差距。
+            </div>
+          </div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            <select className="select" style={{ width: 130 }} value={budgetKey} onChange={(e) => setBudgetKey(e.target.value as BudgetKey)}>
+              {(Object.keys(BUDGETS) as BudgetKey[]).map((k) => (
+                <option key={k} value={k}>
+                  預算：{BUDGETS[k].label}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn btn-sm btn-primary" onClick={runPlan} disabled={running || readyMembers.length === 0}>
+              <Wand2 size={13} /> {running ? "配符中…" : `一鍵配 ${readyMembers.length} 隻`}
+            </button>
+            {running && (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={cancelPlan}>
+                停止
+              </button>
+            )}
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => addSlot(null)} disabled={deck.slots.length >= RTA_SLOTS_MAX}>
+              <Plus size={12} /> 新增格子
+            </button>
+          </div>
+        </div>
+
+        <div className="card-pad col" style={{ gap: 10, borderBottom: "1px solid var(--line-soft)" }}>
+          <div className="row wrap" style={{ gap: 10, alignItems: "center" }}>
+            <div className="tabs">
+              <button type="button" className={`tab ${!deck.leaderOn ? "active" : ""}`} onClick={() => update((prev) => ({ ...prev, leaderOn: false }))}>
+                無速度隊長
+              </button>
+              <button type="button" className={`tab ${deck.leaderOn ? "active" : ""}`} onClick={() => update((prev) => ({ ...prev, leaderOn: true }))}>
+                有速度隊長
+              </button>
+            </div>
+            {deck.leaderOn && (
+              <div style={{ position: "relative" }}>
+                <NumberInput
+                  className="input mono"
+                  min={0}
+                  max={50}
+                  step={1}
+                  value={deck.leaderPct}
+                  onChange={(v) => update((prev) => ({ ...prev, leaderPct: v }))}
+                  style={{ width: 96, paddingRight: 22 }}
+                  title="速度隊長技 %"
+                />
+                <span style={{ position: "absolute", right: 8, top: 9, fontSize: 11, color: "var(--muted-2)" }}>%</span>
+              </div>
+            )}
+            <div className="tabs">
+              <button
+                type="button"
+                className={`tab ${deck.gapMode === "at-least" ? "active" : ""}`}
+                onClick={() => update((prev) => ({ ...prev, gapMode: "at-least" }))}
+                title="後面的角色至少要比前一隻慢指定的速度"
+              >
+                至少差 N 速
+              </button>
+              <button
+                type="button"
+                className={`tab ${deck.gapMode === "exact" ? "active" : ""}`}
+                onClick={() => update((prev) => ({ ...prev, gapMode: "exact" }))}
+                title="後面的角色要剛好比前一隻慢指定的速度"
+              >
+                剛好差 N 速
+              </button>
+            </div>
+            <span className="tiny dim">
+              {deck.leaderOn ? `速度隊長 +${Math.max(0, Math.min(50, deck.leaderPct))}%（套用到所有配裝格）` : "目前不計速度隊長"}
+            </span>
+            <span className="dim tiny" style={{ marginLeft: "auto" }}>
+              已設定 {readyMembers.length} / {RTA_SLOTS_MAX} 格
+            </span>
+          </div>
+
+          {running && (
+            <div className="rta-deck-progress">
+              <div className="row between tiny" style={{ marginBottom: 4 }}>
+                <span>{progress ? `正在配：${progress.label}（${progress.index + 1} / ${progress.total}）` : "準備中…"}</span>
+                <span>{progress ? Math.round(((progress.index + 1) / Math.max(1, progress.total)) * 100) : 0}%</span>
+              </div>
+              <div className="rta-deck-bar">
+                <span style={{ width: `${progress ? Math.round(((progress.index + 1) / Math.max(1, progress.total)) * 100) : 0}%` }} />
+              </div>
+            </div>
+          )}
+          {error && (
+            <div className="rta-deck-error">
+              {error}
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setError(null)} style={{ marginLeft: 8 }}>
+                關閉
+              </button>
+            </div>
+          )}
+
+          {/* 速度順序 */}
+          <div className="rta-speed-box">
+            <div className="row between wrap" style={{ gap: 8 }}>
+              <div className="card-title" style={{ fontSize: 13 }}>
+                <Timer size={13} className="gold" style={{ verticalAlign: -2, marginRight: 4 }} />
+                速度順序（A 比 B 快、B 比 C 快）
+              </div>
+              <div className="row wrap" style={{ gap: 6 }}>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={orderByCurrentSpeed} title="依目前配裝 / 基礎速度由快到慢排序">
+                  <RefreshCw size={11} /> 依目前速度排序
+                </button>
+                <span className="tiny dim">第一隻不受速度差限制；可用 ↑↓ 調整。</span>
+              </div>
+            </div>
+            {speedChain.length === 0 ? (
+              <div className="tiny dim" style={{ padding: "10px 0" }}>
+                還沒有設定速度順序。把配裝格的「參與速度順序」打開，就會列在這裡。
+              </div>
+            ) : (
+              <div className="rta-speed-list">
+                {speedChain.map((slot, i) => {
+                  const unit = unitOf(slot.unitId);
+                  const result = deck.results[slot.id];
+                  const issue = gapIssues.find((x) => x.slotId === slot.id);
+                  const prev = i > 0 ? deck.results[speedChain[i - 1].id] : undefined;
+                  const actual = prev && result ? prev.stats.spd - result.stats.spd : null;
+                  return (
+                    <div key={slot.id} className={`rta-speed-row ${issue && !issue.ok ? "bad" : ""}`}>
+                      <span className="rta-speed-pos">{i + 1}</span>
+                      <GripVertical size={12} className="dim" />
+                      <MonsterIcon id={monsterOfUnit(unit)?.id ?? 0} size={24} />
+                      <span className="rta-speed-name">{labelOf(unit)}</span>
+                      <span className="tiny dim">{result ? `${result.stats.spd} 速` : "尚未配裝"}</span>
+                      {i > 0 ? (
+                        <label className="row tiny" style={{ gap: 4 }}>
+                          與前一隻差
+                          <NumberInput
+                            className="input mono"
+                            min={0}
+                            max={999}
+                            step={1}
+                            value={slot.gap}
+                            onChange={(v) => updateSlot(slot.id, { gap: v })}
+                            style={{ width: 58, padding: "3px 6px", fontSize: 11 }}
+                          />
+                          速
+                        </label>
+                      ) : (
+                        <span className="tiny dim">基準（最快）</span>
+                      )}
+                      {actual != null && (
+                        <span className={`chip ${issue?.ok ? "green" : "red"}`} title="實際速度差">
+                          實際 {actual} 速
+                        </span>
+                      )}
+                      <span className="row" style={{ gap: 2, marginLeft: "auto" }}>
+                        <button type="button" className="order-step" onClick={() => moveInOrder(slot.id, -1)} disabled={i === 0} title="往前">
+                          <ArrowUp size={11} />
+                        </button>
+                        <button type="button" className="order-step" onClick={() => moveInOrder(slot.id, 1)} disabled={i === speedChain.length - 1} title="往後">
+                          <ArrowDown size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          style={{ padding: "0 5px", fontSize: 10 }}
+                          onClick={() => updateSlot(slot.id, { inOrder: false })}
+                          title="不列入速度順序"
+                        >
+                          移除
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {deck.slots.some((s) => s.unitId != null && !s.inOrder) && (
+              <div className="row wrap tiny dim" style={{ gap: 6, marginTop: 6 }}>
+                未列入速度順序：
+                {deck.slots
+                  .filter((s) => s.unitId != null && !s.inOrder)
+                  .map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="chip muted"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => updateSlot(s.id, { inOrder: true })}
+                      title="加入速度順序"
+                    >
+                      {labelOf(unitOf(s.unitId))} ＋
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 30 個配裝格 */}
+        <div className="card-pad col" style={{ gap: 8 }}>
+          {deck.slots.length === 0 ? (
+            <div className="empty" style={{ padding: "30px 16px" }}>
+              還沒有配裝格。從上面的常用魔靈池按 ＋，或按「新增格子」開始設定。
+            </div>
+          ) : (
+            deck.slots.map((slot, index) => {
+              const unit = unitOf(slot.unitId);
+              const monster = monsterOfUnit(unit);
+              const result = deck.results[slot.id];
+              const open = openSlots.has(slot.id);
+              const sets = result ? setsOf(result.runeIds.map((id) => runeMap.get(id)).filter((r): r is Rune => !!r)) : {};
+              return (
+                <div key={slot.id} className={`rta-deck-slot ${open ? "open" : ""}`}>
+                  <div className="rta-deck-slot-head">
+                    <span className="build-rank">{index + 1}</span>
+                    <button type="button" className="rta-deck-unit" onClick={() => setPickerSlotId(slot.id)}>
+                      {monster ? <MonsterIcon id={monster.id} size={34} /> : <span className="rta-deck-empty-icon"><Plus size={14} /></span>}
+                      <span className="col" style={{ gap: 0, minWidth: 0 }}>
+                        <b style={{ fontSize: 12.5 }}>{labelOf(unit)}</b>
+                        <span className="tiny dim">
+                          {unit && monster
+                            ? `${ELEMENTS[monster.el as 1]?.name ?? ""} · ${unit.stars}★ Lv.${unit.level} · 基礎 ${monster.spd} 速`
+                            : "點擊選擇魔靈"}
+                        </span>
+                      </span>
+                    </button>
+
+                    <span className="rta-deck-summary tiny dim">
+                      {slot.set4 > 0
+                        ? `${setLabel(slot.set4)} 4 + ${setLabel(slot.set2)} 2`
+                        : [slot.set2, slot.set2b, slot.set2c].filter((s) => s > 0).map(setLabel).join(" + ") || "未指定套裝"}
+                      {" · "}
+                      主屬 {[2, 4, 6].map((n) => (deckSlotMains(slot)[n]?.map((v) => RTA_MAIN_OPTIONS[n as 2 | 4 | 6].find((o) => o.v === v)?.label ?? "?").join(" / ") ?? "不限")).join(" · ")}
+                      {Object.keys(slot.min).length > 0 && ` · 下限 ${Object.entries(slot.min).map(([k, v]) => `${MIN_LABEL[k as StatKey]} ${v}`).join("、")}`}
+                    </span>
+
+                    <span className="rta-deck-speed">
+                      {result ? (
+                        <>
+                          <b className="mono gold">{result.stats.spd}</b>
+                          <span className="tiny dim">速</span>
+                          <TickBadge spd={result.stats.spd} rta />
+                          <span className="tiny dim">{result.objective}</span>
+                        </>
+                      ) : (
+                        <span className="tiny dim">尚未配符</span>
+                      )}
+                    </span>
+
+                    <span className="row" style={{ gap: 4 }}>
+                      <label className="row tiny" style={{ gap: 4, cursor: "pointer" }} title="是否列入速度順序">
+                        <input
+                          type="checkbox"
+                          checked={slot.inOrder}
+                          onChange={(e) => updateSlot(slot.id, { inOrder: e.target.checked })}
+                        />
+                        順序
+                      </label>
+                      {result && (
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setResultSlotId(slot.id)}>
+                          配裝
+                        </button>
+                      )}
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={() => toggleSlotOpen(slot.id)}>
+                        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />} 設定
+                      </button>
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={() => removeSlot(slot.id)} title="刪除這個配裝格">
+                        <Trash2 size={12} />
+                      </button>
+                    </span>
+                  </div>
+
+                  {open && (
+                    <div className="rta-deck-config">
+                      <div className="rta-deck-config-grid">
+                        <div className="field">
+                          <label>定位</label>
+                          <select className="select" value={slot.role} onChange={(e) => setRole(slot, e.target.value as TeamRole)}>
+                            {ROLE_OPTIONS.map((r) => (
+                              <option key={r} value={r}>{TEAM_ROLE_LABELS[r]}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="field">
+                          <label>評分權重</label>
+                          <NumberInput className="input mono" min={1} max={10} value={slot.weight} onChange={(v) => updateSlot(slot.id, { weight: v })} />
+                        </div>
+                        <div className="field">
+                          <label>與前一隻速度差</label>
+                          <div style={{ position: "relative" }}>
+                            <NumberInput className="input mono" min={0} max={999} value={slot.gap} onChange={(v) => updateSlot(slot.id, { gap: v })} style={{ paddingRight: 26 }} />
+                            <span style={{ position: "absolute", right: 9, top: 9, fontSize: 11, color: "var(--muted-2)" }}>速</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rta-deck-block">
+                        <div className="tiny dim" style={{ marginBottom: 4 }}>套裝</div>
+                        <div className="rta-deck-sets">
+                          <select className="select" value={slot.set4} onChange={(e) => updateSlot(slot.id, { set4: Number(e.target.value) })}>
+                            <option value={0}>4 件套：不指定</option>
+                            {FOUR_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}（4）</option>)}
+                          </select>
+                          {slot.set4 > 0 ? (
+                            <select className="select" value={slot.set2} onChange={(e) => updateSlot(slot.id, { set2: Number(e.target.value) })}>
+                              <option value={0}>2 件套：不指定</option>
+                              {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}（2）</option>)}
+                            </select>
+                          ) : (
+                            <>
+                              <select className="select" value={slot.set2} onChange={(e) => updateSlot(slot.id, { set2: Number(e.target.value) })}>
+                                <option value={0}>2 件套 A：不指定</option>
+                                {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}（2）</option>)}
+                              </select>
+                              <select className="select" value={slot.set2b} onChange={(e) => updateSlot(slot.id, { set2b: Number(e.target.value) })}>
+                                <option value={0}>2 件套 B：不指定</option>
+                                {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}（2）</option>)}
+                              </select>
+                              <select className="select" value={slot.set2c} onChange={(e) => updateSlot(slot.id, { set2c: Number(e.target.value) })}>
+                                <option value={0}>2 件套 C：不指定</option>
+                                {TWO_SETS.map((s) => <option key={s.id} value={s.id}>{s.name}（2）</option>)}
+                              </select>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rta-deck-block">
+                        <div className="tiny dim" style={{ marginBottom: 4 }}>2 / 4 / 6 號主屬性（每個位置最多選 2 個）</div>
+                        <div className="rta-main-grid">
+                          {([2, 4, 6] as const).map((n) => (
+                            <div key={n} className="rta-main-row">
+                              <span className="rta-main-label">{n} 號</span>
+                              <select className="select" value={slot.mains[n]?.[0] ?? 0} onChange={(e) => setMain(slot, n, 0, Number(e.target.value))}>
+                                {mainOptionsOf(n).map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+                              </select>
+                              <select className="select" value={slot.mains[n]?.[1] ?? 0} onChange={(e) => setMain(slot, n, 1, Number(e.target.value))}>
+                                <option value={0}>第二選擇：不限</option>
+                                {mainOptionsOf(n).filter((o) => o.v !== 0).map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="rta-deck-block">
+                        <div className="tiny dim" style={{ marginBottom: 4 }}>面板 / 實戰數值下限（0 = 不限；速度下限會和速度順序一起檢查）</div>
+                        <div className="rta-min-grid">
+                          {STAT_KEYS.map((key) => (
+                            <label key={key} className="rta-min-field">
+                              <span>{MIN_LABEL[key]}{STAT_META[key].suffix}</span>
+                              <NumberInput
+                                className="input mono"
+                                min={0}
+                                max={key === "hp" || key === "atk" || key === "def" ? 1_000_000 : 100_000}
+                                value={slot.min[key] ?? 0}
+                                onChange={(v) => setMin(slot, key, v)}
+                                placeholder="0"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      {result && (
+                        <div className="rta-deck-result">
+                          <div className="row between wrap" style={{ gap: 6 }}>
+                            <span className="tiny dim">上次配符結果</span>
+                            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setResultSlotId(slot.id)}>
+                              查看符文
+                            </button>
+                          </div>
+                          <div className="row wrap" style={{ gap: 8 }}>
+                            <span className="chip muted">速度 <b className="mono">{result.stats.spd}</b></span>
+                            <span className="chip muted">HP <b className="mono">{fmt(result.stats.hp)}</b></span>
+                            <span className="chip muted">ATK <b className="mono">{fmt(result.stats.atk)}</b></span>
+                            <span className="chip muted">DEF <b className="mono">{fmt(result.stats.def)}</b></span>
+                            <span className="chip muted">EHP <b className="mono">{fmt(result.ehp)}</b></span>
+                            <span className="chip muted">套裝 {Object.keys(sets).length > 0 ? setSummary(sets) : "—"}</span>
+                          </div>
+                          {result.notes.length > 0 && (
+                            <div className="tiny" style={{ color: "var(--gold)", marginTop: 6 }}>⚠ {result.notes.join(" ")}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* ── 魔靈池挑選器 ─────────────────────────── */}
+      {poolPicker && (
+        <MonsterPickerModal
+          title={`選擇常用魔靈（${deck.pool.length} / ${RTA_POOL_MAX}）`}
+          entries={allEntries}
+          multi
+          pickedCount={deck.pool.length}
+          footerLeft={`已選 ${deck.pool.length} / ${RTA_POOL_MAX} 隻`}
+          onPick={(entry) => {
+            const id = Number(entry.key);
+            if (Number.isFinite(id)) addPoolUnit(id);
+          }}
+          onClose={() => setPoolPicker(false)}
+        />
+      )}
+
+      {/* ── 格子專用挑選器（只能選常用池） ─────── */}
+      {pickerSlotId && (
+        <MonsterPickerModal
+          title="從常用魔靈池選擇"
+          entries={poolEntries}
+          emptyText="常用魔靈池是空的，請先在「選擇魔靈」加入。"
+          onPick={(entry) => {
+            const id = Number(entry.key);
+            if (Number.isFinite(id)) setSlotUnit(pickerSlotId, id);
+          }}
+          onClose={() => setPickerSlotId(null)}
+        />
+      )}
+
+      {/* ── 目前 RTA 配裝明細 ───────────────────── */}
+      {detail && (
+        <Modal title={`${unitLabel(detail.unit)} · 目前 RTA 配裝`} onClose={() => setDetailUnitId(null)} width={860}>
+          <MonsterPanel
+            monster={detail.monster}
+            base={detail.view.base}
+            stats={detail.view.stats}
+            stars={detail.unit.stars}
+            level={detail.unit.level}
+            artifacts={detail.view.artifacts}
+            badge={<TickBadge spd={detail.view.stats.spd} rta />}
+            name={unitLabel(detail.unit)}
+          />
+          <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+            <span className="chip gold">{detail.monster.nat}★ 原生</span>
+            <span className="chip muted">RTA 獨立配裝</span>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={deck.slots.length >= RTA_SLOTS_MAX || deck.slots.some((s) => s.unitId === detail.unit.id)}
+              onClick={() => {
+                addSlot(detail.unit.id);
+                setDetailUnitId(null);
+              }}
+            >
+              <Plus size={12} /> 加入配裝格
+            </button>
+          </div>
+
+          <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>
+            <div className="card-title">目前 RTA 符文</div>
+            <span className="tiny dim">
+              {detail.view.runes.length}/6 ·{" "}
+              {detail.view.runes.length > 0 ? setSummary(setsOf(detail.view.runes)) : "未配置"}
+            </span>
+          </div>
+          {detail.view.runes.length === 0 ? (
+            <div className="empty tiny">這隻魔靈目前沒有 RTA 符文配置</div>
+          ) : (
+            <RuneBoard
+              runes={detail.view.runes}
+              renderRune={(r: Rune) => (
+                <RuneCard
+                  rune={r}
+                  owner={unitLabel(detail.unit)}
+                  locked={lockedSet.has(r.id)}
+                  excluded={excludedSet.has(r.id)}
+                  onToggleLock={() => toggleRuneFlag("locked", r.id)}
+                  onToggleExclude={() => toggleRuneFlag("excluded", r.id)}
+                />
+              )}
+            />
+          )}
+
+          <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>
+            <div className="card-title">目前 RTA 神器</div>
+            <span className="tiny dim">{detail.view.artifacts.length} / 2</span>
+          </div>
+          {detail.view.artifacts.length === 0 ? (
+            <div className="empty tiny">這隻魔靈目前沒有 RTA 神器配置</div>
+          ) : (
+            <div className="grid" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8 }}>
+              {detail.view.artifacts.map((a: Artifact) => (
+                <ArtifactCard key={a.id} artifact={a} owner={unitLabel(detail.unit)} />
+              ))}
+            </div>
+          )}
+          <div className="tiny dim" style={{ marginTop: 12, lineHeight: 1.6 }}>
+            目前配置來自存檔的 <span className="mono">world_arena_rune_equip_list</span> /{" "}
+            <span className="mono">world_arena_artifact_equip_list</span>。RTA Deck 的配符結果只會顯示在這一頁，不會改寫遊戲存檔。
+          </div>
+        </Modal>
+      )}
+
+      {/* ── 配符結果符文明細 ────────────────────── */}
+      {detailResult && detailResultSlot && (
+        <Modal
+          title={`${labelOf(detailResultUnit)} · RTA Deck 配裝結果`}
+          onClose={() => setResultSlotId(null)}
+          width={860}
+        >
+          <div className="row wrap" style={{ gap: 6 }}>
+            <span className="chip gold">速度 <b className="mono">{detailResult.stats.spd}</b></span>
+            <span className="chip muted">HP {fmt(detailResult.stats.hp)}</span>
+            <span className="chip muted">ATK {fmt(detailResult.stats.atk)}</span>
+            <span className="chip muted">DEF {fmt(detailResult.stats.def)}</span>
+            <span className="chip muted">EHP {fmt(detailResult.ehp)}</span>
+            <span className="chip muted">效率 {Math.round(detailResult.eff * 10) / 10}%</span>
+            <span className="chip muted">套裝 {setSummary(setsOf(detailResultRunes))}</span>
+            {detailResult.notes.length > 0 && <span className="chip gold">⚠ {detailResult.notes[0]}</span>}
+          </div>
+          <div className="row between" style={{ marginTop: 18, marginBottom: 8 }}>
+            <div className="card-title">符文</div>
+            <span className="tiny dim">{detailResultRunes.length} / 6</span>
+          </div>
+          {detailResultRunes.length === 0 ? (
+            <div className="empty tiny">沒有符文</div>
+          ) : (
+            <RuneBoard
+              runes={detailResultRunes}
+              renderRune={(r: Rune) => (
+                <RuneCard
+                  rune={r}
+                  owner={labelOf(detailResultUnit)}
+                  locked={lockedSet.has(r.id)}
+                  excluded={excludedSet.has(r.id)}
+                  onToggleLock={() => toggleRuneFlag("locked", r.id)}
+                  onToggleExclude={() => toggleRuneFlag("excluded", r.id)}
+                />
+              )}
+            />
+          )}
+          <div className="tiny dim" style={{ marginTop: 12, lineHeight: 1.6 }}>
+            這是本頁的模擬結果，不會修改遊戲存檔或 RTA 目前配裝。若要實際換裝，請在遊戲中操作。
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
