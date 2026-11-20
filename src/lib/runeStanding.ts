@@ -1,27 +1,36 @@
+import { grindMax, grindStoneMax } from "./grind";
 import { runeEfficiency } from "./stats";
 import type { Rune } from "./types";
 
 /**
  * 符文定位（Rune Standing）
  *
- * 把「幾百個點的效率曲線」壓成幾個可以直接講出口的數字：
- *  1. 精練度：Top N 符文的平均效率（0–100，100 = 每條副屬都滿值）
- *  2. 對比公會：已裝備符文的平均效率，與公會成員比較（名次 / 標準差）
- *
- * 公會資料來自公會頁匯入的 SWEX 資料，只有「已經裝在魔靈身上」的符文，
- * 沒有完整背包，所以公會比較只適用於已裝備符文；背包 Top N 只跟自己的門檻比較。
+ * 不看符分、也不看「每條都滿值」的理論上限，只做三件事：
+ *  1. 效率：每條副屬的值 ÷ 該屬性的最大值（固定體力 / 攻擊 / 防禦不計）
+ *  2. 精煉：Top N 裡有多少顆「英雄精滿」「傳說精滿」
+ *  3. 公會：已裝備符文的平均效率，與成員比較
  */
 
 /** 預設取效率最高的前 N 顆（與 SWGT 的 Top 400 對齊） */
 export const STANDING_LIMIT = 400;
 
-/** 深度 / 門檻分佈用的效率門檻（效率 100 = 每條副屬滿值） */
+/** 門檻分佈用的效率門檻 */
 export const STANDING_THRESHOLDS = [90, 85, 80, 75] as const;
 
 export interface StandingPoint {
   rune: Rune;
   /** 效率 %（含精煉，忽略固定體攻防） */
   eff: number;
+  /** 英雄級磨石已精滿（可精煉的副屬都到英雄上限） */
+  heroDone: boolean;
+  /** 傳說級磨石已精滿 */
+  legendDone: boolean;
+  /** 完全沒有精煉過（可精煉的副屬全部還是 0） */
+  untouched: boolean;
+  /** 全部用英雄磨石精滿後的效率 */
+  effHero: number;
+  /** 全部用傳說磨石精滿後的效率 */
+  effLegend: number;
 }
 
 /** 單顆符文的定位效率：含精煉、忽略固定體力 / 攻擊 / 防禦 */
@@ -29,11 +38,70 @@ export function standingEff(rune: Rune): number {
   return runeEfficiency(rune, true, { ignoreFlatAll: true }).current;
 }
 
+/** 一顆符文的精煉狀態：英雄 / 傳說是否精滿、精滿後效率 */
+export function grindState(rune: Rune): {
+  heroDone: boolean;
+  legendDone: boolean;
+  untouched: boolean;
+  grindable: number;
+  effHero: number;
+  effLegend: number;
+} {
+  let heroDone = true;
+  let legendDone = true;
+  let grindable = 0;
+  let grinded = 0;
+  let anyGrind = false;
+
+  const withGrind = (cap: (t: number) => number) =>
+    rune.subs.map((s) => {
+      const max = grindMax(s.t, rune.ancient);
+      if (max <= 0) return s;
+      return { ...s, g: Math.max(s.g ?? 0, cap(s.t)) };
+    });
+
+  for (const s of rune.subs) {
+    const max = grindMax(s.t, rune.ancient);
+    if (max <= 0) continue;
+    grindable += 1;
+    const g = s.g ?? 0;
+    if (g > 0) anyGrind = true;
+    grinded += g > 0 ? 1 : 0;
+    if (g < grindStoneMax(s.t, 4, rune.ancient)) heroDone = false;
+    if (g < grindStoneMax(s.t, 5, rune.ancient)) legendDone = false;
+  }
+
+  const opts = { ignoreFlatAll: true } as const;
+  const effHero = runeEfficiency({ ...rune, subs: withGrind((t) => grindStoneMax(t, 4, rune.ancient)) }, true, opts).current;
+  const effLegend = runeEfficiency({ ...rune, subs: withGrind((t) => grindStoneMax(t, 5, rune.ancient)) }, true, opts).current;
+
+  return {
+    // 沒有可精煉的副屬時視為已滿（沒有東西可以補）
+    heroDone: grindable === 0 ? true : heroDone,
+    legendDone: grindable === 0 ? true : legendDone,
+    untouched: grindable > 0 && !anyGrind,
+    grindable,
+    effHero,
+    effLegend,
+  };
+}
+
 /** 依效率由高到低排出前 N 顆 6★ 符文（setId > 0 時只看該套裝） */
 export function standingPoints(runes: Rune[], limit = STANDING_LIMIT, setId = 0): StandingPoint[] {
   return runes
     .filter((r) => r.grade === 6 && (setId <= 0 || r.set === setId))
-    .map((rune) => ({ rune, eff: standingEff(rune) }))
+    .map((rune) => {
+      const state = grindState(rune);
+      return {
+        rune,
+        eff: standingEff(rune),
+        heroDone: state.heroDone,
+        legendDone: state.legendDone,
+        untouched: state.untouched,
+        effHero: state.effHero,
+        effLegend: state.effLegend,
+      };
+    })
     .sort((a, b) => b.eff - a.eff || b.rune.id - a.rune.id)
     .slice(0, Math.max(1, limit));
 }
@@ -49,8 +117,15 @@ export interface StandingSummary {
   floor: number;
   /** 樣本數（可能少於 N） */
   count: number;
-  /** 精練度 = 平均效率，100 為滿值 */
-  refinement: number;
+  /** 英雄 / 傳說精滿的顆數 */
+  heroDone: number;
+  legendDone: number;
+  /** 完全沒精煉過的顆數 */
+  untouched: number;
+  /** 全部精滿（傳說）後的平均效率 */
+  avgIfLegend: number;
+  /** 全部精滿可以多幾點效率 */
+  gainLegend: number;
   thresholds: { t: number; count: number; pct: number }[];
 }
 
@@ -63,16 +138,19 @@ export function summarizeStanding(points: StandingPoint[]): StandingSummary {
       : count % 2 === 0
         ? (points[count / 2 - 1].eff + points[count / 2].eff) / 2
         : points[(count - 1) / 2].eff;
-  const top = points[0]?.eff ?? 0;
-  const floor = points[count - 1]?.eff ?? 0;
+  const avgIfLegend = count ? points.reduce((s, p) => s + p.effLegend, 0) / count : 0;
   return {
     points,
     avg,
     median: mid,
-    top,
-    floor,
+    top: points[0]?.eff ?? 0,
+    floor: points[count - 1]?.eff ?? 0,
     count,
-    refinement: avg,
+    heroDone: points.filter((p) => p.heroDone).length,
+    legendDone: points.filter((p) => p.legendDone).length,
+    untouched: points.filter((p) => p.untouched).length,
+    avgIfLegend,
+    gainLegend: Math.max(0, avgIfLegend - avg),
     thresholds: STANDING_THRESHOLDS.map((t) => {
       const n = points.filter((p) => p.eff >= t).length;
       return { t, count: n, pct: count ? (n / count) * 100 : 0 };
@@ -93,7 +171,7 @@ export interface GuildStanding {
   sd: number;
   min: number;
   max: number;
-  /** 自己排在成員之間的名次（1 = 最高）；自己不在名單內時仍會插入比較 */
+  /** 自己排在成員之間的名次（1 = 最高） */
   rank: number;
   /** 贏過幾成成員（0–100） */
   percentile: number;

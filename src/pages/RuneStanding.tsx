@@ -8,11 +8,11 @@ import { loadGuildData, type GuildData } from "../lib/guild";
 import type { Rune } from "../lib/types";
 
 /**
- * 符文定位：把 SWGT 那張「10 條線 × 400 個點」的圖，改成三個可以直接講出口的數字。
+ * 符文定位：只看「效率」與「精煉」兩件事。
  *
- *  - 精練度：背包 Top N 的平均效率（100 = 每條副屬都滿值）
- *  - 對公會：已裝備符文的平均效率，對比公會成員（名次 / 標準差）
- *  - 門檻件數：Top N 裡有幾顆達到 90 / 85 / 80 / 75
+ *  - 效率：每條副屬的值 ÷ 該屬性的最大值（固定體 / 攻 / 防 不計）
+ *  - 精煉：Top N 裡有多少顆還沒英雄精滿 / 傳說精滿
+ *  - 公會：已裝備符文的平均效率，對比公會成員
  *
  * 可以只看單一套裝（迅速 / 暴走 / 意志…），也可以切換取樣顆數。
  */
@@ -58,7 +58,7 @@ export default function RuneStandingPage() {
     [account, limit, setId],
   );
 
-  // 各套裝的精練度排行（每個套裝各自取 Top N，門檻才不會被套裝數量影響）
+  // 各套裝的橫向比較（每個套裝各自取 Top N）
   const overall = useMemo(
     () => summarizeStanding(standingPoints(account?.runes ?? [], limit, 0)),
     [account, limit],
@@ -72,12 +72,12 @@ export default function RuneStandingPage() {
           name: o.name,
           total: o.count,
           sample: s.count,
-          refine: s.refinement,
-          top: s.top,
-          hi: s.thresholds.find((t) => t.t === 85)?.count ?? 0,
+          avg: s.avg,
+          legendMissing: s.count - s.legendDone,
+          avgIfLegend: s.avgIfLegend,
         };
       })
-      .sort((a, b) => b.refine - a.refine);
+      .sort((a, b) => b.avg - a.avg);
   }, [account, limit, setOptions]);
 
   // 公會成員：同一顆符文可能同時裝在測試隊與據點防守，先用 id 去重
@@ -119,8 +119,11 @@ export default function RuneStandingPage() {
     return <EmptyState icon={<Target size={40} />} title="尚未匯入存檔" desc="回到匯入頁上傳 JSON 後即可看到符文定位。" />;
   }
 
-  const refine = Math.min(100, standing.refinement);
-  const source = setId > 0 ? `${setName} · 已裝備` : "已裝備";
+  const refine = Math.min(100, standing.avg);
+  const heroMissing = standing.count - standing.heroDone;
+  const legendMissing = standing.count - standing.legendDone;
+  const heroPct = standing.count ? (standing.heroDone / standing.count) * 100 : 0;
+  const legendPct = standing.count ? (standing.legendDone / standing.count) * 100 : 0;
 
   return (
     <>
@@ -171,12 +174,7 @@ export default function RuneStandingPage() {
           <div className="seg" role="radiogroup" aria-label="取樣顆數">
             {LIMITS.map((n) => (
               <label key={n} className={`seg-item ${limit === n ? "on" : ""}`}>
-                <input
-                  type="radio"
-                  name="standing-limit"
-                  checked={limit === n}
-                  onChange={() => setLimit(n)}
-                />
+                <input type="radio" name="standing-limit" checked={limit === n} onChange={() => setLimit(n)} />
                 Top {fmt(n)}
               </label>
             ))}
@@ -187,21 +185,21 @@ export default function RuneStandingPage() {
       <div className="grid g3">
         <Tile
           icon={<Gem size={16} />}
-          k="精練度"
-          v={`${standing.refinement.toFixed(1)}%`}
-          sub={`${setName} · Top ${fmt(standing.count)} 平均效率`}
+          k="未英雄精滿"
+          v={`${fmt(heroMissing)} 顆`}
+          sub={`${heroPct.toFixed(0)}% 已英雄精滿（${fmt(standing.heroDone)} 顆）`}
         />
         <Tile
           icon={<Target size={16} />}
-          k="對比公會"
-          v={vsGuild ? `${vsGuild.delta >= 0 ? "+" : ""}${vsGuild.delta.toFixed(1)}` : "—"}
-          sub={vsGuild ? `${source} · 第 ${vsGuild.rank} / ${fmt(vsGuild.members.length)} 名` : guild ? "此套裝沒有可比較的資料" : "未匯入公會資料"}
+          k="未傳說精滿"
+          v={`${fmt(legendMissing)} 顆`}
+          sub={`${legendPct.toFixed(0)}% 已傳說精滿（${fmt(standing.legendDone)} 顆）`}
         />
         <Tile
           icon={<Gauge size={16} />}
-          k="≥85% 件數"
-          v={fmt(standing.thresholds.find((t) => t.t === 85)?.count ?? 0)}
-          sub={`${setName} · Top ${fmt(standing.count)} 之中`}
+          k="平均效率"
+          v={`${standing.avg.toFixed(1)}%`}
+          sub={`全部精滿後 ${standing.avgIfLegend.toFixed(1)}%（+${standing.gainLegend.toFixed(1)}）`}
         />
       </div>
 
@@ -262,33 +260,53 @@ export default function RuneStandingPage() {
         <div className="card">
           <div className="card-head">
             <div>
-              <div className="card-title">我的符文精練到幾成？</div>
-              <div className="card-sub">{setName} · Top {fmt(standing.count)} 的平均效率 ÷ 100</div>
+              <div className="card-title">精煉狀態</div>
+              <div className="card-sub">{setName} · Top {fmt(standing.count)} 的磨石進度</div>
             </div>
             <span className="chip green">Top {fmt(standing.count)}</span>
           </div>
           <div className="card-pad">
             <div className="row" style={{ alignItems: "baseline", gap: 8 }}>
               <div className="mono" style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-.03em" }}>
-                {standing.refinement.toFixed(1)}
-                <span className="dim" style={{ fontSize: 18, fontWeight: 600 }}>%</span>
+                {standing.avg.toFixed(1)}
+                <span className="dim" style={{ fontSize: 16, fontWeight: 600 }}>%</span>
               </div>
-              <div className="tiny dim">還有 {(100 - refine).toFixed(1)} 點空間</div>
+              <div className="tiny dim">目前平均效率 · 滿精煉 {standing.avgIfLegend.toFixed(1)}%</div>
             </div>
             <div className="bar" style={{ height: 10, marginTop: 12 }}>
               <i style={{ width: `${refine}%`, background: "linear-gradient(90deg, var(--blue), var(--gold))" }} />
             </div>
+            <div style={{ marginTop: 14 }}>
+              <div className="row between" style={{ fontSize: 12.5, marginBottom: 4 }}>
+                <span className="dim">英雄精滿</span>
+                <span className="mono">
+                  {fmt(standing.heroDone)} / {fmt(standing.count)}
+                </span>
+              </div>
+              <div className="bar">
+                <i style={{ width: `${heroPct}%` }} />
+              </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div className="row between" style={{ fontSize: 12.5, marginBottom: 4 }}>
+                <span className="dim">傳說精滿</span>
+                <span className="mono">
+                  {fmt(standing.legendDone)} / {fmt(standing.count)}
+                </span>
+              </div>
+              <div className="bar">
+                <i style={{ width: `${legendPct}%`, background: "linear-gradient(90deg, #58a6ff, #f2c65c)" }} />
+              </div>
+            </div>
             <div className="kv" style={{ marginTop: 12 }}>
-              <span className="k">最高（#1）</span>
-              <span className="v mono">{standing.top.toFixed(1)}%</span>
+              <span className="k">完全沒精煉</span>
+              <span className="v mono">{fmt(standing.untouched)} 顆</span>
             </div>
             <div className="kv">
-              <span className="k">中位數</span>
-              <span className="v mono">{standing.median.toFixed(1)}%</span>
-            </div>
-            <div className="kv">
-              <span className="k">{standing.count >= limit ? `第 ${fmt(standing.count)} 名` : "最低"}</span>
-              <span className="v mono">{standing.floor.toFixed(1)}%</span>
+              <span className="k">全部傳說精滿</span>
+              <span className="v mono">
+                {standing.avgIfLegend.toFixed(1)}%（+{standing.gainLegend.toFixed(1)}）
+              </span>
             </div>
           </div>
         </div>
@@ -297,7 +315,7 @@ export default function RuneStandingPage() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-head">
           <div>
-            <div className="card-title">各套裝精練度比較</div>
+            <div className="card-title">各套裝效率比較</div>
             <div className="card-sub">每個套裝各自取 Top {fmt(limit)}，由高到低排；點一列直接切換</div>
           </div>
           <span className="chip">{fmt(setTable.length)} 個套裝</span>
@@ -308,15 +326,15 @@ export default function RuneStandingPage() {
               <tr>
                 <th>套裝</th>
                 <th className="num">6★</th>
-                <th>精練度</th>
+                <th>平均效率</th>
                 <th className="num">與整體差</th>
-                <th className="num">最高</th>
-                <th className="num">≥85%</th>
+                <th className="num">未傳說精滿</th>
+                <th className="num">全滿後</th>
               </tr>
             </thead>
             <tbody>
               {setTable.map((row) => {
-                const diff = row.refine - overall.refinement;
+                const diff = row.avg - overall.avg;
                 const active = setId === row.id;
                 return (
                   <tr
@@ -334,10 +352,15 @@ export default function RuneStandingPage() {
                     <td>
                       <div className="row" style={{ gap: 8 }}>
                         <span className="mono" style={{ minWidth: 46 }}>
-                          {row.refine.toFixed(1)}%
+                          {row.avg.toFixed(1)}%
                         </span>
                         <div className="bar" style={{ flex: 1, minWidth: 60 }}>
-                          <i style={{ width: `${Math.min(100, row.refine)}%`, background: active ? "var(--gold)" : undefined }} />
+                          <i
+                            style={{
+                              width: `${Math.min(100, row.avg)}%`,
+                              background: active ? "var(--gold)" : undefined,
+                            }}
+                          />
                         </div>
                       </div>
                     </td>
@@ -345,8 +368,8 @@ export default function RuneStandingPage() {
                       {diff >= 0 ? "+" : ""}
                       {diff.toFixed(1)}
                     </td>
-                    <td className="num mono">{row.top.toFixed(1)}%</td>
-                    <td className="num mono">{fmt(row.hi)}</td>
+                    <td className="num mono">{fmt(row.legendMissing)}</td>
+                    <td className="num mono">{row.avgIfLegend.toFixed(1)}%</td>
                   </tr>
                 );
               })}
@@ -384,13 +407,21 @@ export default function RuneStandingPage() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-head">
           <div>
-            <div className="card-title">怎樣讀這三個數字</div>
+            <div className="card-title">怎樣讀這些數字</div>
           </div>
         </div>
         <div className="card-pad tiny dim" style={{ lineHeight: 1.9 }}>
-          <div>・精練度只看「{setName}的 6★ 符文，{standing.count >= limit ? `取效率最高的 Top ${fmt(limit)}` : `全部 ${fmt(standing.count)} 顆`}」，效率已含精煉、忽略固定體力 / 攻擊 / 防禦，100% 代表每條副屬性都達到上限。</div>
+          <div>
+            ・效率＝每條副屬的值 ÷ 該屬性的最大值（速度、體攻防%、爆擊、命中抵抗），固定體力 / 攻擊 / 防禦不計。
+          </div>
+          <div>
+            ・英雄精滿＝可精煉的副屬都達到英雄磨石上限；傳說精滿＝都達到傳說磨石上限。沒有可精煉副屬的符文視為已滿。
+          </div>
+          <div>
+            ・取樣只看「{setName}的 6★ 符文，{standing.count >= limit ? `取效率最高的 Top ${fmt(limit)}` : `全部 ${fmt(standing.count)} 顆`}」；套裝比較表也是每個套裝各自取 Top {fmt(limit)}。
+          </div>
+          <div>・固定體力 / 攻擊 / 防禦可以精煉，但不計入效率，所以把它們精滿不會反映在上面的百分比。</div>
           <div>・對公會用的是「已裝備符文」的平均效率，因為公會匯入資料只有裝備中的符文；選了套裝就只比該套裝。</div>
-          <div>・名次是把每位成員的平均效率排隊，你自己插入比較；同一顆符文在測試隊與據點防守重複出現只計一次。</div>
         </div>
       </div>
     </>

@@ -64,7 +64,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "monsters", label: "我的魔靈", icon: <Users size={17} />, title: "我的魔靈", sub: "你的魔靈盒與目前配裝" },
   { key: "summonlog", label: "魔靈召喚記錄", icon: <ScrollText size={17} />, title: "魔靈召喚記錄", sub: "原4 / 原5 魔靈的取得時間軸" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
-  { key: "standing", label: "符文定位", icon: <Target size={17} />, title: "符文定位", sub: "精練度、公會差距與門檻件數" },
+  { key: "standing", label: "符文定位", icon: <Target size={17} />, title: "符文定位", sub: "效率、精煉進度與公會差距" },
   { key: "grind", label: "精煉建議", icon: <Hammer size={17} />, title: "精煉建議", sub: "依符文素質、套裝與裝備對象排出精煉順序" },
   { key: "enchant", label: "精魔建議", icon: <FlaskConical size={17} />, title: "精魔建議", sub: "找出換一條副屬性就能符合自行分類的符文" },
   { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },
