@@ -40,11 +40,6 @@ export interface RtaDeckSlot {
   gap: number;
   /** 是否啟用速度順序（關閉 = 這隻不列入速度串接） */
   inOrder: boolean;
-  /**
-   * 戰鬥速度的手動調整（直接加在算出來的戰鬥速度上）。
-   * 0 = 完全依符文 / 建築 / 速度隊長計算；只影響戰鬥速度面板，不影響配符。
-   */
-  spdAdjust: number;
 }
 
 export interface RtaDeckResult {
@@ -83,15 +78,20 @@ export interface RtaDeckState {
   speedOrder: string[];
   /** 是否計入速度隊長技 */
   leaderOn: boolean;
-  /** 速度隊長技 % */
+  /** 速度隊長技 %（手動套用到所有魔靈時使用） */
   leaderPct: number;
   /**
-   * 指定哪一個配裝格是速度隊長（用該魔靈的隊長技資料與屬性判斷誰吃得到加成）。
-   * null = 使用上面的 leaderPct 手動套用到所有魔靈。
+   * 指定哪一隻常用魔靈是速度隊長（unit id）。
+   * 用該魔靈的隊長技資料與屬性判斷誰吃得到加成；null = 使用 leaderPct 手動套用。
    */
-  leaderSlotId: string | null;
+  leaderUnitId: number | null;
   /** 戰鬥速度模擬用的速度建築 %（RTA 實際上不計；預設 0） */
   towerSpd: number;
+  /**
+   * 常用魔靈池的戰鬥速度手動調整（以 unit id 為 key，值是加在計算值上的差異）。
+   * 只影響速度面板與排序，不影響配符。
+   */
+  speedAdjust: Record<number, number>;
   /** 速度差模式：至少差 N 速 / 剛好差 N 速 */
   gapMode: "at-least" | "exact";
   /** 配裝目標；預設符文評分（速度只當限制條件） */
@@ -127,7 +127,6 @@ export function createDeckSlot(unitId: number | null = null, role: TeamRole = "f
     weight: setup.weight,
     gap: 1,
     inOrder: true,
-    spdAdjust: 0,
   };
 }
 
@@ -139,8 +138,9 @@ export function createEmptyDeck(): RtaDeckState {
     speedOrder: [],
     leaderOn: false,
     leaderPct: 24,
-    leaderSlotId: null,
+    leaderUnitId: null,
     towerSpd: 0,
+    speedAdjust: {},
     gapMode: "at-least",
     objective: "eff",
     results: {},
@@ -254,7 +254,6 @@ function cleanSlot(raw: unknown, usedIds: Set<number>): RtaDeckSlot | null {
     weight: int(r.weight, 1, 10, 1),
     gap: int(r.gap, 0, 999, 1),
     inOrder: r.inOrder !== false,
-    spdAdjust: int(r.spdAdjust, -999, 999, 0),
   };
 }
 
@@ -285,6 +284,24 @@ export function loadRtaDeck(storageKey: string): RtaDeckState {
         results[id] = v;
       }
     }
+    // 常用魔靈池的手動戰鬥速度（unit id → 調整值）
+    const speedAdjust: Record<number, number> = {};
+    if (raw.speedAdjust && typeof raw.speedAdjust === "object") {
+      for (const [key, value] of Object.entries(raw.speedAdjust)) {
+        const uid = Number(key);
+        const n = int(value, -999, 999, 0);
+        if (Number.isInteger(uid) && uid !== 0 && n !== 0) speedAdjust[uid] = n;
+      }
+    }
+    // 舊版把速度隊長存在配裝格（leaderSlotId），換成 unit id
+    const legacy = raw as Partial<RtaDeckState> & { leaderSlotId?: unknown };
+    const legacyUnitId =
+      typeof legacy.leaderSlotId === "string"
+        ? slots.find((s) => s.id === legacy.leaderSlotId)?.unitId ?? null
+        : null;
+    const rawLeaderUnit = Number(raw.leaderUnitId);
+    const leaderUnitId =
+      Number.isInteger(rawLeaderUnit) && rawLeaderUnit !== 0 ? rawLeaderUnit : legacyUnitId;
     return {
       version: RTA_DECK_VERSION,
       pool,
@@ -292,11 +309,9 @@ export function loadRtaDeck(storageKey: string): RtaDeckState {
       speedOrder: order,
       leaderOn: raw.leaderOn === true,
       leaderPct: int(raw.leaderPct, 0, 50, 24),
-      leaderSlotId:
-        typeof raw.leaderSlotId === "string" && slotIds.has(raw.leaderSlotId)
-          ? raw.leaderSlotId
-          : null,
+      leaderUnitId,
       towerSpd: int(raw.towerSpd, 0, 50, 0),
+      speedAdjust,
       gapMode: raw.gapMode === "exact" ? "exact" : "at-least",
       objective: RTA_DECK_OBJECTIVES.some((o) => o.value === raw.objective)
         ? (raw.objective as RtaDeckObjective)
@@ -326,7 +341,6 @@ export function removeSlotFromDeck(deck: RtaDeckState, slotId: string): RtaDeckS
     ...deck,
     slots: deck.slots.filter((s) => s.id !== slotId),
     speedOrder: deck.speedOrder.filter((id) => id !== slotId),
-    leaderSlotId: deck.leaderSlotId === slotId ? null : deck.leaderSlotId,
     results,
     updatedAt: Date.now(),
   };

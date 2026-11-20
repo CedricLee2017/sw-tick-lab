@@ -113,7 +113,6 @@ function speedRows(deck: RtaDeckState) {
 type SpeedSource = "current" | "planned";
 
 interface BattleSpeedRow {
-  slot: RtaDeckSlot;
   unit: Unit;
   monster: Monster;
   baseSpd: number;
@@ -193,17 +192,16 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
 
   const clampPct = (v: number) => Math.max(0, Math.min(50, Math.round(Number(v) || 0)));
 
-  /** 指定的速度隊長格；有指定時依隊長技的屬性 / 內容判斷誰吃得到 */
-  const leaderSlot = deck.leaderSlotId ? deck.slots.find((s) => s.id === deck.leaderSlotId) : undefined;
-  const leaderUnit = unitOf(leaderSlot?.unitId);
+  /** 指定的速度隊長（常用魔靈池的 unit id）；有指定時依隊長技的屬性 / 內容判斷誰吃得到 */
+  const leaderUnit = unitOf(deck.leaderUnitId);
   const leaderMonster = monsterOfUnit(leaderUnit);
   const leaderSkill = leaderMonster ? spdLeaderSkill(leaderMonster.id) : null;
-  /** 真的有對應隊長技資料、可以依屬性判斷的隊長格；否則退回手動 % */
-  const activeLeaderSlotId = deck.leaderSlotId && leaderMonster && leaderSkill ? deck.leaderSlotId : null;
+  /** 真的有對應隊長技資料、可以依屬性判斷的隊長；否則退回手動 % */
+  const activeLeaderUnitId = deck.leaderUnitId && leaderMonster && leaderSkill ? deck.leaderUnitId : null;
 
   const leaderPctFor = (monster: Monster): number => {
     if (!deck.leaderOn) return 0;
-    if (activeLeaderSlotId) {
+    if (activeLeaderUnitId) {
       if (!leaderSkill) return 0;
       return spdLeaderApplies(leaderSkill, monster.el, "arena") ? leaderSkill.p : 0;
     }
@@ -234,15 +232,16 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
   );
 
   /**
-   * 單一配裝格的戰鬥速度。
+   * 單一魔靈的戰鬥速度（常用魔靈池的排序依據）。
    * source = planned 時用上次配符結果的符文；否則用目前 RTA 配裝。
    * 面板速度 = 基礎 + 符文 / 套裝；戰鬥速度再加速度建築與速度隊長。
    */
-  const battleSpeedOf = (slot: RtaDeckSlot, source: SpeedSource, towerPct = 0): BattleSpeedRow | null => {
-    const unit = unitOf(slot.unitId);
+  const battleSpeedOfUnit = (unit: Unit, source: SpeedSource, towerPct = 0): BattleSpeedRow | null => {
     const monster = monsterOfUnit(unit);
-    if (!unit || !monster) return null;
-    const planned = deck.results[slot.id];
+    if (!monster) return null;
+    // 同一隻魔靈可能同時在多個配裝格；取有配符結果的那一格
+    const plannedSlot = deck.slots.find((s) => s.unitId === unit.id && deck.results[s.id]);
+    const planned = plannedSlot ? deck.results[plannedSlot.id] : undefined;
     const current = account?.rta?.loadouts?.[unit.id];
     const usePlanned = source === "planned" && !!planned;
     const ids = usePlanned ? planned.runeIds : current?.runes ?? [];
@@ -256,9 +255,8 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
     const theTower = clampPct(towerPct);
     const leaderPct = leaderPctFor(monster);
     const battleSpd = panelSpd + Math.ceil((base.spd * (theTower + leaderPct)) / 100);
-    const adjust = Math.round(slot.spdAdjust ?? 0);
+    const adjust = Math.round(deck.speedAdjust[unit.id] ?? 0);
     return {
-      slot,
       unit,
       monster,
       baseSpd: base.spd,
@@ -273,9 +271,12 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
     };
   };
 
-  /** 目前 UI 的速度（有配符結果就用結果，否則用目前 RTA 配裝；不計建築與手動調整） */
-  const rtaSpeedOf = (slot: RtaDeckSlot): BattleSpeedRow | null =>
-    battleSpeedOf(slot, deck.results[slot.id] ? "planned" : "current", 0);
+  /** 配裝格目前的速度（有配符結果就用結果，否則用目前 RTA 配裝；不計建築與手動調整） */
+  const rtaSpeedOf = (slot: RtaDeckSlot): BattleSpeedRow | null => {
+    const unit = unitOf(slot.unitId);
+    if (!unit) return null;
+    return battleSpeedOfUnit(unit, deck.results[slot.id] ? "planned" : "current", 0);
+  };
 
   /** RTA 目前配裝（點開魔靈看符文 / 神器） */
   const [detailUnitId, setDetailUnitId] = useState<number | null>(null);
@@ -287,7 +288,7 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
     return { view: rtaView(account, unit, monster, leaderPctFor(monster), grind), monster, unit };
     // leaderPctFor 的結果由下面列出的狀態決定
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account, detailUnitId, unitMap, deck.leaderOn, deck.leaderPct, deck.leaderSlotId, deck.slots, grind]);
+  }, [account, detailUnitId, unitMap, deck.leaderOn, deck.leaderPct, deck.leaderUnitId, deck.pool, grind]);
 
   /** 魔靈挑選器 */
   const [poolPicker, setPoolPicker] = useState(false);
@@ -298,35 +299,46 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
   const budget = BUDGETS[budgetKey];
   /** 戰鬥速度面板要顯示目前 RTA 配裝，還是上次配符結果 */
   const [speedSource, setSpeedSource] = useState<SpeedSource>("current");
+  /**
+   * 正在編輯哪一隻的戰鬥速度。編輯時凍結牠的排序值，
+   * 避免輸入「2」的瞬間就跳到隊尾、輸入框跟著跑。
+   */
+  const [speedEdit, setSpeedEdit] = useState<{ unitId: number; key: number } | null>(null);
 
-  /** 可以當速度隊長的配裝格（有隊長技資料的魔靈） */
-  const leaderOptions = deck.slots.flatMap((slot) => {
-    const unit = unitOf(slot.unitId);
-    const monster = monsterOfUnit(unit);
-    const skill = monster ? spdLeaderSkill(monster.id) : null;
-    if (!unit || !monster || !skill) return [];
-    return [{ slotId: slot.id, label: unitLabel(unit), skill }];
-  });
+  /** 可以當速度隊長的魔靈：常用魔靈池＋配裝格（有隊長技資料的） */
+  const leaderOptions = (() => {
+    const ids = [...deck.pool];
+    for (const slot of deck.slots) {
+      if (slot.unitId != null && !ids.includes(slot.unitId)) ids.push(slot.unitId);
+    }
+    return ids.flatMap((unitId) => {
+      const unit = unitOf(unitId);
+      const monster = monsterOfUnit(unit);
+      const skill = monster ? spdLeaderSkill(monster.id) : null;
+      if (!unit || !monster || !skill) return [];
+      return [{ unitId, label: unitLabel(unit), skill }];
+    });
+  })();
 
-  const setLeaderSlot = (slotId: string) => {
-    if (!slotId) {
-      update((prev) => ({ ...prev, leaderOn: false, leaderSlotId: null }));
+  const setLeaderUnit = (value: string) => {
+    if (!value) {
+      update((prev) => ({ ...prev, leaderOn: false, leaderUnitId: null }));
       return;
     }
-    if (slotId === "__manual") {
-      update((prev) => ({ ...prev, leaderOn: true, leaderSlotId: null }));
+    if (value === "__manual") {
+      update((prev) => ({ ...prev, leaderOn: true, leaderUnitId: null }));
       return;
     }
-    const slot = deck.slots.find((s) => s.id === slotId);
-    const unit = unitOf(slot?.unitId);
+    const unitId = Number(value);
+    const unit = unitOf(unitId);
     const monster = monsterOfUnit(unit);
     const skill = monster ? spdLeaderSkill(monster.id) : null;
-    if (!slot || !skill) return;
-    update((prev) => ({ ...prev, leaderOn: true, leaderSlotId: slotId, leaderPct: skill.p }));
+    if (!unit || !skill) return;
+    update((prev) => ({ ...prev, leaderOn: true, leaderUnitId: unitId, leaderPct: skill.p }));
   };
 
   const setManualLeaderPct = (value: number) => {
-    update((prev) => ({ ...prev, leaderOn: true, leaderSlotId: null, leaderPct: value }));
+    update((prev) => ({ ...prev, leaderOn: true, leaderUnitId: null, leaderPct: value }));
   };
 
   const allEntries = useMemo<MonsterEntry[]>(() => {
@@ -393,12 +405,18 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
   };
 
   const removePoolUnit = (unitId: number) => {
-    update((prev) => ({
-      ...prev,
-      pool: prev.pool.filter((id) => id !== unitId),
-      // 從池子移除時，已設定在格子裡的同一隻也清空，避免選到池子外的魔靈
-      slots: prev.slots.map((s) => (s.unitId === unitId ? { ...s, unitId: null } : s)),
-    }));
+    update((prev) => {
+      const speedAdjust = { ...prev.speedAdjust };
+      delete speedAdjust[unitId];
+      return {
+        ...prev,
+        pool: prev.pool.filter((id) => id !== unitId),
+        // 從池子移除時，已設定在格子裡的同一隻也清空，避免選到池子外的魔靈
+        slots: prev.slots.map((s) => (s.unitId === unitId ? { ...s, unitId: null } : s)),
+        leaderUnitId: prev.leaderUnitId === unitId ? null : prev.leaderUnitId,
+        speedAdjust,
+      };
+    });
   };
 
   const addSlot = (unitId: number | null = null) => {
@@ -692,48 +710,66 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
   const bestRow = ranked[0];
   const worstRow = ranked.length > 1 ? ranked[ranked.length - 1] : undefined;
 
-  /** 戰鬥速度面板：依最終戰鬥速度由快到慢排序 */
-  const boardRows = deck.slots
-    .filter((slot) => slot.unitId != null)
-    .map((slot) => battleSpeedOf(slot, speedSource, deck.towerSpd))
-    .filter((row): row is BattleSpeedRow => !!row)
-    .sort(
-      (a, b) =>
-        b.finalSpd - a.finalSpd ||
+  /** 常用魔靈池的戰鬥速度：依最終戰鬥速度由快到慢排序 */
+  const poolRows = deck.pool
+    .flatMap((unitId) => {
+      const unit = unitOf(unitId);
+      const row = unit ? battleSpeedOfUnit(unit, speedSource, deck.towerSpd) : null;
+      return row ? [row] : [];
+    })
+    .sort((a, b) => {
+      // 編輯中的那一隻維持原本位置，其餘照最終速度排序
+      const key = (row: BattleSpeedRow) =>
+        speedEdit && speedEdit.unitId === row.unit.id ? speedEdit.key : row.finalSpd;
+      return (
+        key(b) - key(a) ||
         b.baseSpd - a.baseSpd ||
-        labelOf(a.unit).localeCompare(labelOf(b.unit)),
-    );
-  const manualSpeedCount = boardRows.filter((row) => row.adjust !== 0).length;
+        labelOf(a.unit).localeCompare(labelOf(b.unit))
+      );
+    });
+  const manualSpeedCount = poolRows.filter((row) => row.adjust !== 0).length;
 
   const leaderDesc =
     !deck.leaderOn
       ? "未計速度隊長"
-      : activeLeaderSlotId && leaderUnit && leaderSkill
+      : activeLeaderUnitId && leaderUnit && leaderSkill
         ? `${unitLabel(leaderUnit)} · +${leaderSkill.p}% ${SPD_AREA_LABEL[leaderSkill.a] ?? ""}`
         : `手動 +${clampPct(deck.leaderPct)}%（套用到所有魔靈）`;
 
-  const setBattleSpeed = (row: BattleSpeedRow, value: number) => {
-    updateSlot(row.slot.id, { spdAdjust: Math.round(value - row.battleSpd) });
+  const setPoolSpeed = (row: BattleSpeedRow, value: number) => {
+    const delta = Math.round(value - row.battleSpd);
+    // 第一次修改就凍結這隻的排序值，避免輸入「1」的瞬間跳到隊尾、輸入框跟著跑
+    setSpeedEdit((prev) => prev ?? { unitId: row.unit.id, key: row.finalSpd });
+    update((prev) => {
+      const speedAdjust = { ...prev.speedAdjust };
+      if (delta === 0) delete speedAdjust[row.unit.id];
+      else speedAdjust[row.unit.id] = delta;
+      return { ...prev, speedAdjust };
+    });
   };
 
   const resetManualSpeeds = () => {
-    update((prev) => ({
-      ...prev,
-      slots: prev.slots.map((slot) => (slot.spdAdjust ? { ...slot, spdAdjust: 0 } : slot)),
-    }));
+    update((prev) => ({ ...prev, speedAdjust: {} }));
     notify("已清除所有手動戰鬥速度");
   };
 
-  const applyBattleOrder = () => {
-    if (boardRows.length === 0) return;
-    const ids = boardRows.map((row) => row.slot.id);
+  /** 把常用魔靈池目前的戰鬥速度順序套用到配符用的速度串接（只取有在配裝格裡的） */
+  const applyPoolOrder = () => {
+    const slotByUnit = new Map(
+      deck.slots.filter((s) => s.unitId != null).map((s) => [s.unitId as number, s.id]),
+    );
+    const ids = poolRows.flatMap((row) => {
+      const id = slotByUnit.get(row.unit.id);
+      return id ? [id] : [];
+    });
+    if (ids.length === 0) return notify("戰鬥速度順序中的魔靈都還沒加入配裝格", "err");
     const rest = deck.slots.filter((slot) => !ids.includes(slot.id)).map((slot) => slot.id);
     update((prev) => ({
       ...prev,
       speedOrder: [...ids, ...rest],
       slots: prev.slots.map((slot) => (ids.includes(slot.id) ? { ...slot, inOrder: true } : slot)),
     }));
-    notify("已依戰鬥速度套用速度順序");
+    notify(`已依戰鬥速度套用 ${ids.length} 隻的速度順序`);
   };
 
   return (
@@ -741,10 +777,125 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
       {/* ── 常用魔靈池 ───────────────────────────── */}
       <div className="card">
         <div className="card-head">
-          <div>
-            <div className="card-title">RTA Deck · 常用魔靈池 <span className="dim tiny">{deck.pool.length} / {RTA_POOL_MAX}</span></div>
+          <div style={{ minWidth: 0 }}>
+            <div className="card-title">
+              <Timer size={13} className="gold" style={{ verticalAlign: -2, marginRight: 4 }} />
+              RTA Deck · 常用魔靈池 <span className="dim tiny">{deck.pool.length} / {RTA_POOL_MAX}</span>
+            </div>
+
+            <div className="rta-pool-tools row wrap">
+              <span className="row tiny" style={{ gap: 5 }}>
+                <Crown size={12} className="gold" />
+                <span className="dim">速度隊長</span>
+                <select
+                  className="select"
+                  style={{ width: 248 }}
+                  value={!deck.leaderOn ? "" : activeLeaderUnitId ?? "__manual"}
+                  onChange={(e) => setLeaderUnit(e.target.value)}
+                >
+                  <option value="">無速度隊長</option>
+                  <option value="__manual">手動輸入 %（套用到全部）</option>
+                  {leaderOptions.map((option) => {
+                    const rtaOk =
+                      option.skill.a === "General" ||
+                      option.skill.a === "Arena" ||
+                      option.skill.a === "Element";
+                    const area = SPD_AREA_LABEL[option.skill.a] ?? option.skill.a;
+                    const element = option.skill.a === "Element" && option.skill.e ? ` ${option.skill.e}` : "";
+                    return (
+                      <option key={option.unitId} value={option.unitId} disabled={!rtaOk}>
+                        {option.label} · +{option.skill.p}%（{area}{element}）{rtaOk ? "" : "－RTA 不適用"}
+                      </option>
+                    );
+                  })}
+                </select>
+              </span>
+
+              {deck.leaderOn && !activeLeaderUnitId && (
+                <span className="row tiny" style={{ gap: 4 }}>
+                  <NumberInput
+                    className="input mono"
+                    min={0}
+                    max={50}
+                    step={1}
+                    value={deck.leaderPct}
+                    onChange={setManualLeaderPct}
+                    style={{ width: 70 }}
+                    title="手動速度隊長技 %"
+                  />
+                  <span className="dim">%</span>
+                </span>
+              )}
+              {deck.leaderOn && activeLeaderUnitId && (
+                <span className="chip gold" title="隊長技依屬性 / 內容自動套用">
+                  {leaderDesc}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    style={{ padding: "0 4px", fontSize: 10 }}
+                    onClick={() => setLeaderUnit("__manual")}
+                  >
+                    改手動
+                  </button>
+                </span>
+              )}
+
+              <span className="row tiny" style={{ gap: 4 }}>
+                <span className="dim">速度建築</span>
+                <NumberInput
+                  className="input mono"
+                  min={0}
+                  max={50}
+                  step={1}
+                  value={deck.towerSpd}
+                  onChange={(v) => update((prev) => ({ ...prev, towerSpd: Math.max(0, Math.min(50, v)) }))}
+                  style={{ width: 58 }}
+                  title="速度圖騰 / 速度建築 %；RTA 實際上不計，預設 0"
+                />
+                <span className="dim">%</span>
+              </span>
+
+              <span className="row tiny" style={{ gap: 4 }}>
+                <span className="dim">速度來源</span>
+                <span className="tabs">
+                  <button
+                    type="button"
+                    className={`tab ${speedSource === "current" ? "active" : ""}`}
+                    onClick={() => setSpeedSource("current")}
+                    title="使用遊戲中目前的 RTA 配裝"
+                  >
+                    目前配裝
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab ${speedSource === "planned" ? "active" : ""}`}
+                    onClick={() => setSpeedSource("planned")}
+                    title="使用上次一鍵配符的結果（沒有結果的魔靈會沿用目前配裝）"
+                  >
+                    配符結果
+                  </button>
+                </span>
+              </span>
+
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={applyPoolOrder}
+                disabled={poolRows.length === 0}
+                title="把常用魔靈池的戰鬥速度順序套用到下方配符用的速度串接"
+              >
+                <ArrowDown size={11} /> 套用順序
+              </button>
+              {manualSpeedCount > 0 && (
+                <button type="button" className="btn btn-sm btn-ghost" onClick={resetManualSpeeds}>
+                  <RotateCcw size={11} /> 清除手動速度（{manualSpeedCount}）
+                </button>
+              )}
+            </div>
+
             <div className="card-sub">
-              最多選 {RTA_POOL_MAX} 隻常用魔靈。點小圖示可看目前的 RTA 符文與神器配置，按右上角 ＋ 直接加入配裝格。
+              最多選 {RTA_POOL_MAX} 隻常用魔靈，依戰鬥速度由快到慢排序（基礎＋符文附加＋速度建築＋速度隊長）。
+              下方速度可直接修改；點小圖示可看目前的 RTA 符文與神器配置，按右上角 ＋ 加入配裝格。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
@@ -759,240 +910,78 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
           </div>
         </div>
         <div className="card-pad">
-          {deck.pool.length === 0 ? (
+          {poolRows.length === 0 ? (
             <div className="empty" style={{ padding: "22px 16px" }}>
               常用魔靈池是空的。可以按「加入 RTA 最愛」或「選擇魔靈」開始。
             </div>
           ) : (
             <div className="rta-deck-pool">
-              {deck.pool.map((id) => {
-                const unit = unitOf(id);
-                const monster = monsterOfUnit(unit);
-                if (!unit || !monster) return null;
-                const used = deck.slots.some((s) => s.unitId === id);
+              {poolRows.map((row, i) => {
+                const used = deck.slots.some((s) => s.unitId === row.unit.id);
+                const isLeader = activeLeaderUnitId === row.unit.id;
+                const noLead = deck.leaderOn && row.leaderPct === 0;
                 return (
-                  <div key={id} className={`rta-pool-item ${used ? "used" : ""}`} title={`${unitLabel(unit)} · 基礎速度 ${monster.spd}`}>
-                    <button type="button" className="rta-pool-open" onClick={() => setDetailUnitId(id)}>
-                      <MonsterIcon id={monster.id} size={46} />
-                      <span className="rta-pool-name">{unitLabel(unit)}</span>
+                  <div
+                    key={row.unit.id}
+                    className={`rta-pool-item ${used ? "used" : ""} ${isLeader ? "leader" : ""} ${noLead ? "no-lead" : ""}`}
+                    title={`${unitLabel(row.unit)} · 戰鬥速度 ${row.finalSpd}（基礎 ${row.baseSpd} + 符文 ${row.addSpd} + 建築 ${row.towerPct}% + 隊長 ${row.leaderPct}%）`}
+                  >
+                    <button type="button" className="rta-pool-open" onClick={() => setDetailUnitId(row.unit.id)}>
+                      <MonsterIcon id={row.monster.id} size={42} />
+                      <span className="rta-pool-name">
+                        {isLeader && <Crown size={9} className="gold" style={{ verticalAlign: -1, marginRight: 2 }} />}
+                        {unitLabel(row.unit)}
+                      </span>
                     </button>
+                    <div className="rta-pool-spd">
+                      <span className="rta-pool-rank">{i + 1}</span>
+                      <NumberInput
+                        className="rta-pool-spd-input mono"
+                        min={1}
+                        max={9999}
+                        step={1}
+                        value={row.finalSpd}
+                        onChange={(v) => setPoolSpeed(row, v)}
+                        onFocus={() => setSpeedEdit({ unitId: row.unit.id, key: row.finalSpd })}
+                        onBlur={() => setSpeedEdit(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                        }}
+                        title="可直接修改戰鬥速度（手動調整會疊加在計算值上）"
+                      />
+                      <span className="tiny dim">速</span>
+                      {row.adjust !== 0 && (
+                        <button
+                          type="button"
+                          className="rta-pool-spd-reset"
+                          title={`手動 ${row.adjust > 0 ? "+" : ""}${row.adjust}；點擊清除`}
+                          onClick={() =>
+                            update((prev) => {
+                              const speedAdjust = { ...prev.speedAdjust };
+                              delete speedAdjust[row.unit.id];
+                              return { ...prev, speedAdjust };
+                            })
+                          }
+                        >
+                          <RotateCcw size={9} />
+                        </button>
+                      )}
+                    </div>
                     <button
                       type="button"
                       className="rta-pool-add"
                       title={used ? "已在配裝格" : "加入配裝格"}
                       disabled={used}
-                      onClick={() => addSlot(id)}
+                      onClick={() => addSlot(row.unit.id)}
                     >
                       <Plus size={11} />
                     </button>
-                    <button type="button" className="rta-pool-del" title="從常用魔靈池移除" onClick={() => removePoolUnit(id)}>
+                    <button type="button" className="rta-pool-del" title="從常用魔靈池移除" onClick={() => removePoolUnit(row.unit.id)}>
                       <X size={10} />
                     </button>
                   </div>
                 );
               })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── 戰鬥速度順序 ───────────────────────── */}
-      <div className="card">
-        <div className="card-head">
-          <div>
-            <div className="card-title">
-              <Timer size={13} className="gold" style={{ verticalAlign: -2, marginRight: 4 }} />
-              RTA Deck · 戰鬥速度順序
-              <span className="dim tiny" style={{ fontWeight: 400, marginLeft: 6 }}>
-                {boardRows.length} 隻 · 由快到慢
-              </span>
-            </div>
-            <div className="card-sub">
-              小圖示下方是即時戰鬥速度：基礎 + 符文附加 + 速度建築 + 速度隊長。換速度隊長後會自動重排，可以直接比較不同隊長技下的出手順序。
-            </div>
-          </div>
-          <div className="row wrap" style={{ gap: 6 }}>
-            <div className="tabs">
-              <button
-                type="button"
-                className={`tab ${speedSource === "current" ? "active" : ""}`}
-                onClick={() => setSpeedSource("current")}
-                title="使用遊戲中目前的 RTA 配裝"
-              >
-                目前配裝
-              </button>
-              <button
-                type="button"
-                className={`tab ${speedSource === "planned" ? "active" : ""}`}
-                onClick={() => setSpeedSource("planned")}
-                title="使用上次一鍵配符的結果（沒有結果的格子會沿用目前配裝）"
-              >
-                配符結果
-              </button>
-            </div>
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={applyBattleOrder}
-              disabled={boardRows.length === 0}
-              title="把這個戰鬥速度順序套用到下方的配符速度順序"
-            >
-              <ArrowDown size={11} /> 套用順序
-            </button>
-            {manualSpeedCount > 0 && (
-              <button type="button" className="btn btn-sm btn-ghost" onClick={resetManualSpeeds}>
-                <RotateCcw size={11} /> 清除手動速度（{manualSpeedCount}）
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="card-pad col" style={{ gap: 10 }}>
-          <div className="row wrap" style={{ gap: 10, alignItems: "center" }}>
-            <span className="row tiny" style={{ gap: 6 }}>
-              <Crown size={13} className="gold" />
-              <span className="dim">速度隊長</span>
-              <select
-                className="select"
-                style={{ width: 260 }}
-                value={!deck.leaderOn ? "" : activeLeaderSlotId ?? "__manual"}
-                onChange={(e) => setLeaderSlot(e.target.value)}
-              >
-                <option value="">無速度隊長</option>
-                <option value="__manual">手動輸入 %（套用到全部）</option>
-                {leaderOptions.map((option) => {
-                  const rtaOk =
-                    option.skill.a === "General" ||
-                    option.skill.a === "Arena" ||
-                    option.skill.a === "Element";
-                  const area = SPD_AREA_LABEL[option.skill.a] ?? option.skill.a;
-                  const element = option.skill.a === "Element" && option.skill.e ? ` ${option.skill.e}` : "";
-                  return (
-                    <option key={option.slotId} value={option.slotId} disabled={!rtaOk}>
-                      {option.label} · +{option.skill.p}%（{area}{element}）{rtaOk ? "" : "－RTA 不適用"}
-                    </option>
-                  );
-                })}
-              </select>
-            </span>
-
-            {deck.leaderOn && !activeLeaderSlotId && (
-              <span className="row tiny" style={{ gap: 4 }}>
-                <NumberInput
-                  className="input mono"
-                  min={0}
-                  max={50}
-                  step={1}
-                  value={deck.leaderPct}
-                  onChange={setManualLeaderPct}
-                  style={{ width: 78 }}
-                  title="手動速度隊長技 %"
-                />
-                <span className="dim">%</span>
-              </span>
-            )}
-            {deck.leaderOn && activeLeaderSlotId && (
-              <span className="chip gold" title="隊長技依屬性 / 內容自動套用">
-                {leaderDesc}
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost"
-                  style={{ padding: "0 4px", fontSize: 10 }}
-                  onClick={() => setLeaderSlot("__manual")}
-                >
-                  改手動
-                </button>
-              </span>
-            )}
-
-            <span className="row tiny" style={{ gap: 4 }}>
-              <span className="dim">速度建築</span>
-              <NumberInput
-                className="input mono"
-                min={0}
-                max={50}
-                step={1}
-                value={deck.towerSpd}
-                onChange={(v) => update((prev) => ({ ...prev, towerSpd: Math.max(0, Math.min(50, v)) }))}
-                style={{ width: 64 }}
-                title="速度圖騰 / 速度建築 %；RTA 實際上不計，預設 0"
-              />
-              <span className="dim">%</span>
-            </span>
-            <span className="tiny dim">RTA 不計建築；要模擬一般戰鬥可填 15。</span>
-          </div>
-
-          {boardRows.length === 0 ? (
-            <div className="empty" style={{ padding: "20px 16px" }}>
-              把魔靈加入配裝格後，這裡會依戰鬥速度列出攻擊順序。
-            </div>
-          ) : (
-            <div className="rta-battle-grid">
-              {boardRows.map((row, i) => {
-                const isLeader = !!activeLeaderSlotId && row.slot.id === activeLeaderSlotId;
-                const noLead = deck.leaderOn && row.leaderPct === 0;
-                return (
-                  <div
-                    key={row.slot.id}
-                    className={`rta-battle-card ${isLeader ? "leader" : ""} ${noLead ? "no-lead" : ""}`}
-                  >
-                    <span className="rta-battle-rank">{i + 1}</span>
-                    <button
-                      type="button"
-                      className="rta-battle-icon"
-                      onClick={() => setDetailUnitId(row.unit.id)}
-                      title={`${unitLabel(row.unit)} · 目前 RTA 配裝`}
-                    >
-                      <MonsterIcon id={row.monster.id} size={44} />
-                    </button>
-                    <div className="rta-battle-name" title={unitLabel(row.unit)}>
-                      {isLeader && <Crown size={9} className="gold" style={{ verticalAlign: -1, marginRight: 2 }} />}
-                      {unitLabel(row.unit)}
-                    </div>
-                    <div className="rta-battle-speed">
-                      <NumberInput
-                        className="rta-battle-input mono"
-                        min={1}
-                        max={9999}
-                        step={1}
-                        value={row.finalSpd}
-                        onChange={(v) => setBattleSpeed(row, v)}
-                        title="可直接修改戰鬥速度（手動調整會疊加在計算值上）"
-                      />
-                      <span className="tiny dim">速</span>
-                      <TickBadge spd={row.finalSpd} rta />
-                    </div>
-                    <div
-                      className="rta-battle-break"
-                      title={`基礎 ${row.baseSpd} + 符文 ${row.addSpd} + 建築 ${row.towerPct}% + 隊長 ${row.leaderPct}%`}
-                    >
-                      <span>基 {row.baseSpd} + 附 {row.addSpd}</span>
-                      <span>
-                        建 {row.towerPct}% · 隊 {row.leaderPct}%
-                      </span>
-                    </div>
-                    {row.adjust !== 0 ? (
-                      <button
-                        type="button"
-                        className="rta-battle-manual"
-                        onClick={() => updateSlot(row.slot.id, { spdAdjust: 0 })}
-                        title="清除這隻的手動速度"
-                      >
-                        手動 {row.adjust > 0 ? "+" : ""}{row.adjust} ↺
-                      </button>
-                    ) : (
-                      <span className={`rta-battle-src ${row.source}`}>
-                        {row.source === "planned" ? "配符結果" : row.source === "current" ? "目前配裝" : "無符文"}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {manualSpeedCount > 0 && (
-            <div className="tiny dim">
-              手動速度是「加在計算值上的調整」，不是固定值；變更速度隊長或建築後會跟著重新計算。
             </div>
           )}
         </div>
@@ -1047,7 +1036,7 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
             <span className="chip muted">
               <Crown size={11} /> {deck.leaderOn ? leaderDesc : "未計速度隊長"}
             </span>
-            <span className="tiny dim">速度隊長與建築在「戰鬥速度順序」設定</span>
+            <span className="tiny dim">速度隊長與建築在「常用魔靈池」設定</span>
             <div className="tabs">
               <button
                 type="button"
