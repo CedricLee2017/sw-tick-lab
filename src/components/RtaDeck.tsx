@@ -33,6 +33,7 @@ import {
   deckSlotSets,
   loadRtaDeck,
   orderedSlots,
+  removePoolUnits,
   removeSlotFromDeck,
   saveRtaDeck,
   type RtaDeckObjective,
@@ -405,18 +406,20 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
   };
 
   const removePoolUnit = (unitId: number) => {
-    update((prev) => {
-      const speedAdjust = { ...prev.speedAdjust };
-      delete speedAdjust[unitId];
-      return {
-        ...prev,
-        pool: prev.pool.filter((id) => id !== unitId),
-        // 從池子移除時，已設定在格子裡的同一隻也清空，避免選到池子外的魔靈
-        slots: prev.slots.map((s) => (s.unitId === unitId ? { ...s, unitId: null } : s)),
-        leaderUnitId: prev.leaderUnitId === unitId ? null : prev.leaderUnitId,
-        speedAdjust,
-      };
-    });
+    update((prev) => removePoolUnits(prev, [unitId]));
+  };
+
+  /** 常用魔靈池裡已經不在遊戲 RTA 最愛中的魔靈（可一鍵清除） */
+  const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
+  const stalePoolIds = useMemo(
+    () => deck.pool.filter((id) => !favoriteSet.has(id)),
+    [deck.pool, favoriteSet],
+  );
+
+  const clearStalePool = () => {
+    if (stalePoolIds.length === 0) return notify("常用魔靈池沒有不在 RTA 最愛的魔靈");
+    update((prev) => removePoolUnits(prev, stalePoolIds));
+    notify(`已一鍵清除 ${stalePoolIds.length} 隻不在 RTA 最愛的魔靈`);
   };
 
   const addSlot = (unitId: number | null = null) => {
@@ -896,12 +899,23 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
             <div className="card-sub">
               最多選 {RTA_POOL_MAX} 隻常用魔靈，依戰鬥速度由快到慢排序（基礎＋符文附加＋速度建築＋速度隊長）。
               下方速度可直接修改；點小圖示可看目前的 RTA 符文與神器配置，按右上角 ＋ 加入配裝格。
+              遊戲中的最愛移除後，可按「一鍵清除」同步移除已不在最愛的魔靈。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
             {favorites.length > 0 && (
               <button type="button" className="btn btn-sm btn-ghost" onClick={addFavoritePool} title="把 RTA 最愛加入常用魔靈池">
                 <Swords size={12} /> 加入 RTA 最愛
+              </button>
+            )}
+            {favorites.length > 0 && stalePoolIds.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={clearStalePool}
+                title={`一鍵移除 ${stalePoolIds.length} 隻已不在 RTA 最愛的魔靈，並同步清空對應配裝格`}
+              >
+                <Trash2 size={12} /> 一鍵清除（{stalePoolIds.length}）
               </button>
             )}
             <button type="button" className="btn btn-sm btn-primary" onClick={() => setPoolPicker(true)}>

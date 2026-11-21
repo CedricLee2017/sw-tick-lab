@@ -333,6 +333,31 @@ export function saveRtaDeck(storageKey: string, deck: RtaDeckState): void {
   }
 }
 
+/**
+ * 從常用魔靈池移除多隻魔靈，並同步清掉它們佔用的配裝格、隊長與手動速度 / 配符結果。
+ * 用於「一鍵清除不在最愛」；保留格子本身的套裝與下限設定，方便直接換上別的魔靈。
+ */
+export function removePoolUnits(deck: RtaDeckState, unitIds: Iterable<number>): RtaDeckState {
+  const remove = new Set(unitIds);
+  if (remove.size === 0) return deck;
+  const clearedSlotIds = new Set(
+    deck.slots.filter((s) => s.unitId != null && remove.has(s.unitId)).map((s) => s.id),
+  );
+  const speedAdjust = { ...deck.speedAdjust };
+  for (const id of remove) delete speedAdjust[id];
+  const results = { ...deck.results };
+  for (const id of clearedSlotIds) delete results[id];
+  return {
+    ...deck,
+    pool: deck.pool.filter((id) => !remove.has(id)),
+    slots: deck.slots.map((s) => (s.unitId != null && remove.has(s.unitId) ? { ...s, unitId: null } : s)),
+    leaderUnitId: deck.leaderUnitId != null && remove.has(deck.leaderUnitId) ? null : deck.leaderUnitId,
+    speedAdjust,
+    results,
+    updatedAt: Date.now(),
+  };
+}
+
 /** 移除格子後同步速度順序與結果 */
 export function removeSlotFromDeck(deck: RtaDeckState, slotId: string): RtaDeckState {
   const results = { ...deck.results };
