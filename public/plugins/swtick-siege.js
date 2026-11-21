@@ -45,6 +45,9 @@ module.exports = {
       wizardGuild: new Map(),
       wizardNames: new Map(),
       pending: [],
+      observerDefenses: [],
+      observerAttacks: [],
+      viewerWizardId: 0,
       seen: new Set(),
       warned: false,
     };
@@ -58,6 +61,11 @@ module.exports = {
       "BattleGuildSiegeResult",
       "getGuildSiegeMatchBattleLogSummary_v2",
       "SetGuildSiegeBattleReplayData",
+      // 遊戲內「據點進攻 / 防守紀錄」與戰報
+      "GetGuildSiegeBaseDefenseUnitList",
+      "GetGuildSiegeBaseDefenseUnitListPreset",
+      "GetGuildSiegeAttackUnitListInBattle",
+      "GetGuildSiegeBattleLog",
     ];
 
     for (const command of commands) {
@@ -100,6 +108,7 @@ module.exports = {
   },
 
   process(command, proxy, config, req, resp) {
+    if (this.num(req.wizard_id)) this.ctx.viewerWizardId = this.num(req.wizard_id);
     const actual = resp.command || req.command || command;
     if (actual === "GetGuildSiegeMatchupInfo" || actual === "GetGuildSiegeMatchupInfoForFinished") return this.ingestContext(resp);
     if (actual === "GetGuildSiegeRankingInfo") return this.ingestRanking(resp);
@@ -107,6 +116,9 @@ module.exports = {
     if (actual === "BattleGuildSiegeResult") return this.finishBattle(proxy, config, req, resp);
     if (actual === "getGuildSiegeMatchBattleLogSummary_v2") return this.ingestSummary(proxy, config, resp);
     if (actual === "SetGuildSiegeBattleReplayData") return this.ingestReplay(proxy, config, req, resp);
+    if (actual === "GetGuildSiegeBaseDefenseUnitList" || actual === "GetGuildSiegeBaseDefenseUnitListPreset") return this.ingestDefenseList(proxy, config, req, resp);
+    if (actual === "GetGuildSiegeAttackUnitListInBattle") return this.ingestAttackList(proxy, config, req, resp);
+    if (actual === "GetGuildSiegeBattleLog") return this.ingestBattleLog(proxy, config, req, resp);
   },
 
   ingestContext(resp) {
@@ -261,6 +273,140 @@ module.exports = {
       defense: { units: defense },
       counter: { units: counter },
     });
+  },
+
+  /** 遊戲內「據點防守」頁：先記住每個防守隊與最近一次被攻擊的時間 */
+  ingestDefenseList(proxy, config, req, resp) {
+    const ctx = this.ctx;
+    const baseId = this.num(req.base_number);
+    const deckStatus = this.asArray(resp.defense_deck_status_list);
+    for (const deck of this.asArray(resp.defense_deck_list)) {
+      const deckId = this.num(deck.deck_id);
+      const wizardId = this.num(deck.wizard_id);
+      if (!deckId || !wizardId) continue;
+      const units = this.asArray(resp.defense_unit_list)
+        .filter((unit) => this.num(unit.deck_id) === deckId && unit.unit_info)
+        .map((unit) => ({
+          pos: this.num(unit.pos_id),
+          unique: this.num(unit.unit_info.unit_id),
+          master: this.num(unit.unit_info.unit_master_id),
+        }))
+        .filter((unit) => unit.master > 0)
+        .sort((a, b) => a.pos - b.pos);
+      if (units.length !== 3) continue;
+      const status = deckStatus.find((row) => this.num(row.deck_id) === deckId);
+      const attackWizardId = this.num(status?.attack_wizard_id);
+      const battleStartTime = this.num(status?.battle_start_time);
+      const key = `${deckId}:${attackWizardId}:${battleStartTime}`;
+      if (ctx.observerDefenses.some((row) => row.key === key)) continue;
+      ctx.observerDefenses.push({
+        key,
+        baseId,
+        deckId,
+        wizardId,
+        units: units.map((unit) => unit.master),
+        unique: units.map((unit) => unit.unique),
+        attackWizardId,
+        battleStartTime,
+      });
+    }
+  },
+
+  /** 遊戲內「攻擊隊伍」頁：記住某個 base / deck 的進攻隊 */
+  ingestAttackList(proxy, config, req, resp) {
+    const ctx = this.ctx;
+    const baseId = this.num(req.base_number);
+    const deckId = this.num(req.deck_id);
+    const wizardInfo = this.asArray(resp.wizard_info_list);
+    for (const deck of this.asArray(resp.guildsiege_attack_unit_list)) {
+      const attackWizardId = this.num(deck.wizard_id);
+      if (!attackWizardId) continue;
+      const units = this.asArray(deck.unit_list)
+        .map((unit) => ({
+          pos: this.num(unit.pos_id),
+          unique: this.num(unit.unit_id),
+          master: this.num(unit.unit_master_id),
+        }))
+        .filter((unit) => unit.master > 0)
+        .sort((a, b) => a.pos - b.pos);
+      if (units.length !== 3) continue;
+      const info = wizardInfo.find((row) => this.num(row.wizard_id) === attackWizardId) || wizardInfo[0];
+      const attackWizardName = this.text(info?.wizard_name) || ctx.wizardNames.get(attackWizardId) || "";
+      const key = `${deckId}:${attackWizardId}:${units.map((unit) => unit.unique).join("-")}`;
+      if (ctx.observerAttacks.some((row) => row.key === key)) continue;
+      ctx.observerAttacks.push({
+        key,
+        baseId,
+        deckId,
+        attackWizardId,
+        attackWizardName,
+        units: units.map((unit) => unit.master),
+        unique: units.map((unit) => unit.unique),
+        battleStartTime: this.num(resp.tvalue),
+      });
+    }
+  },
+
+  /** 遊戲內「據點戰紀錄」：把防守隊、進攻隊與勝負配對成 3MDC 紀錄 */
+  ingestBattleLog(proxy, config, req, resp) {
+    const ctx = this.ctx;
+    const logType = this.num(resp.log_type ?? req.log_type);
+    if (logType && logType !== 1) return;
+    const viewerGuildId = ctx.wizardGuild.get(ctx.viewerWizardId) || 0;
+
+    for (const group of this.asArray(resp.log_list)) {
+      for (const row of this.asArray(group.battle_log_list)) {
+        const baseNumber = this.num(row.base_number);
+        const attackWizardId = this.num(row.wizard_id);
+        const defenseWizardId = this.num(row.opp_wizard_id);
+        const timestamp = this.num(row.log_timestamp);
+        if (!timestamp) continue;
+
+        const defense = ctx.observerDefenses.find((item) =>
+          item.baseId === baseNumber &&
+          item.wizardId === defenseWizardId
+        );
+        if (!defense) continue;
+
+        const attack = ctx.observerAttacks.find((item) =>
+          item.attackWizardId === attackWizardId &&
+          item.deckId === defense.deckId &&
+          (!defense.battleStartTime || item.battleStartTime > defense.battleStartTime) &&
+          (!item.battleStartTime || item.battleStartTime < timestamp)
+        );
+        if (!attack) continue;
+
+        const attackerGuildId = ctx.wizardGuild.get(attackWizardId) || 0;
+        const defenderGuildId = ctx.wizardGuild.get(defenseWizardId) || viewerGuildId;
+        const battle = {
+          battleType: "SiegeObserver",
+          wizard_id: attackWizardId,
+          wizard_name: attack.attackWizardName || ctx.wizardNames.get(attackWizardId) || "",
+          guild_id: attackerGuildId,
+          guild_name: ctx.guildNames.get(attackerGuildId) || "",
+          opp_guild_id: defenderGuildId,
+          opp_guild_name: ctx.guildNames.get(defenderGuildId) || "",
+          opp_wizard_id: defenseWizardId,
+          opp_wizard_name: ctx.wizardNames.get(defenseWizardId) || "",
+          battleKey: `${attackWizardId}:${timestamp}:${defense.deckId}`,
+          battleStartTime: defense.battleStartTime || attack.battleStartTime || 0,
+          battleDateTime: timestamp,
+          win_lose: this.num(row.win_lose) === 1 ? 1 : 0,
+          battleRank: ctx.guildRatings.get(viewerGuildId) || ctx.guildRatings.get(attackerGuildId) || 0,
+          defense: { units: defense.units },
+          counter: { units: attack.units },
+        };
+        this.send(proxy, config, battle);
+
+        // 同一場只配對一次；進攻方勝利代表這個防守隊已被攻破
+        const attackIndex = ctx.observerAttacks.indexOf(attack);
+        if (attackIndex >= 0) ctx.observerAttacks.splice(attackIndex, 1);
+        if (this.num(row.win_lose) === 1) {
+          const defenseIndex = ctx.observerDefenses.indexOf(defense);
+          if (defenseIndex >= 0) ctx.observerDefenses.splice(defenseIndex, 1);
+        }
+      }
+    }
   },
 
   send(proxy, config, battle) {

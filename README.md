@@ -113,7 +113,7 @@
   - 成員一覽：先列出公會名單（`GetGuildSiegeMatchupInfo.member_info_list`，含名稱、等級、職位、最後登入），有隊伍資料的成員再補上隊伍數、魔靈數、神器數、最快速度與平均符文效率；沒有隊伍資料的會標「—」。點成員可看每支隊伍的魔靈，點魔靈可看完整符文與神器。
   - 同魔靈比較：自動列出「兩位以上成員都有」的魔靈，表格比較套裝、速度、HP / DEF / 暴率 / 暴傷 / 抵抗 / 命中與神器效果，依速度排序；同一成員重複出現在多支隊伍時只算一次。
   - 資料存在瀏覽器（IndexedDB），可隨時重新匯入或清除。
-  - **據點戰**：公會頁的第二個分頁，收集自己的據點戰進攻紀錄（雙方三隻魔靈、勝負、公會、時間），可看場次 / 勝率、常用進攻隊與常遇到的防守隊。
+  - **據點戰**：公會頁的第二個分頁，收集據點進攻 / 防守紀錄（雙方三隻魔靈、勝負、公會、時間），可看場次 / 勝率、常用進攻隊與常遇到的防守隊。除了自己打完戰鬥外，只要在遊戲內打開「據點防守」、「攻擊隊伍」或「戰報」，外掛就會用防守隊 / 進攻隊 / 勝負紀錄配對成 `SiegeObserver` 紀錄，不需要自己打。
     - **SWEX 外掛自動上傳**：登入後在頁面產生 `swt_…` 上傳金鑰，把 `public/plugins/swtick-siege.js` 放到 SWEX 的 `plugins` 資料夾並在 Settings 啟用；之後打據點戰會自動上傳到 `POST /api/siege/battles`（Bearer token）。外掛只上傳對戰紀錄，不會上傳存檔或符文庫。
     - **手動匯入**：也可以拖入 SWGT 外掛存下來的 `3MDC-*.json`、單場 3MDC JSON，或 SWEX `full_log.txt`；full_log 會用 `BattleGuildSiegeStart_v2` 準備雙方隊伍，再用 `getGuildSiegeMatchBattleLogSummary_v2` / `BattleGuildSiegeResult` 配對勝負，未完成的戰鬥不會匯入。
     - 雲端紀錄存在 D1（`siege_battles`），同公會成員可共享；上傳金鑰只存 SHA-256 hash。資料庫升級：`npx wrangler d1 execute sw-tick-lab-db --remote --file=db/migrate-006-siege.sql`。

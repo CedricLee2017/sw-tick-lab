@@ -362,8 +362,8 @@ export function SiegeBattlesPanel() {
               </span>
             </div>
             <div className="card-sub">
-              自動收集 SWEX 的據點戰進攻紀錄；也可以手動匯入 SWGT 3MDC JSON 或 full_log.txt。
-              目前顯示{scope === "guild" ? "同公會" : "我的"}紀錄。
+              自動收集據點進攻 / 防守紀錄；在遊戲內查看據點防守、攻擊隊伍或戰報時就會上傳，不一定要自己打完一場。
+              也可以手動匯入 SWGT 3MDC JSON 或 full_log.txt。目前顯示{scope === "guild" ? "同公會" : "我的"}紀錄。
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
@@ -474,7 +474,7 @@ export function SiegeBattlesPanel() {
                   <br />
                   2. 外掛設定的網站網址填 <span className="mono">{siteUrl}</span>，貼上剛剛產生的 <span className="mono">swt_…</span> 金鑰。
                   <br />
-                  3. 打據點戰；戰鬥結束後外掛會自動上傳，回到這頁按「重新整理」。
+                  3. 在遊戲內查看據點防守、攻擊隊伍或戰報，外掛會自動上傳；回到這頁按「重新整理」。
                 </div>
               </>
             ) : (

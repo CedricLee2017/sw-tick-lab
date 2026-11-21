@@ -80,7 +80,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   if (scope === "guild") {
     if (guild) {
       const owns = await env.DB.prepare(
-        `SELECT 1 AS ok FROM siege_battles WHERE user_id = ?1 AND guild_name = ?2 LIMIT 1`,
+        `SELECT 1 AS ok FROM siege_battles
+         WHERE user_id = ?1 AND (guild_name = ?2 OR opp_guild_name = ?2) LIMIT 1`,
       )
         .bind(user.id, guild)
         .first<{ ok: number }>();
@@ -96,7 +97,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     }
 
     if (allowedGuild) {
-      where = "guild_name = ?1";
+      // 自己的進攻紀錄（guild_name）與別人打我們防守的紀錄（opp_guild_name）都要看到
+      where = "(guild_name = ?1 OR opp_guild_name = ?1)";
       binds = [allowedGuild];
     } else {
       // 沒有指定公會時：用自己上傳過的公會 id / 名稱，讓同公會成員的上傳也能看到

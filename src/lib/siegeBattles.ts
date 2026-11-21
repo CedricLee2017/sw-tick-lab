@@ -88,6 +88,26 @@ interface PendingBattle extends SiegeBattle {
   resolved: boolean;
 }
 
+interface ObserverDefense {
+  key: string;
+  baseId: number;
+  deckId: number;
+  wizardId: number;
+  units: number[];
+  attackWizardId: number;
+  battleStartTime: number;
+}
+
+interface ObserverAttack {
+  key: string;
+  baseId: number;
+  deckId: number;
+  attackWizardId: number;
+  attackWizardName: string;
+  units: number[];
+  battleStartTime: number;
+}
+
 interface SiegeLogBlock {
   command: string;
   request?: any;
@@ -107,6 +127,9 @@ class SiegeLogParser {
   private readonly wizardGuild = new Map<number, number>();
   private readonly wizardNames = new Map<number, string>();
   private readonly pending: PendingBattle[] = [];
+  private readonly observerDefenses: ObserverDefense[] = [];
+  private readonly observerAttacks: ObserverAttack[] = [];
+  private viewerWizardId = 0;
   blocks = 0;
 
   ingest(block: SiegeLogBlock): void {
@@ -114,7 +137,20 @@ class SiegeLogParser {
     const command = block.response?.command || block.request?.command || block.command;
     if (!command) return;
     this.commands[command] = (this.commands[command] ?? 0) + 1;
+    if (num(block.request?.wizard_id)) this.viewerWizardId = num(block.request?.wizard_id);
 
+    if ((command === "GetGuildSiegeBaseDefenseUnitList" || command === "GetGuildSiegeBaseDefenseUnitListPreset") && block.response) {
+      this.ingestDefenseList(block.request, block.response);
+      return;
+    }
+    if (command === "GetGuildSiegeAttackUnitListInBattle" && block.response) {
+      this.ingestAttackList(block.request, block.response);
+      return;
+    }
+    if (command === "GetGuildSiegeBattleLog" && block.response) {
+      this.ingestBattleLog(block.request, block.response);
+      return;
+    }
     if (command === "BattleGuildSiegeStart_v2" && block.response) {
       this.startBattle(block.response);
       return;
@@ -326,6 +362,129 @@ class SiegeLogParser {
       counter,
       resolved: true,
     } as PendingBattle);
+  }
+
+  /** 遊戲內據點防守頁：記住每個防守隊與最近一次被攻擊時間 */
+  private ingestDefenseList(req: any, resp: any): void {
+    const baseId = num(req?.base_number);
+    const statuses = asArray(resp.defense_deck_status_list);
+    for (const raw of asArray(resp.defense_deck_list)) {
+      const deck = raw as any;
+      const deckId = num(deck.deck_id);
+      const wizardId = num(deck.wizard_id);
+      if (!deckId || !wizardId) continue;
+      const units = asArray(resp.defense_unit_list)
+        .filter((unit: any) => num(unit?.deck_id) === deckId && unit?.unit_info)
+        .map((unit: any) => ({ pos: num(unit.pos_id), master: num(unit.unit_info.unit_master_id) }))
+        .filter((unit) => unit.master > 0)
+        .sort((a, b) => a.pos - b.pos);
+      if (units.length !== 3) continue;
+      const status = statuses.find((row: any) => num(row?.deck_id) === deckId) as any;
+      const attackWizardId = num(status?.attack_wizard_id);
+      const battleStartTime = num(status?.battle_start_time);
+      const key = `${deckId}:${attackWizardId}:${battleStartTime}`;
+      if (this.observerDefenses.some((row) => row.key === key)) continue;
+      this.observerDefenses.push({
+        key,
+        baseId,
+        deckId,
+        wizardId,
+        units: units.map((unit) => unit.master),
+        attackWizardId,
+        battleStartTime,
+      });
+    }
+  }
+
+  /** 遊戲內攻擊隊伍頁：記住某個 base / deck 的進攻隊 */
+  private ingestAttackList(req: any, resp: any): void {
+    const baseId = num(req?.base_number);
+    const deckId = num(req?.deck_id);
+    const wizardInfo = asArray(resp.wizard_info_list);
+    for (const raw of asArray(resp.guildsiege_attack_unit_list)) {
+      const deck = raw as any;
+      const attackWizardId = num(deck.wizard_id);
+      if (!attackWizardId) continue;
+      const units = asArray(deck.unit_list)
+        .map((unit: any) => ({ pos: num(unit?.pos_id), master: num(unit?.unit_master_id) }))
+        .filter((unit) => unit.master > 0)
+        .sort((a, b) => a.pos - b.pos);
+      if (units.length !== 3) continue;
+      const info = (wizardInfo.find((row: any) => num(row?.wizard_id) === attackWizardId) ?? wizardInfo[0]) as any;
+      const attackWizardName = text(info?.wizard_name) || this.wizardNames.get(attackWizardId) || "";
+      const key = `${deckId}:${attackWizardId}:${units.map((unit) => unit.master).join("-")}`;
+      if (this.observerAttacks.some((row) => row.key === key)) continue;
+      this.observerAttacks.push({
+        key,
+        baseId,
+        deckId,
+        attackWizardId,
+        attackWizardName,
+        units: units.map((unit) => unit.master),
+        battleStartTime: num(resp.tvalue),
+      });
+    }
+  }
+
+  /** 遊戲內據點戰紀錄：把防守隊 / 進攻隊與勝負配對成紀錄 */
+  private ingestBattleLog(req: any, resp: any): void {
+    const logType = num(resp.log_type ?? req?.log_type);
+    if (logType && logType !== 1) return;
+    const viewerGuildId = this.wizardGuild.get(this.viewerWizardId) ?? 0;
+
+    for (const rawGroup of asArray(resp.log_list)) {
+      const group = rawGroup as any;
+      for (const rawRow of asArray(group.battle_log_list)) {
+        const row = rawRow as any;
+        const baseNumber = num(row.base_number);
+        const attackWizardId = num(row.wizard_id);
+        const defenseWizardId = num(row.opp_wizard_id);
+        const timestamp = num(row.log_timestamp);
+        if (!timestamp) continue;
+
+        const defense = this.observerDefenses.find((item) =>
+          item.baseId === baseNumber && item.wizardId === defenseWizardId,
+        );
+        if (!defense) continue;
+
+        const attack = this.observerAttacks.find((item) =>
+          item.attackWizardId === attackWizardId &&
+          item.deckId === defense.deckId &&
+          (!defense.battleStartTime || item.battleStartTime > defense.battleStartTime) &&
+          (!item.battleStartTime || item.battleStartTime < timestamp),
+        );
+        if (!attack) continue;
+
+        const attackerGuildId = this.wizardGuild.get(attackWizardId) ?? 0;
+        const defenderGuildId = this.wizardGuild.get(defenseWizardId) ?? viewerGuildId;
+        this.remember({
+          uid: "",
+          battleType: "SiegeObserver",
+          wizardId: attackWizardId,
+          wizardName: attack.attackWizardName || this.wizardNames.get(attackWizardId) || "",
+          guildId: attackerGuildId,
+          guildName: this.guildNames.get(attackerGuildId) ?? "",
+          oppGuildId: defenderGuildId,
+          oppGuildName: this.guildNames.get(defenderGuildId) ?? "",
+          oppWizardId: defenseWizardId,
+          oppWizardName: this.wizardNames.get(defenseWizardId) ?? "",
+          battleKey: `${attackWizardId}:${timestamp}:${defense.deckId}`,
+          time: timestamp,
+          win: num(row.win_lose) === 1,
+          rank: this.guildRatings.get(viewerGuildId) ?? this.guildRatings.get(attackerGuildId) ?? 0,
+          defense: defense.units,
+          counter: attack.units,
+          resolved: true,
+        } as PendingBattle);
+
+        const attackIndex = this.observerAttacks.indexOf(attack);
+        if (attackIndex >= 0) this.observerAttacks.splice(attackIndex, 1);
+        if (num(row.win_lose) === 1) {
+          const defenseIndex = this.observerDefenses.indexOf(defense);
+          if (defenseIndex >= 0) this.observerDefenses.splice(defenseIndex, 1);
+        }
+      }
+    }
   }
 }
 
