@@ -53,6 +53,7 @@ import { TEAM_ROLE_LABELS, type TeamRole } from "../lib/teamOptimizer";
 import { baseStats, defaultBonus, effectiveSetCounts, setSummary, statsForRunes } from "../lib/stats";
 import type { Account, Artifact, Monster, Rune, Unit } from "../lib/types";
 import { MonsterPickerModal, sortMonsterEntries, type MonsterEntry } from "./MonsterPicker";
+import { SwcSamplePanel } from "./SwcSamplePanel";
 import {
   ArtifactCard,
   Modal,
@@ -300,6 +301,8 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
   const budget = BUDGETS[budgetKey];
   /** 戰鬥速度面板要顯示目前 RTA 配裝，還是上次配符結果 */
   const [speedSource, setSpeedSource] = useState<SpeedSource>("current");
+  /** RTA Deck 的分頁：自己的配裝 / SWC 支援魔靈樣本 */
+  const [deckView, setDeckView] = useState<"mine" | "swc">("mine");
   /**
    * 正在編輯哪一隻的戰鬥速度。編輯時凍結牠的排序值，
    * 避免輸入「2」的瞬間就跳到隊尾、輸入框跟著跑。
@@ -676,6 +679,26 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
 
   if (!account) return <div className="empty">尚未匯入存檔</div>;
 
+  const deckTabs = (
+    <div className="tabs rta-page-tabs" style={{ marginBottom: 12 }}>
+      <button type="button" className={`tab ${deckView === "mine" ? "active" : ""}`} onClick={() => setDeckView("mine")}>
+        <Swords size={13} /> 我的 RTA Deck
+      </button>
+      <button type="button" className={`tab ${deckView === "swc" ? "active" : ""}`} onClick={() => setDeckView("swc")}>
+        <Crown size={13} /> SWC sample
+      </button>
+    </div>
+  );
+
+  if (deckView === "swc") {
+    return (
+      <div className="col rta-deck" style={{ gap: 14 }}>
+        {deckTabs}
+        <SwcSamplePanel />
+      </div>
+    );
+  }
+
   const gapIssues = speedGapIssues(
     speedChain
       .map((slot) => ({
@@ -777,6 +800,7 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
 
   return (
     <div className="col rta-deck" style={{ gap: 14 }}>
+      {deckTabs}
       {/* ── 常用魔靈池 ───────────────────────────── */}
       <div className="card">
         <div className="card-head">
