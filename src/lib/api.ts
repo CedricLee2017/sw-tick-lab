@@ -1,3 +1,5 @@
+import type { SiegeBattle } from "./siegeBattleCore";
+
 export interface ApiUser {
   id: number;
   email: string;
@@ -13,6 +15,19 @@ export interface ApiConfig {
   forceLogin: boolean;
   /** 存檔備份（R2）是否可用 */
   uploads: boolean;
+}
+
+export interface ApiSiegeToken {
+  prefix: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+}
+
+export interface ApiSiegeBattles {
+  battles: SiegeBattle[];
+  hasMore: boolean;
+  scope: "mine" | "guild";
+  guild: string;
 }
 
 export class ApiError extends Error {
@@ -43,4 +58,18 @@ export const api = {
   changePassword: (current: string, next: string) =>
     request<{ ok: true }>("/api/auth/password", { method: "POST", body: JSON.stringify({ current, next }) }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
+
+  siegeToken: () => request<{ token: ApiSiegeToken | null }>("/api/siege/token"),
+  createSiegeToken: () =>
+    request<{ ok: true; token: string; prefix: string; createdAt: number }>("/api/siege/token", { method: "POST" }),
+  revokeSiegeToken: () => request<{ ok: true }>("/api/siege/token", { method: "DELETE" }),
+  siegeBattles: (scope: "mine" | "guild", guild = "", limit = 500, offset = 0) =>
+    request<ApiSiegeBattles>(
+      `/api/siege/battles?scope=${scope}&limit=${limit}&offset=${offset}${guild ? `&guild=${encodeURIComponent(guild)}` : ""}`,
+    ),
+  uploadSiegeBattles: (battles: SiegeBattle[]) =>
+    request<{ ok: true; received: number; inserted: number; duplicates: number }>("/api/siege/battles", {
+      method: "POST",
+      body: JSON.stringify({ battles }),
+    }),
 };

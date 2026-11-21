@@ -1,6 +1,6 @@
 /** 公會：匯入隊友的公會資料，比較成員的符文與神器 */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, RefreshCw, Search, Trash2, Upload, Users } from "lucide-react";
+import { ArrowLeft, RefreshCw, Search, Swords, Trash2, Upload, Users } from "lucide-react";
 import { MONSTER_MAP, useStore } from "../store";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
 import {
@@ -22,6 +22,7 @@ import {
 import { artifactSubText } from "../lib/artifacts";
 import { effectiveSetCounts, setSummary } from "../lib/stats";
 import { ArtifactCard, EmptyState, Modal, MonsterIcon, MonsterPanel, RuneBoard, RuneCard, TickBadge, fmt } from "../components/ui";
+import { SiegeBattlesPanel } from "../components/SiegeBattlesPanel";
 
 const SOURCE_LABEL: Record<string, string> = { test: "公會測試隊伍", siege: "據點戰防守" };
 
@@ -135,6 +136,8 @@ export default function GuildPage() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ name: string; pct: number; found: number } | null>(null);
   const [drag, setDrag] = useState(false);
+  /** 公會頁的兩個大分頁：成員資料 / 據點戰 */
+  const [view, setView] = useState<"members" | "siege">("members");
   const [tab, setTab] = useState<"members" | "compare">("members");
   const [q, setQ] = useState("");
   const [memberOpen, setMemberOpen] = useState<GuildMember | null>(null);
@@ -217,9 +220,30 @@ export default function GuildPage() {
 
   const memberSummary = memberOpen ? summaries.find((s) => s.member.wizardId === memberOpen.wizardId) : null;
 
+  const guildTabs = (
+    <div className="tabs" style={{ marginBottom: 12 }}>
+      <button type="button" className={`tab ${view === "members" ? "active" : ""}`} onClick={() => setView("members")}>
+        <Users size={13} /> 成員資料
+      </button>
+      <button type="button" className={`tab ${view === "siege" ? "active" : ""}`} onClick={() => setView("siege")}>
+        <Swords size={13} /> 據點戰
+      </button>
+    </div>
+  );
+
+  if (view === "siege") {
+    return (
+      <>
+        {guildTabs}
+        <SiegeBattlesPanel />
+      </>
+    );
+  }
+
   if (!data || data.members.length === 0) {
     return (
       <>
+        {guildTabs}
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="card-head">
             <div>
@@ -279,6 +303,7 @@ export default function GuildPage() {
 
   return (
     <>
+      {guildTabs}
       <div className="row between wrap" style={{ gap: 10, marginBottom: 12 }}>
         <div>
           <div className="card-title row" style={{ gap: 7 }}>

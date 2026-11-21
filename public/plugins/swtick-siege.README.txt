@@ -1,0 +1,39 @@
+SW Tick Lab — 據點戰紀錄上傳外掛（SWEX）
+========================================
+
+這個外掛會從 SWEX 的遊戲封包中收集「自己的據點戰進攻紀錄」，
+包含雙方三隻魔靈、勝負、公會與時間，並自動上傳到 SW Tick Lab。
+不會上傳帳號 JSON、符文庫、聊天或個人密碼。
+
+安裝步驟
+--------
+1. 下載 swtick-siege.js。
+2. 放到 SWEX 的 plugins 資料夾，例如：
+   C:\SWEX\plugins\swtick-siege.js
+3. 完全關閉 SWEX 再重新開啟。
+4. 到 SWEX 的 Settings → Plugins，啟用「SwTickSiegeLogger」。
+5. 在 SW Tick Lab 登入後，打開「公會 → 據點戰」：
+   - 按「產生上傳金鑰」，複製 swt_ 開頭的金鑰。
+   - 在 SWEX 外掛設定貼上金鑰。
+   - 網站網址預設是 https://sw-tick-lab.pages.dev；
+     如果你使用其他網域，請改成該網址。
+6. 打據點戰。戰鬥結束後外掛會自動上傳，重新整理頁面即可看到。
+
+設定說明
+--------
+- siteURL：SW Tick Lab 網站網址（不要加結尾的 /）。
+- token：在「公會 → 據點戰」產生的上傳金鑰。
+- saveToFile：同時把 3MDC JSON 存到 SWEX 的檔案資料夾，方便備份或手動匯入。
+
+授權與致謝
+----------
+這個外掛的封包流程參考 Cerusa 的 swgt-swex-plugin（MIT License，
+Copyright (c) 2020 Cerusa），但它是獨立實作，只會上傳到 SW Tick Lab，
+不會呼叫 SWGT 的 API 或使用 SWGT 的金鑰。完整 MIT 授權文字見
+swtick-siege.LICENSE.txt。
+
+注意
+----
+- 只有三隻防守 + 至少一隻進攻的戰鬥會上傳。
+- 若外掛沒有收到戰鬥結果，該場不會上傳，避免把中離或未完成戰鬥算進去。
+- 也可以在「公會 → 據點戰」直接拖入 SWEX full_log.txt 或 3MDC JSON 手動匯入。
