@@ -1134,7 +1134,7 @@ check("神器分數：四條滿分 = 200", () => {
   assert.equal(artifactScore(art), 25);
 });
 
-check("屬性減傷合計：取最高 N 條", () => {
+check("屬性減傷合計：只計剛好 N 種", () => {
   const mk = (subs) => ({
     id: 1, type: 1, attr: 3, style: 0, occupied: 0, main: { t: 100, v: 1500 },
     subs, level: 15, rank: 5, stars: 5, locked: false,
@@ -1142,12 +1142,16 @@ check("屬性減傷合計：取最高 N 條", () => {
   const five = mk([
     { t: 305, v: 10 }, { t: 306, v: 20 }, { t: 307, v: 30 }, { t: 308, v: 40 }, { t: 309, v: 50 },
   ]);
-  assert.equal(artifactReductionSum(five, 1), 50);
-  assert.equal(artifactReductionSum(five, 3), 120);
-  assert.equal(artifactReductionSum(five, 4), 140);
+  assert.equal(artifactReductionSum(five, 1), null, "5 種不會被當成 1 種");
+  assert.equal(artifactReductionSum(five, 3), null, "5 種不會被當成 3 種");
+  assert.equal(artifactReductionSum(five, 5), 150);
   const three = mk([{ t: 305, v: 10 }, { t: 306, v: 20 }, { t: 307, v: 25 }]);
+  assert.equal(artifactReductionSum(three, 2), null, "3 種不會被當成 2 種");
   assert.equal(artifactReductionSum(three, 3), 55);
   assert.equal(artifactReductionSum(three, 4), null);
+  const two = mk([{ t: 305, v: 10 }, { t: 306, v: 20 }]);
+  assert.equal(artifactReductionSum(two, 2), 30);
+  assert.equal(artifactReductionSum(two, 1), null);
 });
 
 check("神器主效果：固定體力 / 攻擊 / 防禦", () => {

@@ -91,7 +91,7 @@ export default function ArtifactsPage() {
         if (rankWithinAction === "include" ? within < rankWithinCount : within >= rankWithinCount) return false;
       }
       if (reductionEnabled && reductionCount > 0) {
-        // 任 N 種屬性減傷：取這件神器最高的 N 條（同一屬性只取最高）
+        // 只計剛好 N 種屬性減傷；3/4 種不會被算進 2 種的條件
         const total = artifactReductionSum(a, reductionCount);
         const matched =
           total != null &&
@@ -340,13 +340,13 @@ export default function ArtifactsPage() {
               setReductionCount(v);
               if (v === 0) setReductionEnabled(false);
             }}
-            title="選擇要合計幾種屬性減傷（取這件神器最高的 N 條）"
+            title="只計剛好 N 種屬性減傷的神器；3 種或 4 種不會算進 2 種的條件"
           >
             <option value={0}>不限</option>
-            <option value={1}>任一種屬性</option>
-            <option value={2}>任二種屬性</option>
-            <option value={3}>任三種屬性</option>
-            <option value={4}>任四種屬性</option>
+            <option value={1}>剛好 1 種屬性</option>
+            <option value={2}>剛好 2 種屬性</option>
+            <option value={3}>剛好 3 種屬性</option>
+            <option value={4}>剛好 4 種屬性</option>
           </select>
           <NumberInput
             className="input mono"
@@ -403,10 +403,10 @@ export default function ArtifactsPage() {
           </span>
           <span className="tiny dim">
             {reductionCount === 0
-              ? "例：任三種屬性 + 25 + 以下 + 符合 → 最高三條屬性減傷合計 ≤ 25%"
+              ? "例：剛好 3 種屬性 + 25 + 以下 + 符合 → 只有剛好 3 種屬性減傷的神器，合計 ≤ 25%"
               : reductionAction === "include"
-                ? `最高 ${reductionCount} 條屬性減傷合計 ${reductionDirection === "above" ? "≥" : "≤"} ${reductionSum}%`
-                : `排除最高 ${reductionCount} 條屬性減傷合計 ${reductionDirection === "above" ? "≥" : "≤"} ${reductionSum}%`}
+                ? `剛好 ${reductionCount} 種屬性減傷合計 ${reductionDirection === "above" ? "≥" : "≤"} ${reductionSum}%`
+                : `排除剛好 ${reductionCount} 種屬性減傷合計 ${reductionDirection === "above" ? "≥" : "≤"} ${reductionSum}%`}
           </span>
           {reductionCount > 0 && !reductionEnabled && <span className="tiny dim">（未套用）</span>}
           {reductionCount > 0 && (
