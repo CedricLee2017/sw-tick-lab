@@ -6,6 +6,7 @@ import { useRankIndex } from "../components/RankProvider";
 import { averageRankPercent, summarizeRanks } from "../lib/rankings";
 import { buildUsageIndex, usageText } from "../lib/usage";
 import { artifactMainText, artifactScore, artifactSubText, artifactKindText, artifactTypeText } from "../lib/artifacts";
+import { artifactReductionSum } from "../lib/artifactReduction";
 import type { Artifact } from "../lib/types";
 
 type SortKey = "rank" | "subrank" | "subrank-desc" | "type" | "id" | "score" | "score-asc" | "acquired" | "acquired-asc";
@@ -34,6 +35,11 @@ export default function ArtifactsPage() {
   /** 排名門檻（1 = 第一名） */
   const [rankWithin, setRankWithin] = useState(5);
   const [rankWithinAction, setRankWithinAction] = useState<"include" | "exclude">("include");
+  /** 屬性減傷總和條件：0 = 不限；1–4 = 任 N 種 */
+  const [reductionCount, setReductionCount] = useState(0);
+  const [reductionSum, setReductionSum] = useState(25);
+  const [reductionDirection, setReductionDirection] = useState<"above" | "below">("below");
+  const [reductionAction, setReductionAction] = useState<"include" | "exclude">("include");
   const ranks = useRankIndex();
   const usageIndex = useMemo(() => buildUsageIndex(account), [account]);
 
@@ -80,6 +86,14 @@ export default function ArtifactsPage() {
         const within = subs.filter((r) => r && r.total >= 2 && r.rank <= rankWithin).length;
         if (rankWithinAction === "include" ? within < rankWithinCount : within >= rankWithinCount) return false;
       }
+      if (reductionCount > 0) {
+        // 任 N 種屬性減傷：取這件神器最高的 N 條（同一屬性只取最高）
+        const total = artifactReductionSum(a, reductionCount);
+        const matched =
+          total != null &&
+          (reductionDirection === "above" ? total >= reductionSum : total <= reductionSum);
+        if (reductionAction === "include" ? !matched : matched) return false;
+      }
       if (q) {
         const text = [
           artifactTypeText(a.type),
@@ -125,7 +139,7 @@ export default function ArtifactsPage() {
       return b.main.v - a.main.v || b.rank - a.rank;
     });
     return arr;
-  }, [account, q, type, attr, onlyFree, usage, rankMin, rankWithinCount, rankWithin, rankWithinAction, sort, owner, ranks, usageIndex]);
+  }, [account, q, type, attr, onlyFree, usage, rankMin, rankWithinCount, rankWithin, rankWithinAction, reductionCount, reductionSum, reductionDirection, reductionAction, sort, owner, ranks, usageIndex]);
 
   if (!account) return <div className="empty"><Sparkles size={40} /><div>尚未匯入存檔</div></div>;
 
@@ -142,6 +156,7 @@ export default function ArtifactsPage() {
     setRankMin(80);
     setSort("subrank-desc");
     setRankWithinCount(0);
+    setReductionCount(0);
   };
   const equipped = account.artifacts.filter((a) => a.occupied > 0).length;
   const attrCounts = new Map<number, number>();
@@ -276,6 +291,87 @@ export default function ArtifactsPage() {
           </span>
           {rankWithinCount > 0 && (
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRankWithinCount(0)}>
+              清除條件
+            </button>
+          )}
+        </div>
+        <div className="card-pad row wrap" style={{ gap: 10, borderBottom: "1px solid var(--line-soft)" }}>
+          <span className="tiny" style={{ fontWeight: 700 }}>屬性減傷總和</span>
+          <select
+            className="select"
+            style={{ width: 118 }}
+            value={reductionCount}
+            onChange={(e) => setReductionCount(Number(e.target.value))}
+            title="選擇要合計幾種屬性減傷（取這件神器最高的 N 條）"
+          >
+            <option value={0}>不限</option>
+            <option value={1}>任一種屬性</option>
+            <option value={2}>任二種屬性</option>
+            <option value={3}>任三種屬性</option>
+            <option value={4}>任四種屬性</option>
+          </select>
+          <NumberInput
+            className="input mono"
+            min={0}
+            max={200}
+            step={1}
+            fallback={25}
+            value={reductionSum}
+            onChange={setReductionSum}
+            disabled={reductionCount === 0}
+            style={{ width: 64 }}
+            title="屬性減傷合計門檻（%）"
+          />
+          <span className="tiny dim">%</span>
+          <span className="tabs">
+            <button
+              type="button"
+              className={`tab ${reductionDirection === "above" ? "active" : ""}`}
+              onClick={() => setReductionDirection("above")}
+              disabled={reductionCount === 0}
+              title="合計大於或等於門檻"
+            >
+              以上
+            </button>
+            <button
+              type="button"
+              className={`tab ${reductionDirection === "below" ? "active" : ""}`}
+              onClick={() => setReductionDirection("below")}
+              disabled={reductionCount === 0}
+              title="合計小於或等於門檻"
+            >
+              以下
+            </button>
+          </span>
+          <span className="tabs">
+            <button
+              type="button"
+              className={`tab ${reductionAction === "include" ? "active" : ""}`}
+              onClick={() => setReductionAction("include")}
+              disabled={reductionCount === 0}
+              title="只顯示符合條件的神器"
+            >
+              符合
+            </button>
+            <button
+              type="button"
+              className={`tab ${reductionAction === "exclude" ? "active" : ""}`}
+              onClick={() => setReductionAction("exclude")}
+              disabled={reductionCount === 0}
+              title="排除符合條件的神器"
+            >
+              排除
+            </button>
+          </span>
+          <span className="tiny dim">
+            {reductionCount === 0
+              ? "例：任三種屬性 + 25 + 以下 + 符合 → 最高三條屬性減傷合計 ≤ 25%"
+              : reductionAction === "include"
+                ? `最高 ${reductionCount} 條屬性減傷合計 ${reductionDirection === "above" ? "≥" : "≤"} ${reductionSum}%`
+                : `排除最高 ${reductionCount} 條屬性減傷合計 ${reductionDirection === "above" ? "≥" : "≤"} ${reductionSum}%`}
+          </span>
+          {reductionCount > 0 && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setReductionCount(0)}>
               清除條件
             </button>
           )}

@@ -3,6 +3,7 @@ export * from "../src/lib/optimizer";
 export * from "../src/lib/stats";
 export * from "../src/lib/damage";
 export * from "../src/lib/artifacts";
+export * from "../src/lib/artifactReduction";
 export * from "../src/lib/stage2";
 export * from "../src/lib/rta";
 export * from "../src/lib/adCalculator";

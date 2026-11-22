@@ -42,6 +42,20 @@ export function artifactReduction(art: Artifact): ArtifactReduction {
   return { values, elements, total, count: elements.length };
 }
 
+/**
+ * 取這件神器最高的 count 條屬性減傷合計。
+ * 不足 count 條時回傳 null（例如只有 2 種屬性減傷，就不算「任三種」）。
+ */
+export function artifactReductionSum(art: Artifact, count: number): number | null {
+  if (count <= 0) return null;
+  const r = artifactReduction(art);
+  const top = r.elements
+    .map((el) => r.values[el] ?? 0)
+    .sort((a, b) => b - a)
+    .slice(0, count);
+  return top.length >= count ? top.reduce((sum, v) => sum + v, 0) : null;
+}
+
 /** 分組用的鍵：元素組合（例如火水風 = "1-2-3"，順序不影響） */
 export function reductionComboKey(elements: number[]): string {
   return [...elements].sort((a, b) => a - b).join("-");

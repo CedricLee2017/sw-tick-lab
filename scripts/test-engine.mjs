@@ -44,7 +44,7 @@ const {
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
   artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct, artifactScore,
-  buildRankIndex, artifactPoolKey,
+  buildRankIndex, artifactPoolKey, artifactReductionSum,
   rtaStats, rtaView,
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
@@ -1132,6 +1132,22 @@ check("神器分數：四條滿分 = 200", () => {
   assert.equal(artifactScore(art), 200);
   art.subs = [{ t: 305, v: 15 }];
   assert.equal(artifactScore(art), 25);
+});
+
+check("屬性減傷合計：取最高 N 條", () => {
+  const mk = (subs) => ({
+    id: 1, type: 1, attr: 3, style: 0, occupied: 0, main: { t: 100, v: 1500 },
+    subs, level: 15, rank: 5, stars: 5, locked: false,
+  });
+  const five = mk([
+    { t: 305, v: 10 }, { t: 306, v: 20 }, { t: 307, v: 30 }, { t: 308, v: 40 }, { t: 309, v: 50 },
+  ]);
+  assert.equal(artifactReductionSum(five, 1), 50);
+  assert.equal(artifactReductionSum(five, 3), 120);
+  assert.equal(artifactReductionSum(five, 4), 140);
+  const three = mk([{ t: 305, v: 10 }, { t: 306, v: 20 }, { t: 307, v: 25 }]);
+  assert.equal(artifactReductionSum(three, 3), 55);
+  assert.equal(artifactReductionSum(three, 4), null);
 });
 
 check("神器主效果：固定體力 / 攻擊 / 防禦", () => {
