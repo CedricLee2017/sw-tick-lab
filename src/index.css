@@ -2019,6 +2019,7 @@ p { margin: 0; }
 }
 .rta-pool-spd {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 2px;
@@ -2062,6 +2063,14 @@ p { margin: 0; }
   cursor: pointer;
 }
 .rta-pool-spd-reset:hover { opacity: 1; }
+.rta-pool-panel-spd {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 9px;
+  line-height: 1.1;
+  color: var(--muted-2);
+  white-space: nowrap;
+}
 .rta-pool-add, .rta-pool-del {
   position: absolute;
   top: 3px;

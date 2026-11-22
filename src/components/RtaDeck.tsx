@@ -132,6 +132,8 @@ interface BattleSpeedRow {
   finalSpd: number;
   /** 手動調整值 */
   adjust: number;
+  /** 對應的面板速度（把手動調整一起算進去，不含建築與隊長） */
+  finalPanelSpd: number;
   /** 這組速度是來自目前配裝、上次配符結果，或完全沒有符文 */
   source: "current" | "planned" | "none";
 }
@@ -269,6 +271,7 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
       battleSpd,
       finalSpd: Math.max(1, battleSpd + adjust),
       adjust,
+      finalPanelSpd: Math.max(1, panelSpd + adjust),
       source: usePlanned ? "planned" : runes.length > 0 ? "current" : "none",
     };
   };
@@ -922,7 +925,7 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
 
             <div className="card-sub">
               最多選 {RTA_POOL_MAX} 隻常用魔靈，依戰鬥速度由快到慢排序（基礎＋符文附加＋速度建築＋速度隊長）。
-              下方速度可直接修改；點小圖示可看目前的 RTA 符文與神器配置，按右上角 ＋ 加入配裝格。
+              下方速度可直接修改；手動修改後會多顯示反推的對應面板速度。點小圖示可看目前的 RTA 符文與神器配置，按右上角 ＋ 加入配裝格。
               遊戲中的最愛移除後，可按「一鍵清除」同步移除已不在最愛的魔靈。
             </div>
           </div>
@@ -1003,6 +1006,14 @@ export function RtaDeckPanel({ favorites }: RtaDeckProps) {
                         >
                           <RotateCcw size={9} />
                         </button>
+                      )}
+                      {row.adjust !== 0 && (
+                        <span
+                          className="rta-pool-panel-spd"
+                          title={`對應面板速度 ${row.finalPanelSpd}（戰鬥速度 ${row.finalSpd} − 建築 ${row.towerPct}% − 隊長 ${row.leaderPct}%）`}
+                        >
+                          面板 {row.finalPanelSpd}
+                        </span>
                       )}
                     </div>
                     <button
