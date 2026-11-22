@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Search, Sparkles } from "lucide-react";
 import { unitLabel, useStore } from "../store";
-import { ArtifactCard, Modal, fmt } from "../components/ui";
+import { ArtifactCard, Modal, NumberInput, fmt } from "../components/ui";
 import { useRankIndex } from "../components/RankProvider";
 import { averageRankPercent, summarizeRanks } from "../lib/rankings";
 import { buildUsageIndex, usageText } from "../lib/usage";
@@ -22,6 +22,11 @@ export default function ArtifactsPage() {
   const [sort, setSort] = useState<SortKey>("main");
   const [take, setTake] = useState(150);
   const [detail, setDetail] = useState<Artifact | null>(null);
+  /** 附屬性排名條件：0 = 不限；1–4 = 任 N 種附屬性 */
+  const [rankWithinCount, setRankWithinCount] = useState(0);
+  /** 排名門檻（1 = 第一名） */
+  const [rankWithin, setRankWithin] = useState(5);
+  const [rankWithinAction, setRankWithinAction] = useState<"include" | "exclude">("include");
   const ranks = useRankIndex();
   const usageIndex = useMemo(() => buildUsageIndex(account), [account]);
 
@@ -62,6 +67,12 @@ export default function ArtifactsPage() {
         const summary = summarizeRanks(ranks?.artifacts.get(a.id)?.subs);
         if (summary.count < 2 || summary.best * 100 < rankMin) return false;
       }
+      if (rankWithinCount > 0) {
+        // 只計同組有 2 件以上的排名，避免「1/1」被當成前 5 名
+        const subs = ranks?.artifacts.get(a.id)?.subs ?? [];
+        const within = subs.filter((r) => r && r.total >= 2 && r.rank <= rankWithin).length;
+        if (rankWithinAction === "include" ? within < rankWithinCount : within >= rankWithinCount) return false;
+      }
       if (q) {
         const text = [
           artifactTypeText(a.type),
@@ -93,7 +104,7 @@ export default function ArtifactsPage() {
       return b.main.v - a.main.v || b.rank - a.rank;
     });
     return arr;
-  }, [account, q, type, attr, onlyFree, usage, rankMin, sort, owner, ranks, usageIndex]);
+  }, [account, q, type, attr, onlyFree, usage, rankMin, rankWithinCount, rankWithin, rankWithinAction, sort, owner, ranks, usageIndex]);
 
   if (!account) return <div className="empty"><Sparkles size={40} /><div>尚未匯入存檔</div></div>;
 
@@ -109,6 +120,7 @@ export default function ArtifactsPage() {
     setUsage("none");
     setRankMin(80);
     setSort("subrank-desc");
+    setRankWithinCount(0);
   };
   const equipped = account.artifacts.filter((a) => a.occupied > 0).length;
   const attrCounts = new Map<number, number>();
@@ -188,6 +200,69 @@ export default function ArtifactsPage() {
               <option value="id">ID 排序</option>
             </select>
           </div>
+        </div>
+        <div className="card-pad row wrap" style={{ gap: 10, borderBottom: "1px solid var(--line-soft)" }}>
+          <span className="tiny" style={{ fontWeight: 700 }}>附屬性排名</span>
+          <select
+            className="select"
+            style={{ width: 122 }}
+            value={rankWithinCount}
+            onChange={(e) => setRankWithinCount(Number(e.target.value))}
+            title="選擇要有幾種附屬性符合下面的名次條件"
+          >
+            <option value={0}>不限</option>
+            <option value={1}>任一種附屬性</option>
+            <option value={2}>任二種附屬性</option>
+            <option value={3}>任三種附屬性</option>
+            <option value={4}>任四種附屬性</option>
+          </select>
+          <NumberInput
+            className="input mono"
+            min={1}
+            max={9999}
+            step={1}
+            fallback={5}
+            value={rankWithin}
+            onChange={setRankWithin}
+            disabled={rankWithinCount === 0}
+            style={{ width: 64 }}
+            title="輸入排名門檻，1 = 同組第一名"
+          />
+          <span className="tiny dim">名以內</span>
+          <span className="tabs">
+            <button
+              type="button"
+              className={`tab ${rankWithinAction === "include" ? "active" : ""}`}
+              onClick={() => setRankWithinAction("include")}
+              disabled={rankWithinCount === 0}
+              title="只顯示符合條件的神器"
+            >
+              符合
+            </button>
+            <button
+              type="button"
+              className={`tab ${rankWithinAction === "exclude" ? "active" : ""}`}
+              onClick={() => setRankWithinAction("exclude")}
+              disabled={rankWithinCount === 0}
+              title="排除符合條件的神器"
+            >
+              排除
+            </button>
+          </span>
+          <span className="tiny dim">
+            {rankWithinCount === 0
+              ? "例：任一種附屬性 + 5 + 排除 → 四條附屬性都在第 5 名以外"
+              : rankWithinAction === "include"
+                ? `至少 ${rankWithinCount} 條附屬性排名 ≤ ${rankWithin}`
+                : rankWithinCount === 1
+                  ? `四條附屬性排名都 > ${rankWithin}`
+                  : `少於 ${rankWithinCount} 條附屬性排名 ≤ ${rankWithin}`}
+          </span>
+          {rankWithinCount > 0 && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRankWithinCount(0)}>
+              清除條件
+            </button>
+          )}
         </div>
         <div className="card-pad row wrap" style={{ gap: 14, borderBottom: "1px solid var(--line-soft)" }}>
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
