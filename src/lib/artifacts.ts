@@ -117,6 +117,42 @@ export function artifactSubValue(art: Artifact, effect: number): number {
 }
 
 /**
+ * 神器分數用的單條效果上限。
+ * 大部分與 ARTIFACT_EFFECT_MAX 相同，但這幾條的實際上限不同，
+ * 分開一張表避免影響配神器 / Focus 的既有數值。
+ */
+const ARTIFACT_SCORE_MAX: Record<number, number> = {
+  ...ARTIFACT_EFFECT_MAX,
+  // 依初始骰數分類：3–5% 的效果上限 25、3–6% 的上限 30
+  200: 30,
+  201: 30,
+  202: 30,
+  204: 25,
+  205: 25,
+  226: 25,
+  215: 40,
+  300: 25,
+  301: 25,
+  302: 25,
+  303: 25,
+  304: 25,
+};
+
+/**
+ * 神器分數（滿分 200）：每條副效果除以該效果上限，四條全滿 = 200。
+ * 主效果不計分，與遊戲 v8.5.2 後的神器分數一致。
+ */
+export function artifactScore(art: Artifact): number {
+  let ratio = 0;
+  for (const s of art.subs) {
+    const max = ARTIFACT_SCORE_MAX[s.t];
+    if (!max || s.v <= 0) continue;
+    ratio += s.v / max;
+  }
+  return Math.min(200, Math.round(ratio * 50));
+}
+
+/**
  * 神器「速度增加效果 +%」（效果 206）的總和。
  * 這個效果只會放大「速度 Buff」，本身不會直接加面板速度；
  * 有兩件神器時分別取每件的最高數值再加總。

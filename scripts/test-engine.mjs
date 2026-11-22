@@ -43,7 +43,8 @@ const {
   filterEnchantByStock, filterEnchantScoreByStock, ENCHANT_MAIN_STATS,
   defaultBonus, finalizeStats, statsForRunes, buildsOf, ehpWithSkills, effectiveSetCounts,
   artifactFlat, artifactMainText, artifactSubText, artifactDamageBonus, artifactKindText, artifactTypeText,
-  artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct,
+  artifactAdditionalDamage, artifactEligible, runStage2, artifactFocusFit, artifactAutoLabels, artifactSpeedBuffPct, artifactScore,
+  buildRankIndex, artifactPoolKey,
   rtaStats, rtaView,
   calculateAd, artifactAdEffects, artifactAdResult, addAdEffects,
   deckContext, spdLeaderSkill, spdLeaderApplies,
@@ -1096,6 +1097,41 @@ check("神器自動套用魔靈屬性 / 類型（含無形）", () => {
   assert.equal(artifactEligible(mk(2, 0, 98), lushen), true, "無形類型神器可用");
   assert.equal(artifactKindText(mk(1, 98, 0)), "無形");
   assert.equal(artifactKindText(mk(2, 0, 98)), "無形");
+});
+
+check("神器排名：同屬性 + 同主效果（星級不拆組）", () => {
+  const mk = (id, stars, mainT, value) => ({
+    id, type: 1, attr: 3, style: 0, occupied: 0,
+    main: { t: mainT, v: 1500 },
+    subs: [{ t: 307, v: value, up: 0, roll: 0 }],
+    level: 15, rank: 5, stars, locked: false,
+  });
+  const a = mk(1, 5, 100, 30);
+  const b = mk(2, 5, 100, 20);
+  const c = mk(3, 4, 100, 40);
+  const d = mk(4, 5, 101, 50);
+  const idx = buildRankIndex([], [a, b, c, d]);
+  assert.equal(idx.artifacts.get(1).subs[0].rank, 2);
+  assert.equal(idx.artifacts.get(1).subs[0].total, 3);
+  assert.equal(idx.artifacts.get(2).subs[0].rank, 3);
+  assert.equal(idx.artifacts.get(3).subs[0].rank, 1, "不同星級仍同組");
+  assert.equal(idx.artifacts.get(3).subs[0].total, 3);
+  assert.equal(idx.artifacts.get(4).subs[0].total, 1, "不同主效果不同組");
+  assert.equal(artifactPoolKey(a), artifactPoolKey(c));
+  assert.notEqual(artifactPoolKey(a), artifactPoolKey(d));
+});
+
+check("神器分數：四條滿分 = 200", () => {
+  const art = {
+    id: 1, type: 1, attr: 3, style: 0, occupied: 0, main: { t: 100, v: 1500 },
+    subs: [
+      { t: 305, v: 30 }, { t: 306, v: 30 }, { t: 307, v: 30 }, { t: 308, v: 30 },
+    ],
+    level: 15, rank: 5, stars: 5, locked: false,
+  };
+  assert.equal(artifactScore(art), 200);
+  art.subs = [{ t: 305, v: 15 }];
+  assert.equal(artifactScore(art), 25);
 });
 
 check("神器主效果：固定體力 / 攻擊 / 防禦", () => {

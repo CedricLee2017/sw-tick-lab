@@ -5,7 +5,7 @@ import { ELEMENTS, SET_BY_ID, STAT_TYPES, type StatKey } from "../lib/constants"
 import { monsterOf } from "../store";
 import type { Artifact, Monster, Rune, Stats } from "../lib/types";
 import { runeScore, type BaseStats } from "../lib/stats";
-import { artifactKindText, artifactMainText, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
+import { artifactKindText, artifactMainText, artifactScore, artifactSubText, artifactSubsText, artifactTypeText, ARTIFACT_RANKS } from "../lib/artifacts";
 import { rankTone, type StatRank } from "../lib/rankings";
 import { type EquipUsage } from "../lib/usage";
 import { useArtifactRank, useRankIndex, useRuneRank } from "./RankProvider";
@@ -487,7 +487,8 @@ export function ArtifactCard({
   const rankClass = rank >= 5 ? "legendary" : rank === 4 ? "hero" : rank === 3 ? "rare" : "";
   const color = artifact.type === 2 ? "#e879f9" : (ARTIFACT_EL_COLOR[artifact.attr] ?? "#8b9cc0");
   const artRank = useArtifactRank(artifact.id);
-  const poolTitle = `${artifactTypeText(artifact.type)}（${artifactKindText(artifact)}）共 ${artRank?.pool ?? 0} 件，副效果排名以此為基準`;
+  const score = artifactScore(artifact);
+  const poolTitle = `${artifactTypeText(artifact.type)}（${artifactKindText(artifact)}）· ${artifactMainText(artifact)} 共 ${artRank?.pool ?? 0} 件，副效果排名以此為基準`;
   return (
     <div
       className={`rune artifact ${rankClass} ${detail ? "detail" : ""}`}
@@ -499,6 +500,7 @@ export function ArtifactCard({
           <span className="rune-dot" style={{ background: color }} />
           {artifactTypeText(artifact.type)}
           <span className="rune-tag">{artifactKindText(artifact)}</span>
+          <span className="rune-tag muted" title="神器分數：四條副效果對比各自上限，滿分 200（主效果不計）">分數 {score}</span>
           {usage?.deck && <span className="rune-tag usage deck" title="遊戲內預設隊 / 防守隊使用中">預設隊</span>}
           {usage?.rta && <span className="rune-tag usage rta" title="世界競技場（RTA）配裝使用中">RTA</span>}
           {artRank && artRank.pool > 1 && (
@@ -525,7 +527,10 @@ export function ArtifactCard({
         );
       })}
       <div className="rune-sub" style={{ marginTop: 2 }}>
-        <span className="dim tiny">{ARTIFACT_RANKS[rank] ?? `${rank}★`} · {artifact.stars}★ 原生</span>
+        <span className="dim tiny" title={artifact.acquiredAt ? `取得時間 ${artifact.acquiredAt}` : "舊存檔沒有取得時間"}>
+          {ARTIFACT_RANKS[rank] ?? `${rank}★`} · {artifact.stars}★ 原生
+          {artifact.acquiredAt ? ` · ${artifact.acquiredAt.slice(0, 10)}` : ""}
+        </span>
         {!detail && <span className="dim tiny">{owner || "未裝備"}</span>}
       </div>
       {detail && (
@@ -533,6 +538,8 @@ export function ArtifactCard({
           <div className="rune-meta-row"><span>神器 ID</span><b className="mono">{artifact.id}</b></div>
           <div className="rune-meta-row"><span>類型</span><b>{artifactTypeText(artifact.type)} · {artifactKindText(artifact)}</b></div>
           <div className="rune-meta-row"><span>品質</span><b>{ARTIFACT_RANKS[rank] ?? "—"}</b></div>
+          <div className="rune-meta-row"><span>分數</span><b className="gold">{score} / 200</b></div>
+          <div className="rune-meta-row"><span>取得時間</span><b className="mono">{artifact.acquiredAt || "—"}</b></div>
           <div className="rune-meta-row"><span>裝備</span><b title={owner || "未裝備"}>{owner || "未裝備"}</b></div>
           <div className="rune-meta-row"><span>效果</span><b title={artifactSubsText(artifact)}>{artifact.subs.length} 條</b></div>
         </div>

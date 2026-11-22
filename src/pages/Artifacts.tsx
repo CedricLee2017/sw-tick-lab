@@ -5,11 +5,18 @@ import { ArtifactCard, Modal, NumberInput, fmt } from "../components/ui";
 import { useRankIndex } from "../components/RankProvider";
 import { averageRankPercent, summarizeRanks } from "../lib/rankings";
 import { buildUsageIndex, usageText } from "../lib/usage";
-import { artifactMainText, artifactSubText, artifactKindText, artifactTypeText } from "../lib/artifacts";
+import { artifactMainText, artifactScore, artifactSubText, artifactKindText, artifactTypeText } from "../lib/artifacts";
 import type { Artifact } from "../lib/types";
 
-type SortKey = "main" | "rank" | "subrank" | "subrank-desc" | "type" | "id";
+type SortKey = "rank" | "subrank" | "subrank-desc" | "type" | "id" | "score" | "score-asc" | "acquired" | "acquired-asc";
 type UsageFilter = "all" | "deck" | "rta" | "any" | "none";
+
+/** SWEX 的 date_add 轉成時間戳；沒有日期時回傳 0（排序時會用 ID 補） */
+function acquiredTime(a: Artifact): number {
+  if (!a.acquiredAt) return 0;
+  const t = Date.parse(a.acquiredAt.replace(" ", "T"));
+  return Number.isFinite(t) ? t : 0;
+}
 
 export default function ArtifactsPage() {
   const account = useStore((s) => s.account);
@@ -19,7 +26,7 @@ export default function ArtifactsPage() {
   const [onlyFree, setOnlyFree] = useState(false);
   const [usage, setUsage] = useState<UsageFilter>("all");
   const [rankMin, setRankMin] = useState(0);
-  const [sort, setSort] = useState<SortKey>("main");
+  const [sort, setSort] = useState<SortKey>("score");
   const [take, setTake] = useState(150);
   const [detail, setDetail] = useState<Artifact | null>(null);
   /** 附屬性排名條件：0 = 不限；1–4 = 任 N 種附屬性 */
@@ -101,6 +108,20 @@ export default function ArtifactsPage() {
       }
       if (sort === "type") return a.type - b.type || a.attr - b.attr;
       if (sort === "id") return a.id - b.id;
+      if (sort === "score" || sort === "score-asc") {
+        const sa = artifactScore(a);
+        const sb = artifactScore(b);
+        return sort === "score"
+          ? sb - sa || b.rank - a.rank || b.main.v - a.main.v
+          : sa - sb || a.rank - b.rank || a.main.v - b.main.v;
+      }
+      if (sort === "acquired" || sort === "acquired-asc") {
+        const ta = acquiredTime(a);
+        const tb = acquiredTime(b);
+        if (ta !== tb) return sort === "acquired" ? tb - ta : ta - tb;
+        // 舊存檔沒有 date_add 時，用神器 ID 當作取得順序
+        return sort === "acquired" ? b.id - a.id : a.id - b.id;
+      }
       return b.main.v - a.main.v || b.rank - a.rank;
     });
     return arr;
@@ -180,19 +201,14 @@ export default function ArtifactsPage() {
             </select>
             <select
               className="select"
-              style={{ width: 162 }}
-              value={rankMin}
-              onChange={(e) => setRankMin(Number(e.target.value))}
-              title="只留下每一條副效果都排在該組最後 N% 的神器"
+              style={{ width: 170 }}
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
             >
-              <option value={0}>不限副效果排名</option>
-              <option value={50}>副效果全排最後 50%</option>
-              <option value={70}>副效果全排最後 30%</option>
-              <option value={80}>副效果全排最後 20%</option>
-              <option value={90}>副效果全排最後 10%</option>
-            </select>
-            <select className="select" style={{ width: 120 }} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-              <option value="main">主效果排序</option>
+              <option value="score">分數排序（高→低）</option>
+              <option value="score-asc">分數排序（低→高）</option>
+              <option value="acquired">獲得順序（新→舊）</option>
+              <option value="acquired-asc">獲得順序（舊→新）</option>
               <option value="rank">品質排序</option>
               <option value="subrank">副效果排名（好→差）</option>
               <option value="subrank-desc">副效果排名（差→好）</option>
@@ -270,17 +286,22 @@ export default function ArtifactsPage() {
           </label>
           <button
             type="button"
-            className="btn btn-sm"
-            onClick={sellCandidates}
-            title="篩選：未在預設隊 / RTA、副效果全部排最後 20%，並由差到好排列"
+            className={`btn btn-sm ${rankMin > 0 ? "btn-primary" : ""}`}
+            onClick={() => {
+              if (rankMin > 0) setRankMin(0);
+              else sellCandidates();
+            }}
+            title={rankMin > 0
+              ? "取消可賣候選篩選"
+              : "篩選：未在預設隊 / RTA、副效果全部排最後 20%，並由差到好排列"}
           >
-            可賣候選
+            {rankMin > 0 ? "取消可賣候選" : "可賣候選"}
           </button>
           <span
             className="chip muted"
-            title="每條副效果後面的數字是「名次 / 同組有這條效果的數量」，1 = 最高。分組方式：屬性神器看同屬性、類型神器看同魔靈類型。"
+            title="每條副效果後面的數字是「名次 / 同組有這條效果的數量」，1 = 最高。分組方式：屬性神器看同屬性、類型神器看同魔靈類型，再分同主效果。"
           >
-            副效果排名＝同類型同屬性
+            副效果排名＝同類型／同屬性＋同主效果
           </span>
           <span className="tiny dim">
             屬性 {[1, 2, 3, 4, 5].map((n) => `${["水", "火", "風", "光", "暗"][n - 1]} ${attrCounts.get(n) ?? 0}`).join(" · ")}

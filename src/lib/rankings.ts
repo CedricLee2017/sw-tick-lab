@@ -7,7 +7,8 @@
  *
  * 1. 分組（池）：
  *    - 符文：同套裝 + 同號碼（遠古與一般一起計，跟遊戲的「意志符文 (1)」一致）。
- *    - 神器：同類型（屬性 / 類型）+ 同屬性（屬性神器）或同魔靈類型（類型神器）。
+ *    - 神器：同類型（屬性 / 類型）+ 同屬性（屬性神器）或同魔靈類型（類型神器）
+ *      + 同主效果；與遊戲內神器副屬性排名一致。
  * 2. 比較值：符文用「實際數值 = 原始值 + 精煉值」，神器直接用效果數值；
  *    同分並列同名次（名次 = 1 + 數值比它高的數量）。
  *
@@ -51,9 +52,10 @@ export function runePoolKey(rune: Pick<Rune, "set" | "slot">): string {
   return `${rune.set}:${rune.slot}`;
 }
 
-/** 神器分組：屬性神器看屬性，類型神器看魔靈類型（無形 98 自成一组） */
-export function artifactPoolKey(art: Pick<Artifact, "type" | "attr" | "style">): string {
-  return art.type === 1 ? `1:${art.attr}` : `2:${art.style}`;
+/** 神器分組：屬性神器看屬性，類型神器看魔靈類型；再分主效果（與遊戲的「持有數量」一致） */
+export function artifactPoolKey(art: Pick<Artifact, "type" | "attr" | "style" | "main">): string {
+  const kind = art.type === 1 ? `1:${art.attr}` : `2:${art.style}`;
+  return `${kind}:${art.main.t}`;
 }
 
 /** 由大到小排序後，回傳比 value 大的數量（同分不算大於） */

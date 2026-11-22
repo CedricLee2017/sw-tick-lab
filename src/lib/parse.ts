@@ -219,6 +219,8 @@ function artifactOf(a: any, owner = 0): Artifact {
     rank: num(a.rank, 0),
     stars: num(a.natural_rank ?? a.class, 5),
     locked: truthy(a.locked),
+    acquiredAt: typeof a.date_add === "string" ? a.date_add : undefined,
+    modifiedAt: typeof a.date_mod === "string" ? a.date_mod : undefined,
   };
 }
 
@@ -768,6 +770,8 @@ export function exportAccount(account: Account): string {
       pri_effect: [a.main.t, a.main.v, a.level, 0, 0],
       sec_effects: a.subs.map((s) => [s.t, s.v, s.up ?? 0, s.roll ?? 0, s.extra ?? 0]),
       locked: a.locked ? 1 : 0,
+      date_add: a.acquiredAt,
+      date_mod: a.modifiedAt,
     })),
     runes: account.runes.map((r) => ({
       rune_id: r.id,

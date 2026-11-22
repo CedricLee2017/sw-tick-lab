@@ -143,6 +143,10 @@ export interface Artifact {
   /** type 2 的魔靈類型（unit_style）1 攻擊 / 2 防禦 / 3 體力 / 4 支援 / 98 特殊 */
   style: number;
   occupied: number;
+  /** 取得時間（SWEX date_add；舊存檔可能沒有） */
+  acquiredAt?: string;
+  /** 最後修改時間（SWEX date_mod） */
+  modifiedAt?: string;
   /** 主效果：100 體力 / 101 攻擊 / 102 防禦 */
   main: { t: number; v: number };
   subs: ArtifactSub[];
