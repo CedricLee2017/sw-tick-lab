@@ -35,11 +35,15 @@ export default function ArtifactsPage() {
   /** 排名門檻（1 = 第一名） */
   const [rankWithin, setRankWithin] = useState(5);
   const [rankWithinAction, setRankWithinAction] = useState<"include" | "exclude">("include");
+  /** 勾選後才套用附屬性排名條件 */
+  const [rankWithinEnabled, setRankWithinEnabled] = useState(false);
   /** 屬性減傷總和條件：0 = 不限；1–4 = 任 N 種 */
   const [reductionCount, setReductionCount] = useState(0);
   const [reductionSum, setReductionSum] = useState(25);
   const [reductionDirection, setReductionDirection] = useState<"above" | "below">("below");
   const [reductionAction, setReductionAction] = useState<"include" | "exclude">("include");
+  /** 勾選後才套用屬性減傷條件 */
+  const [reductionEnabled, setReductionEnabled] = useState(false);
   const ranks = useRankIndex();
   const usageIndex = useMemo(() => buildUsageIndex(account), [account]);
 
@@ -80,13 +84,13 @@ export default function ArtifactsPage() {
         const summary = summarizeRanks(ranks?.artifacts.get(a.id)?.subs);
         if (summary.count < 2 || summary.best * 100 < rankMin) return false;
       }
-      if (rankWithinCount > 0) {
+      if (rankWithinEnabled && rankWithinCount > 0) {
         // 只計同組有 2 件以上的排名，避免「1/1」被當成前 5 名
         const subs = ranks?.artifacts.get(a.id)?.subs ?? [];
         const within = subs.filter((r) => r && r.total >= 2 && r.rank <= rankWithin).length;
         if (rankWithinAction === "include" ? within < rankWithinCount : within >= rankWithinCount) return false;
       }
-      if (reductionCount > 0) {
+      if (reductionEnabled && reductionCount > 0) {
         // 任 N 種屬性減傷：取這件神器最高的 N 條（同一屬性只取最高）
         const total = artifactReductionSum(a, reductionCount);
         const matched =
@@ -139,7 +143,7 @@ export default function ArtifactsPage() {
       return b.main.v - a.main.v || b.rank - a.rank;
     });
     return arr;
-  }, [account, q, type, attr, onlyFree, usage, rankMin, rankWithinCount, rankWithin, rankWithinAction, reductionCount, reductionSum, reductionDirection, reductionAction, sort, owner, ranks, usageIndex]);
+  }, [account, q, type, attr, onlyFree, usage, rankMin, rankWithinCount, rankWithinEnabled, rankWithin, rankWithinAction, reductionCount, reductionEnabled, reductionSum, reductionDirection, reductionAction, sort, owner, ranks, usageIndex]);
 
   if (!account) return <div className="empty"><Sparkles size={40} /><div>尚未匯入存檔</div></div>;
 
@@ -156,7 +160,9 @@ export default function ArtifactsPage() {
     setRankMin(80);
     setSort("subrank-desc");
     setRankWithinCount(0);
+    setRankWithinEnabled(false);
     setReductionCount(0);
+    setReductionEnabled(false);
   };
   const equipped = account.artifacts.filter((a) => a.occupied > 0).length;
   const attrCounts = new Map<number, number>();
@@ -238,7 +244,11 @@ export default function ArtifactsPage() {
             className="select"
             style={{ width: 122 }}
             value={rankWithinCount}
-            onChange={(e) => setRankWithinCount(Number(e.target.value))}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setRankWithinCount(v);
+              if (v === 0) setRankWithinEnabled(false);
+            }}
             title="選擇要有幾種附屬性符合下面的名次條件"
           >
             <option value={0}>不限</option>
@@ -289,11 +299,32 @@ export default function ArtifactsPage() {
                   ? `四條附屬性排名都 > ${rankWithin}`
                   : `少於 ${rankWithinCount} 條附屬性排名 ≤ ${rankWithin}`}
           </span>
+          {rankWithinCount > 0 && !rankWithinEnabled && <span className="tiny dim">（未套用）</span>}
           {rankWithinCount > 0 && (
-            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRankWithinCount(0)}>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => {
+                setRankWithinCount(0);
+                setRankWithinEnabled(false);
+              }}
+            >
               清除條件
             </button>
           )}
+          <label
+            className="row tiny"
+            style={{ gap: 6, marginLeft: "auto", cursor: rankWithinCount === 0 ? "default" : "pointer", opacity: rankWithinCount === 0 ? 0.5 : 1 }}
+            title={rankWithinCount === 0 ? "先選擇任 N 種附屬性，再勾選套用" : "勾選後才會套用這個篩選"}
+          >
+            <input
+              type="checkbox"
+              checked={rankWithinEnabled}
+              disabled={rankWithinCount === 0}
+              onChange={(e) => setRankWithinEnabled(e.target.checked)}
+            />
+            套用此條件
+          </label>
         </div>
         <div className="card-pad row wrap" style={{ gap: 10, borderBottom: "1px solid var(--line-soft)" }}>
           <span className="tiny" style={{ fontWeight: 700 }}>屬性減傷總和</span>
@@ -301,7 +332,11 @@ export default function ArtifactsPage() {
             className="select"
             style={{ width: 118 }}
             value={reductionCount}
-            onChange={(e) => setReductionCount(Number(e.target.value))}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setReductionCount(v);
+              if (v === 0) setReductionEnabled(false);
+            }}
             title="選擇要合計幾種屬性減傷（取這件神器最高的 N 條）"
           >
             <option value={0}>不限</option>
@@ -370,11 +405,32 @@ export default function ArtifactsPage() {
                 ? `最高 ${reductionCount} 條屬性減傷合計 ${reductionDirection === "above" ? "≥" : "≤"} ${reductionSum}%`
                 : `排除最高 ${reductionCount} 條屬性減傷合計 ${reductionDirection === "above" ? "≥" : "≤"} ${reductionSum}%`}
           </span>
+          {reductionCount > 0 && !reductionEnabled && <span className="tiny dim">（未套用）</span>}
           {reductionCount > 0 && (
-            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setReductionCount(0)}>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => {
+                setReductionCount(0);
+                setReductionEnabled(false);
+              }}
+            >
               清除條件
             </button>
           )}
+          <label
+            className="row tiny"
+            style={{ gap: 6, marginLeft: "auto", cursor: reductionCount === 0 ? "default" : "pointer", opacity: reductionCount === 0 ? 0.5 : 1 }}
+            title={reductionCount === 0 ? "先選擇任 N 種屬性，再勾選套用" : "勾選後才會套用這個篩選"}
+          >
+            <input
+              type="checkbox"
+              checked={reductionEnabled}
+              disabled={reductionCount === 0}
+              onChange={(e) => setReductionEnabled(e.target.checked)}
+            />
+            套用此條件
+          </label>
         </div>
         <div className="card-pad row wrap" style={{ gap: 14, borderBottom: "1px solid var(--line-soft)" }}>
           <label className="row tiny" style={{ gap: 6, cursor: "pointer" }}>
