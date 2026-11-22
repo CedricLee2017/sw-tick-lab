@@ -2392,3 +2392,58 @@ p { margin: 0; }
   white-space: nowrap;
   line-height: 1.25;
 }
+
+/* ── 總覽：SWGT 式滿等魔靈圖示牆 ─────────────────── */
+.max-monsters-title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.max-monsters-hr {
+  flex: 1;
+  min-width: 40px;
+  height: 1px;
+  background: var(--line-soft);
+}
+.max-monsters-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.max-monster-tile {
+  width: 44px;
+  height: 44px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(11, 17, 32, .48);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .15s;
+}
+.max-monster-tile:hover {
+  border-color: #2f416b;
+  background: var(--panel-3);
+  transform: translateY(-1px);
+}
+.max-monster-tile img { display: block; }
+.divider-v {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+
+/* SWGT 式神器 Top 10 表格 */
+.swgt-artifact-table th,
+.swgt-artifact-table td {
+  padding: 3px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.swgt-artifact-table thead th {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}

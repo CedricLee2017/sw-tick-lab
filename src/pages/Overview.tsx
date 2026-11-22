@@ -1,28 +1,23 @@
 import { useState } from "react";
-import { Activity, ArrowUpRight, Gauge, Gem, Sparkles, Star, Users } from "lucide-react";
-import { unitLabel, useStore } from "../store";
+import { Activity, ArrowUpRight, Gem, Sparkles, Star, Users } from "lucide-react";
+import { useStore } from "../store";
 import { useSummary, type TopEffKey } from "../lib/accountStats";
 import { ELEMENTS, SET_BY_ID } from "../lib/constants";
-import { MonsterIcon, TickBadge, fmt, setColor, statText } from "../components/ui";
-import { speedForTick } from "../lib/stats";
+import { fmt, setColor, statText } from "../components/ui";
 import { EmptyState } from "../components/ui";
+import { MaxLevelMonsters } from "../components/MaxLevelMonsters";
+import { ArtifactTopTables } from "../components/ArtifactTopTables";
 
 export default function OverviewPage() {
   const account = useStore((s) => s.account);
-  const runeMap = useStore((s) => s.runeMap);
   const summary = useSummary();
-  const rta = useStore((s) => s.settings.rta);
   const [effTab, setEffTab] = useState<TopEffKey>("all");
 
   if (!account || !summary) {
     return <EmptyState icon={<Activity size={40} />} title="尚未匯入存檔" desc="回到匯入頁上傳 JSON 後即可看到分析。" />;
   }
 
-  const maxBucket = Math.max(1, ...summary.tickBuckets.map((b) => b.count));
-  const top = summary.topSpeed;
-  const fastest = top[0];
-  const equipped = account.runes.filter((r) => r.occupied > 0).length;
-  const topSets = Object.entries(summary.sets)
+  const equipped = account.runes.filter((r) => r.occupied > 0).length;  const topSets = Object.entries(summary.sets)
     .map(([id, c]) => ({ id: Number(id), c }))
     .sort((a, b) => b.c - a.c)
     .slice(0, 8);
@@ -46,12 +41,6 @@ export default function OverviewPage() {
           sub={`已裝備 ${fmt(account.artifacts.filter((a) => a.occupied > 0).length)} 件`}
         />
         <Tile icon={<Star size={16} />} k="平均符文效率" v={`${summary.avgEff.toFixed(1)}%`} sub="以同星級副屬上限計算" />
-        <Tile
-          icon={<Gauge size={16} />}
-          k="最快魔靈"
-          v={fastest ? `${fastest.stats.panelSpd ?? fastest.stats.spd}` : "—"}
-          sub={fastest ? `${unitLabel(fastest.unit)} · Tick ${fastest.stats.tick}` : ""}
-        />
       </div>
 
       <div className="grid g2" style={{ marginTop: 16 }}>
@@ -91,79 +80,6 @@ export default function OverviewPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-head">
-            <div>
-              <div className="card-title">6★ 滿等魔靈</div>
-              <div className="card-sub">所有 6 星 Lv40 魔靈，重複的也會各自列出</div>
-            </div>
-            <span className="chip gold">{fmt(summary.maxLevel6.length)} 隻</span>
-          </div>
-          <div className="card-pad scroll-y" style={{ maxHeight: 258 }}>
-            {summary.maxLevel6.length === 0 ? (
-              <div className="dim tiny">沒有資料</div>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {summary.maxLevel6.map((v) => (
-                  <span
-                    key={v.unit.id}
-                    className="chip muted"
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6, paddingLeft: 4 }}
-                    title={`${unitLabel(v.unit)} · ${ELEMENTS[v.monster.el as 1].name} · 魔靈 ID ${v.unit.id}`}
-                  >
-                    <MonsterIcon id={v.monster.id} size={20} />
-                    {unitLabel(v.unit)}
-                    <span className={`tiny el-${v.monster.el}`}>{ELEMENTS[v.monster.el as 1].name}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid g2" style={{ marginTop: 16 }}>
-        <div className="card">
-          <div className="card-head">
-            <div>
-              <div className="card-title">速度 Tick 分佈</div>
-              <div className="card-sub">每隻魔靈在自己目前符文下的出手 Tick（{rta ? "RTA" : "一般"}）</div>
-            </div>
-            <span className="chip muted">T1–T20</span>
-          </div>
-          <div className="card-pad">
-            {summary.tickBuckets.length === 0 ? (
-              <div className="dim tiny">沒有資料</div>
-            ) : (
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 170 }}>
-                {summary.tickBuckets.map((b) => (
-                  <div key={b.tick} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                    <div className="tiny mono" style={{ color: "var(--muted)" }}>{b.count}</div>
-                    <div
-                      title={`Tick ${b.tick}（${speedForTick(b.tick, rta)} 速以上）`}
-                      style={{
-                        width: "100%",
-                        height: Math.max(4, (b.count / maxBucket) * 120),
-                        borderRadius: 6,
-                        background: b.tick <= 6 ? "linear-gradient(180deg, #f6d27a, #c9962f)" : "linear-gradient(180deg, #58a6ff, #2f5aa8)",
-                        opacity: b.tick <= 6 ? 1 : 0.75,
-                      }}
-                    />
-                    <div className="tiny dim mono">T{b.tick}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="row wrap tiny dim" style={{ marginTop: 12, gap: 10 }}>
-              <span>Tick 5 = {speedForTick(5, rta)} 速</span>
-              <span>·</span>
-              <span>Tick 6 = {speedForTick(6, rta)} 速</span>
-              <span>·</span>
-              <span>Tick 7 = {speedForTick(7, rta)} 速</span>
-            </div>
           </div>
         </div>
 
@@ -226,6 +142,35 @@ export default function OverviewPage() {
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-head">
+          <div className="card-title">符文套裝分佈</div>
+          <a className="tiny" href="#/runes">符文倉庫 <ArrowUpRight size={11} /></a>
+        </div>
+        <div className="card-pad col" style={{ gap: 9 }}>
+          {topSets.map((s) => {
+            const def = SET_BY_ID[s.id];
+            const w = (s.c / Math.max(1, account.runes.length)) * 100;
+            return (
+              <div key={s.id}>
+                <div className="row between" style={{ marginBottom: 4 }}>
+                  <span className="tiny" style={{ fontWeight: 600 }}>
+                    <span className="rune-dot" style={{ background: setColor(s.id), display: "inline-block", marginRight: 6 }} />
+                    {def?.name ?? `套裝 ${s.id}`}
+                    <span className="dim" style={{ marginLeft: 5 }}>{def?.en}</span>
+                  </span>
+                  <span className="tiny mono dim">{s.c} 顆</span>
+                </div>
+                <div className="bar"><i style={{ width: `${w}%`, background: `linear-gradient(90deg, ${setColor(s.id)}, rgba(255,255,255,.05))` }} /></div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <MaxLevelMonsters views={summary.maxLevel6} />
+      <ArtifactTopTables artifacts={account.artifacts} />
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-head">
           <div>
             <div className="card-title">最高效率符文 Top 100</div>
             <div className="card-sub">只計 6★ 符文；效率含精煉，分子與分母都不計固定體力 / 攻擊 / 防禦</div>
@@ -282,64 +227,48 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <div className="grid g2" style={{ marginTop: 16 }}>
-        <div className="card">
-          <div className="card-head">
-            <div className="card-title">速度排行</div>
-            <a className="tiny" href="#/speed">前往速度實驗室 <ArrowUpRight size={11} /></a>
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">最高分符文 Top 100</div>
+            <div className="card-sub">依遊戲符文分數排序（含精煉）；不限制星級，5★ 神符也會列入</div>
           </div>
-          <div className="scroll-y" style={{ maxHeight: 420 }}>
-            <table className="table">
-              <thead>
-                <tr><th>魔靈</th><th className="num">速度</th><th className="num">Tick</th><th className="num">體力</th><th className="num">符文</th></tr>
-              </thead>
-              <tbody>
-                {top.map((v) => (
-                  <tr key={v.unit.id}>
-                    <td>
-                      <div className="row" style={{ gap: 8 }}>
-                        <MonsterIcon id={v.monster.id} size={30} />
-                        <div>
-                          <div style={{ fontWeight: 600 }}>{unitLabel(v.unit)}</div>
-                          <div className="tiny dim">{ELEMENTS[v.monster.el as 1].name} · {v.monster.nat}★</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="num mono gold" style={{ fontWeight: 700 }} title="遊戲面板速度（不含建築 / 隊長 / 強化）">{v.stats.panelSpd ?? v.stats.spd}</td>
-                    <td className="num"><TickBadge spd={v.stats.spd} rta={rta} /></td>
-                    <td className="num mono">{fmt(v.stats.hp)}</td>
-                    <td className="num mono dim">{v.runes.length}/6</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <span className="chip muted">{summary.topScore.length} 顆</span>
         </div>
-
-        <div className="card">
-          <div className="card-head">
-            <div className="card-title">符文套裝分佈</div>
-            <a className="tiny" href="#/runes">符文倉庫 <ArrowUpRight size={11} /></a>
-          </div>
-          <div className="card-pad col" style={{ gap: 9 }}>
-            {topSets.map((s) => {
-              const def = SET_BY_ID[s.id];
-              const w = (s.c / Math.max(1, account.runes.length)) * 100;
-              return (
-                <div key={s.id}>
-                  <div className="row between" style={{ marginBottom: 4 }}>
-                    <span className="tiny" style={{ fontWeight: 600 }}>
-                      <span className="rune-dot" style={{ background: setColor(s.id), display: "inline-block", marginRight: 6 }} />
-                      {def?.name ?? `套裝 ${s.id}`}
-                      <span className="dim" style={{ marginLeft: 5 }}>{def?.en}</span>
+        <div className="scroll-y" style={{ maxHeight: 480 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th className="num" style={{ width: 52 }}>#</th>
+                <th>套裝</th>
+                <th className="num">位置</th>
+                <th>主屬性</th>
+                <th className="num">速度</th>
+                <th className="num">評分</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.topScore.map((e, i) => (
+                <tr key={e.rune.id}>
+                  <td className="num mono dim">{i + 1}</td>
+                  <td>
+                    <span className="row" style={{ gap: 6 }}>
+                      <span className="rune-dot" style={{ background: setColor(e.rune.set) }} />
+                      {SET_BY_ID[e.rune.set]?.name ?? `套裝 ${e.rune.set}`}
+                      <span className="tiny dim">{e.rune.grade}★ +{e.rune.level}</span>
                     </span>
-                    <span className="tiny mono dim">{s.c} 顆</span>
-                  </div>
-                  <div className="bar"><i style={{ width: `${w}%`, background: `linear-gradient(90deg, ${setColor(s.id)}, rgba(255,255,255,.05))` }} /></div>
-                </div>
-              );
-            })}
-          </div>
+                  </td>
+                  <td className="num mono">{e.rune.slot}</td>
+                  <td className="tiny mono">{statText(e.rune.main.t, e.rune.main.v)}</td>
+                  <td className="num mono gold" style={{ fontWeight: 700 }}>{e.spd}</td>
+                  <td className="num mono" style={{ fontWeight: 700 }}>{e.score}</td>
+                </tr>
+              ))}
+              {summary.topScore.length === 0 && (
+                <tr><td colSpan={6} className="dim tiny" style={{ textAlign: "center", padding: 20 }}>沒有符文資料</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 

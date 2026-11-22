@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { MONSTER_MAP, useStore } from "../store";
-import { baseStats, runeEfficiency, statsForRunes } from "./stats";
+import { baseStats, runeEfficiency, runeScore, statsForRunes } from "./stats";
 import type { Account, Artifact, BonusConfig, Monster, Rune, Stats, Unit } from "./types";
 
 /** 總覽「高速符文」的速度門檻 */
@@ -15,6 +15,14 @@ export interface RuneEffEntry {
   rune: Rune;
   /** 效率：含精煉，分子與分母都不計固定體力 / 攻擊 / 防禦 */
   eff: number;
+  /** 符文速度：速度副屬性（含精煉）＋ 速度固有屬性 */
+  spd: number;
+}
+
+export interface RuneScoreEntry {
+  rune: Rune;
+  /** 遊戲符文分數（含精煉） */
+  score: number;
   /** 符文速度：速度副屬性（含精煉）＋ 速度固有屬性 */
   spd: number;
 }
@@ -59,7 +67,6 @@ export interface AccountSummary {
   runeOwner: Map<number, number>;
   byEl: Record<number, number>;
   byNat: Record<number, number>;
-  tickBuckets: { tick: number; count: number }[];
   topSpeed: UnitView[];
   sixStar: number;
   avgEff: number;
@@ -70,6 +77,8 @@ export interface AccountSummary {
   speedCounts: SpeedThresholdCount[];
   /** 6 星符文效率 Top 100（全部與暴走 / 意志 / 迅速） */
   topEff: Record<TopEffKey, RuneEffEntry[]>;
+  /** 遊戲符文分數 Top 100（全部星級） */
+  topScore: RuneScoreEntry[];
   /** 所有 6 星滿等魔靈（重複也保留） */
   maxLevel6: UnitView[];
 }
@@ -97,14 +106,6 @@ export function summarize(account: Account, bonus: BonusConfig, rta = false): Ac
     slots[r.slot] = (slots[r.slot] ?? 0) + 1;
   }
 
-  const buckets = new Map<number, number>();
-  for (const v of views) {
-    if (!Number.isFinite(v.stats.tick)) continue;
-    const t = Math.min(20, Math.max(1, v.stats.tick));
-    buckets.set(t, (buckets.get(t) ?? 0) + 1);
-  }
-  const tickBuckets = [...buckets.entries()].map(([tick, count]) => ({ tick, count })).sort((a, b) => a.tick - b.tick);
-
   const avgEff = account.runes.length ? account.runes.reduce((s, r) => s + r.eff, 0) / account.runes.length : 0;
 
   // 高速符文：速度副屬性（含精煉）＋ 速度固有屬性
@@ -131,6 +132,12 @@ export function summarize(account: Account, bonus: BonusConfig, rta = false): Ac
     swift: effSorted.filter((e) => e.rune.set === TOP_EFF_SET_IDS.swift).slice(0, TOP_EFF_LIMIT),
   } as Record<TopEffKey, RuneEffEntry[]>;
 
+  // 遊戲符文分數 Top 100（含精煉；不限制星級，讓 5★ 神符也能排進來）
+  const topScore: RuneScoreEntry[] = [...account.runes]
+    .map((r) => ({ rune: r, score: runeScore(r, true), spd: runeSpeed(r) }))
+    .sort((a, b) => b.score - a.score || b.rune.id - a.rune.id)
+    .slice(0, TOP_EFF_LIMIT);
+
   // 6 星滿等（Lv40）；重複的魔靈各自保留
   const maxLevel6 = views
     .filter((v) => v.unit.stars === 6 && v.unit.level >= 40)
@@ -141,7 +148,6 @@ export function summarize(account: Account, bonus: BonusConfig, rta = false): Ac
     runeOwner,
     byEl,
     byNat,
-    tickBuckets,
     topSpeed: [...views].sort((a, b) => (b.stats.panelSpd ?? b.stats.spd) - (a.stats.panelSpd ?? a.stats.spd)).slice(0, 12),
     sixStar: account.units.filter((u) => u.stars === 6).length,
     avgEff,
@@ -150,6 +156,7 @@ export function summarize(account: Account, bonus: BonusConfig, rta = false): Ac
     slots,
     speedCounts,
     topEff,
+    topScore,
     maxLevel6,
   };
 }
