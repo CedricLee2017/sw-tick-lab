@@ -314,14 +314,17 @@ export default function ArtifactsPage() {
           )}
           <label
             className="row tiny"
-            style={{ gap: 6, marginLeft: "auto", cursor: rankWithinCount === 0 ? "default" : "pointer", opacity: rankWithinCount === 0 ? 0.5 : 1 }}
-            title={rankWithinCount === 0 ? "先選擇任 N 種附屬性，再勾選套用" : "勾選後才會套用這個篩選"}
+            style={{ gap: 6, marginLeft: "auto", cursor: "pointer" }}
+            title="勾選後才會套用；若目前是「不限」，會自動切成任一種附屬性"
           >
             <input
               type="checkbox"
               checked={rankWithinEnabled}
-              disabled={rankWithinCount === 0}
-              onChange={(e) => setRankWithinEnabled(e.target.checked)}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setRankWithinEnabled(checked);
+                if (checked && rankWithinCount === 0) setRankWithinCount(1);
+              }}
             />
             套用此條件
           </label>
@@ -420,14 +423,17 @@ export default function ArtifactsPage() {
           )}
           <label
             className="row tiny"
-            style={{ gap: 6, marginLeft: "auto", cursor: reductionCount === 0 ? "default" : "pointer", opacity: reductionCount === 0 ? 0.5 : 1 }}
-            title={reductionCount === 0 ? "先選擇任 N 種屬性，再勾選套用" : "勾選後才會套用這個篩選"}
+            style={{ gap: 6, marginLeft: "auto", cursor: "pointer" }}
+            title="勾選後才會套用；若目前是「不限」，會自動切成任一種屬性"
           >
             <input
               type="checkbox"
               checked={reductionEnabled}
-              disabled={reductionCount === 0}
-              onChange={(e) => setReductionEnabled(e.target.checked)}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setReductionEnabled(checked);
+                if (checked && reductionCount === 0) setReductionCount(1);
+              }}
             />
             套用此條件
           </label>
