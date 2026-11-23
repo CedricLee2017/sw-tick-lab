@@ -46,21 +46,17 @@ const font = (weight: number, size: number) => `${weight} ${size}px ${FONT_STACK
 const W = 1440;
 const PAD = 32;
 const GAP = 14;
-const COLS = 4;
 const SCALE = 1.5;
-const PER_ROW = 3;
 const HEADER_H = 104;
-const CELL_PAD = 12;
-const CELL_LABEL_H = 28;
+const CELL_PAD = 14;
+const CELL_LABEL_H = 30;
 const FOOTER_H = 44;
-const ICON_GAP = 10;
+/** 一隊一列，隊員之間的間距 */
+const UNIT_GAP = 18;
+/** 圖示上限；4 隻一隊時整列只放這一隊，圖示可放到最大 */
+const ICON_MAX = 256;
 
-const CELL_W = (W - PAD * 2 - GAP * (COLS - 1)) / COLS;
-/** 圖示大小由卡片寬度反推：同一隊三隻盡量靠緊，圖示就能放大 */
-const ICON = Math.floor((CELL_W - CELL_PAD * 2 - ICON_GAP * (PER_ROW - 1)) / PER_ROW);
-const UNIT_H = ICON + 38;
-const CELL_H = CELL_PAD + CELL_LABEL_H + UNIT_H + 8;
-const BADGE_R = Math.round(ICON * 0.12);
+const CELL_W = W - PAD * 2;
 
 const iconCache = new Map<string, Promise<HTMLImageElement | null>>();
 
@@ -128,7 +124,10 @@ function drawIcon(
   unit: PosterUnit,
   x: number,
   y: number,
+  size: number,
 ) {
+  const ICON = size;
+  const badgeR = Math.round(ICON * 0.12);
   roundRect(ctx, x, y, ICON, ICON, Math.round(ICON * 0.2));
   ctx.save();
   ctx.clip();
@@ -152,7 +151,7 @@ function drawIcon(
   ctx.stroke();
 
   if (unit.rank > 0) {
-    const r = BADGE_R;
+    const r = badgeR;
     const cx = x + r + 1;
     const cy = y + r + 1;
     ctx.beginPath();
@@ -175,9 +174,14 @@ function drawIcon(
 export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
   const teams = input.teams;
   const maxUnits = Math.max(1, ...teams.map((t) => Math.min(5, t.units.length)));
-  const unitRows = Math.max(1, Math.ceil(maxUnits / PER_ROW));
-  const cellH = CELL_H + (unitRows - 1) * UNIT_H;
-  const rows = Math.max(1, Math.ceil(teams.length / COLS));
+  /** 一隊一列：依最多隊員數把整列寬度均分，4 隻一隊時圖示可以放到最大 */
+  const slotW = (CELL_W - CELL_PAD * 2) / maxUnits;
+  const icon = Math.max(72, Math.min(ICON_MAX, Math.floor(slotW - UNIT_GAP)));
+  const nameSize = Math.max(14, Math.min(20, Math.round(icon * 0.075)));
+  const metaSize = Math.max(11, Math.min(15, Math.round(icon * 0.055)));
+  const unitH = icon + nameSize + metaSize + 12;
+  const cellH = CELL_PAD + CELL_LABEL_H + unitH + 12;
+  const rows = Math.max(1, teams.length);
   const H = HEADER_H + rows * cellH + (rows - 1) * GAP + FOOTER_H + 14;
 
   const canvas = document.createElement("canvas");
@@ -227,7 +231,6 @@ export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
 
   // ── 隊伍卡片 ─────────────────────────────────────────
   const icons = await loadIcons(teams);
-  const itemW = (CELL_W - CELL_PAD * 2) / PER_ROW;
 
   if (teams.length === 0) {
     ctx.fillStyle = "#6f80a6";
@@ -237,12 +240,10 @@ export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
   }
 
   teams.forEach((team, i) => {
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
-    const x = PAD + col * (CELL_W + GAP);
-    const y = HEADER_H + row * (cellH + GAP);
+    const x = PAD;
+    const y = HEADER_H + i * (cellH + GAP);
 
-    roundRect(ctx, x, y, CELL_W, cellH, 14);
+    roundRect(ctx, x, y, CELL_W, cellH, 16);
     ctx.fillStyle = "#121b30";
     ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,.07)";
@@ -252,43 +253,44 @@ export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
     // 隊號 + 隊長
     ctx.textAlign = "left";
     ctx.fillStyle = "#e8eeff";
-    ctx.font = font(700, 14);
-    ctx.fillText(`第 ${team.seq} 隊`, x + CELL_PAD, y + CELL_PAD + 15);
+    ctx.font = font(700, 16);
+    ctx.fillText(`第 ${team.seq} 隊`, x + CELL_PAD, y + CELL_PAD + 16);
 
     const leader = team.units.find((u) => u.leader);
-    const rightMax = CELL_W - CELL_PAD * 2 - 92;
+    const rightMax = CELL_W - CELL_PAD * 2 - 120;
     ctx.textAlign = "right";
     if (leader) {
       ctx.fillStyle = "#f2c65c";
-      ctx.font = font(600, 11.5);
-      ctx.fillText(fitText(ctx, `隊長 ${leader.name}`, rightMax), x + CELL_W - CELL_PAD, y + CELL_PAD + 15);
+      ctx.font = font(600, 13);
+      ctx.fillText(fitText(ctx, `隊長 ${leader.name}`, rightMax), x + CELL_W - CELL_PAD, y + CELL_PAD + 16);
     } else {
       ctx.fillStyle = "#6f80a6";
-      ctx.font = font(500, 11.5);
-      ctx.fillText(`${team.units.length} 人`, x + CELL_W - CELL_PAD, y + CELL_PAD + 15);
+      ctx.font = font(500, 13);
+      ctx.fillText(`${team.units.length} 人`, x + CELL_W - CELL_PAD, y + CELL_PAD + 16);
     }
 
-    // 隊員
-    team.units.slice(0, PER_ROW * unitRows).forEach((unit, ui) => {
-      const c = ui % PER_ROW;
-      const r = Math.floor(ui / PER_ROW);
-      const ix = x + CELL_PAD + c * itemW + (itemW - ICON) / 2;
-      const iy = y + CELL_PAD + CELL_LABEL_H + r * UNIT_H;
+    // 隊員：一列排開，數量少於最多隊員數時置中
+    const shown = team.units.slice(0, maxUnits);
+    const startX = x + CELL_PAD + ((maxUnits - shown.length) * slotW) / 2;
+    shown.forEach((unit, ui) => {
+      const ix = startX + ui * slotW + (slotW - icon) / 2;
+      const iy = y + CELL_PAD + CELL_LABEL_H;
 
-      drawIcon(ctx, icons.get(unit.icon) ?? null, unit, ix, iy);
+      drawIcon(ctx, icons.get(unit.icon) ?? null, unit, ix, iy, icon);
 
-      const cx = ix + ICON / 2;
+      const cx = ix + icon / 2;
+      const textMax = slotW - 10;
       ctx.textAlign = "center";
       ctx.fillStyle = unit.leader ? "#f2c65c" : "#dfe8ff";
-      ctx.font = font(600, 12.5);
-      ctx.fillText(fitText(ctx, unit.name, itemW - 2), cx, iy + ICON + 18);
+      ctx.font = font(600, nameSize);
+      ctx.fillText(fitText(ctx, unit.name, textMax), cx, iy + icon + nameSize + 3);
 
-      ctx.font = font(600, 10.5);
+      ctx.font = font(600, metaSize);
       const spd = unit.spd > 0 ? `SPD ${unit.spd}` : "SPD —";
       const tick = unit.tick > 0 ? `T${unit.tick}` : "T—";
       const meta = `${spd} · ${tick}`;
       ctx.fillStyle = "#9fb0d4";
-      ctx.fillText(fitText(ctx, meta, itemW - 2), cx, iy + ICON + 34);
+      ctx.fillText(fitText(ctx, meta, textMax), cx, iy + icon + nameSize + metaSize + 5);
     });
   });
 
