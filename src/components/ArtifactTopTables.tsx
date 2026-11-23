@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Heart, Shield, Sparkles, Swords } from "lucide-react";
 import type { Artifact } from "../lib/types";
+import { ARTIFACT_MAIN } from "../lib/artifacts";
 
 interface EffectDef {
   /** 神器效果 id */
@@ -136,15 +137,29 @@ const TYPE_TABS: ArtifactTab[] = [
 
 const TABS: ArtifactTab[] = [...ATTR_TABS, ...TYPE_TABS];
 
+/** 神器主屬性圖示：盾 = 防禦、雙劍 = 攻擊、心 = 體力（SWGT 風格） */
+function MainIcon({ t }: { t: number }) {
+  const meta = ARTIFACT_MAIN[t];
+  if (!meta) return null;
+  const Icon = meta.key === "hp" ? Heart : meta.key === "atk" ? Swords : Shield;
+  const color = meta.key === "hp" ? "#ff6b8a" : meta.key === "atk" ? "#f2c65c" : "#6ea8ff";
+  return <Icon size={12} strokeWidth={2.2} style={{ color, flex: "none" }} aria-label={meta.label} />;
+}
+
+interface TopValue {
+  v: number;
+  art: Artifact;
+}
+
 /** 每件神器只取該效果的最高數值，再排出前 10 名 */
-function topValues(artifacts: Artifact[], effect: number): number[] {
-  const values: number[] = [];
+function topValues(artifacts: Artifact[], effect: number): TopValue[] {
+  const values: TopValue[] = [];
   for (const a of artifacts) {
     let best = 0;
     for (const s of a.subs) if (s.t === effect && s.v > best) best = s.v;
-    if (best > 0) values.push(best);
+    if (best > 0) values.push({ v: best, art: a });
   }
-  return values.sort((a, b) => b - a).slice(0, 10);
+  return values.sort((a, b) => b.v - a.v).slice(0, 10);
 }
 
 function formatValue(v: number, def: EffectDef): string {
@@ -199,7 +214,7 @@ export function ArtifactTopTables({ artifacts }: { artifacts: Artifact[] }) {
             <span className="dim tiny" style={{ fontWeight: 400 }}>本組 {rows.length} 件</span>
           </div>
           <div className="card-sub">
-            參考 SWGT Artifact 統計：屬性神器（水／火／風／光／暗，用屬性色）與類型神器（攻擊／防禦／體力／支援／無形，青色）以顏色區分，列出每個效果最高的 10 件；數值已含強化。
+            參考 SWGT Artifact 統計：屬性神器（水／火／風／光／暗，用屬性色）與類型神器（攻擊／防禦／體力／支援／無形，青色）以顏色區分，列出每個效果最高的 10 件；數值前的圖示是該件神器的主屬性（盾＝防禦、雙劍＝攻擊、心＝體力），數值已含強化。
           </div>
         </div>
         <div className="row wrap" style={{ gap: 5, justifyContent: "flex-end", alignItems: "center" }}>
@@ -243,11 +258,24 @@ export function ArtifactTopTables({ artifacts }: { artifacts: Artifact[] }) {
                     {Array.from({ length: 10 }).map((_, i) => (
                       <tr key={i}>
                         <td className="num mono dim">{i + 1}</td>
-                        {table.columns.map((values, ci) => (
-                          <td key={table.effects[ci].t} className="num mono">
-                            {values[i] == null ? <span className="dim">—</span> : formatValue(values[i], table.effects[ci])}
-                          </td>
-                        ))}
+                        {table.columns.map((values, ci) => {
+                          const cell = values[i] as TopValue | undefined;
+                          return (
+                            <td key={table.effects[ci].t} className="num mono">
+                              {!cell ? (
+                                <span className="dim">—</span>
+                              ) : (
+                                <span
+                                  style={{ display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}
+                                  title={`主屬性：${ARTIFACT_MAIN[cell.art.main.t]?.label ?? "?"}`}
+                                >
+                                  <MainIcon t={cell.art.main.t} />
+                                  {formatValue(cell.v, table.effects[ci])}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>
