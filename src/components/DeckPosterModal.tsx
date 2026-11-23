@@ -7,12 +7,17 @@ export interface PosterResult {
   blob: Blob;
   title: string;
   count: number;
+  /** 標題右側與底部說明；省略時顯示「N 隊」 */
+  label?: string;
+  /** 下載檔名（不含 .png）；省略時使用「標題-N隊」 */
+  fileName?: string;
 }
 
 /** 一鍵生圖的預覽：可下載 PNG 或直接複製到剪貼簿貼給隊友。 */
 export function DeckPosterModal({ poster, onClose }: { poster: PosterResult; onClose: () => void }) {
   const notify = useStore((s) => s.notify);
-  const fileName = `${poster.title}-${poster.count}隊.png`.replace(/[\\/:*?"<>|]/g, "-");
+  const caption = poster.label ?? `${poster.count} 隊`;
+  const fileName = `${poster.fileName ?? `${poster.title}-${poster.count}隊`}.png`.replace(/[\\/:*?"<>|]/g, "-");
 
   const download = () => {
     const a = document.createElement("a");
@@ -31,7 +36,7 @@ export function DeckPosterModal({ poster, onClose }: { poster: PosterResult; onC
   };
 
   return (
-    <Modal title={`${poster.title} · ${poster.count} 隊`} onClose={onClose} width={900}>
+    <Modal title={`${poster.title} · ${caption}`} onClose={onClose} width={900}>
       <div className="row wrap" style={{ gap: 8, marginBottom: 10 }}>
         <button type="button" className="btn btn-sm btn-primary" onClick={download}>
           <Download size={12} /> 下載 PNG
@@ -42,7 +47,7 @@ export function DeckPosterModal({ poster, onClose }: { poster: PosterResult; onC
         <button type="button" className="btn btn-sm btn-ghost" onClick={() => window.open(poster.url, "_blank")}>
           <ExternalLink size={12} /> 另開大圖
         </button>
-        <span className="tiny dim" style={{ marginLeft: "auto" }}>共 {poster.count} 隊 · 下載或複製後直接貼給隊友</span>
+        <span className="tiny dim" style={{ marginLeft: "auto" }}>{caption} · 下載或複製後直接貼給隊友</span>
       </div>
       <div
         className="scroll-y"

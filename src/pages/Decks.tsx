@@ -5,6 +5,7 @@ import { ELEMENTS } from "../lib/constants";
 import { baseStats, statsForRunes } from "../lib/stats";
 import { DECK_TYPE_NUMBERS, deckTypeLabel } from "../lib/deckTypes";
 import { renderDeckPoster } from "../lib/deckPoster";
+import { renderTeamSheet, type TeamSheetUnit } from "../lib/teamSheet";
 import { DeckPosterModal, type PosterResult } from "../components/DeckPosterModal";
 import { deckContext, spdLeaderApplies, spdLeaderSkill, SPD_AREA_LABEL } from "../lib/deckSpeed";
 import { ArtifactCard, Modal, MonsterIcon, RuneCard, TickBadge, fmt } from "../components/ui";
@@ -30,6 +31,9 @@ export default function DecksPage() {
   /** 一鍵生圖：正在產圖的類型（0 = 沒有）與產好的圖片 */
   const [posterBusy, setPosterBusy] = useState(0);
   const [poster, setPoster] = useState<PosterResult | null>(null);
+  /** 整隊資料圖：正在產圖的隊伍 key 與產好的圖片 */
+  const [sheetBusy, setSheetBusy] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<PosterResult | null>(null);
 
   const decks = account?.decks ?? [];
   const defenseDecks = account?.defenseDecks ?? [];
@@ -276,6 +280,67 @@ export default function DecksPage() {
     };
   };
 
+  /** 把一整隊的面板、符文與神器資料整理成一張 PNG（「整隊資料圖」） */
+  const makeTeamSheet = async (deck: DeckWithEquip) => {
+    if (!account) return;
+    const key = `${deck.type}-${deck.seq}`;
+    setSheetBusy(key);
+    try {
+      const speed = speedByDeck.get(key);
+      const leaderUid = speed?.leaderUid ?? deck.leader ?? deck.units[0] ?? 0;
+      const units: TeamSheetUnit[] = [];
+      for (const uid of deck.units) {
+        const d = deckUnitDetail(deck, uid);
+        if (!d) continue;
+        units.push({
+          name: unitName(uid),
+          icon: d.monster.icon,
+          el: d.monster.el,
+          stars: d.unit.stars,
+          level: d.unit.level,
+          leader: uid === leaderUid,
+          rank: d.info?.rank ?? 0,
+          spd: d.info?.spd ?? d.stats.spd,
+          tick: d.info?.tick ?? d.stats.tick,
+          base: d.base,
+          stats: d.stats,
+          runes: d.runes,
+          artifacts: d.artifacts,
+        });
+      }
+      if (units.length === 0) {
+        notify("這一隊沒有可產圖的魔靈資料", "err");
+        return;
+      }
+      const lead = speed?.leader;
+      const blob = await renderTeamSheet({
+        title: `${deckTypeLabel(deck.type)} · 第 ${deck.seq} 隊`,
+        subtitle: [account.wizard, account.guild].filter(Boolean).join(" · "),
+        leaderSkill: lead
+          ? `隊長技：${monsterLabel(lead.master)} 速度 +${lead.pct}%（${SPD_AREA_LABEL[lead.area] ?? "全內容"}）`
+          : undefined,
+        battlePower: deck.battlePower,
+        units,
+        note: `SW Tick Lab · ${account.fileName}`,
+      });
+      setSheet((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return {
+          url: URL.createObjectURL(blob),
+          blob,
+          title: `${deckTypeLabel(deck.type)} 第 ${deck.seq} 隊`,
+          count: 1,
+          label: "整隊資料",
+          fileName: `${deckTypeLabel(deck.type)}-第${deck.seq}隊-整隊資料`,
+        };
+      });
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "產圖失敗，請再試一次", "err");
+    } finally {
+      setSheetBusy(null);
+    }
+  };
+
   if (!account) return <div className="empty"><Layers size={40} /><div>尚未匯入存檔</div></div>;
 
   const openEquip = open ? new Map<number, DeckEquip>(open.equip.map((e) => [e.unit, e])) : new Map<number, DeckEquip>();
@@ -424,6 +489,18 @@ export default function DecksPage() {
                         >
                           <Save size={12} /> {isSaved(d) ? "已儲存" : "儲存整隊"}
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          disabled={sheetBusy !== null}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void makeTeamSheet(d);
+                          }}
+                          title="把這一隊的面板、符文、神器整理成一張 PNG，方便分享給隊友"
+                        >
+                          <ImageDown size={12} /> {sheetBusy === `${d.type}-${d.seq}` ? "產圖中…" : "整隊資料圖"}
+                        </button>
                       </div>
                     </div>
                   );
@@ -441,6 +518,15 @@ export default function DecksPage() {
             <span className="tiny dim">共 {open.units.length} 隻{open.leader ? ` · 隊長 ${unitName(open.leader)}` : openSpeed?.leaderUid ? ` · 隊長 ${unitName(openSpeed.leaderUid)}（第 1 位）` : ""}{open.battlePower ? ` · 戰力 ${fmt(open.battlePower)}` : ""} · 點擊魔靈看完整面板</span>
             <div className="row" style={{ gap: 6 }}>
               <span className="tiny dim">預設隊快照（符文 / 神器配置）</span>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={sheetBusy !== null}
+                onClick={() => void makeTeamSheet(open)}
+                title="把這一隊的面板、符文、神器整理成一張 PNG，方便分享給隊友"
+              >
+                <ImageDown size={12} /> {sheetBusy === `${open.type}-${open.seq}` ? "產圖中…" : "整隊資料圖"}
+              </button>
               <button type="button" className="btn btn-sm btn-primary" onClick={() => saveWholeDeck(open)}>
                 <Save size={12} /> 儲存整隊
               </button>
@@ -565,6 +651,15 @@ export default function DecksPage() {
           onClose={() => {
             URL.revokeObjectURL(poster.url);
             setPoster(null);
+          }}
+        />
+      )}
+      {sheet && (
+        <DeckPosterModal
+          poster={sheet}
+          onClose={() => {
+            URL.revokeObjectURL(sheet.url);
+            setSheet(null);
           }}
         />
       )}
