@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
-import { Layers, Save, Search } from "lucide-react";
+import { ImageDown, Layers, Save, Search } from "lucide-react";
 import { MONSTER_MAP, monsterLabel, unitLabel, useLibrary, useStore } from "../store";
 import { ELEMENTS } from "../lib/constants";
 import { baseStats, statsForRunes } from "../lib/stats";
 import { DECK_TYPE_NUMBERS, deckTypeLabel } from "../lib/deckTypes";
+import { renderDeckPoster } from "../lib/deckPoster";
+import { DeckPosterModal, type PosterResult } from "../components/DeckPosterModal";
 import { deckContext, spdLeaderApplies, spdLeaderSkill, SPD_AREA_LABEL } from "../lib/deckSpeed";
 import { ArtifactCard, Modal, MonsterIcon, RuneCard, TickBadge, fmt } from "../components/ui";
 import { MonsterDetailModal } from "../components/MonsterDetail";
@@ -25,6 +27,9 @@ export default function DecksPage() {
   const [open, setOpen] = useState<DeckWithEquip | null>(null);
   /** 從預設隊點開的魔靈完整面板（依該隊快照計算） */
   const [unitOpen, setUnitOpen] = useState<{ deck: DeckWithEquip; uid: number } | null>(null);
+  /** 一鍵生圖：正在產圖的類型（0 = 沒有）與產好的圖片 */
+  const [posterBusy, setPosterBusy] = useState(0);
+  const [poster, setPoster] = useState<PosterResult | null>(null);
 
   const decks = account?.decks ?? [];
   const defenseDecks = account?.defenseDecks ?? [];
@@ -190,6 +195,50 @@ export default function DecksPage() {
     ? speedByDeck.get(`${open.type}-${open.seq}`)
     : undefined;
 
+  /** 把一組預設隊整理成一張 PNG（「一鍵生圖」） */
+  const makePoster = async (type: number, list: Deck[]) => {
+    if (!account || list.length === 0) return;
+    setPosterBusy(type);
+    try {
+      const unitById = new Map(account.units.map((u) => [u.id, u]));
+      const teams = list.map((d) => {
+        const sp = speedByDeck.get(`${d.type}-${d.seq}`);
+        const leaderUid = sp?.leaderUid ?? d.leader ?? d.units[0] ?? 0;
+        return {
+          seq: d.seq,
+          units: d.units.map((uid) => {
+            const u = unitById.get(uid);
+            const m = u ? MONSTER_MAP.get(u.master) : undefined;
+            const info = sp?.units.get(uid);
+            return {
+              name: unitName(uid),
+              icon: m?.icon ?? "",
+              el: m?.el ?? 1,
+              spd: info?.spd ?? 0,
+              tick: info?.tick ?? 0,
+              rank: info?.rank ?? 0,
+              leader: uid === leaderUid,
+            };
+          }),
+        };
+      });
+      const blob = await renderDeckPoster({
+        title: deckTypeLabel(type),
+        subtitle: [account.wizard, account.guild].filter(Boolean).join(" · "),
+        teams,
+        note: `SW Tick Lab · ${account.fileName}`,
+      });
+      setPoster((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return { url: URL.createObjectURL(blob), blob, title: deckTypeLabel(type), count: teams.length };
+      });
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "生圖失敗，請再試一次", "err");
+    } finally {
+      setPosterBusy(0);
+    }
+  };
+
   /**
    * 依指定預設隊的符文 / 神器快照，組出單隻魔靈的完整面板資料。
    * 速度會套用該隊的隊長技，與速度順序顯示一致。
@@ -294,9 +343,20 @@ export default function DecksPage() {
             <div key={t}>
               <div className="row between" style={{ gap: 8, marginBottom: 7 }}>
                 <div className="card-title">{deckTypeLabel(t)} <span className="dim tiny" style={{ fontWeight: 400 }}>類型 {t} · {list.length} 隊</span></div>
-                <span className="tiny dim">
-                  {[...new Set(list.map((d) => d.units.length))].sort((a, b) => a - b).map((n) => `${n} 人`).join(" / ")}隊
-                </span>
+                <div className="row wrap" style={{ gap: 8 }}>
+                  <span className="tiny dim">
+                    {[...new Set(list.map((d) => d.units.length))].sort((a, b) => a - b).map((n) => `${n} 人`).join(" / ")}隊
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={posterBusy === t}
+                    onClick={() => void makePoster(t, list)}
+                    title="把這一組所有隊伍整理成一張圖片，方便傳給隊友"
+                  >
+                    <ImageDown size={12} /> {posterBusy === t ? "產圖中…" : "一鍵生圖"}
+                  </button>
+                </div>
               </div>
               <div className="grid g3" style={{ gap: 10 }}>
                 {list.map((d) => {
@@ -499,6 +559,15 @@ export default function DecksPage() {
           />
         );
       })()}
+      {poster && (
+        <DeckPosterModal
+          poster={poster}
+          onClose={() => {
+            URL.revokeObjectURL(poster.url);
+            setPoster(null);
+          }}
+        />
+      )}
     </>
   );
 }
