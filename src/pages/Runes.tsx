@@ -371,8 +371,8 @@ export default function RunesPage() {
         <div className="card-head">
           <div className="card-title">
             符文倉庫 <span className="dim tiny" style={{ fontWeight: 400 }}>共 {fmt(runes.length)} 顆</span>
-            <a className="chip gold" href="#/grind" style={{ marginLeft: 8, textDecoration: "none" }} title="依符文素質與裝備對象列出精煉順序">
-              精煉建議 →
+            <a className="chip gold" href="#/enchant" style={{ marginLeft: 8, textDecoration: "none" }} title="列出可用持有素材精魔／精煉到 12+9、11+7 的符文">
+              精煉／精魔建議 →
             </a>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>

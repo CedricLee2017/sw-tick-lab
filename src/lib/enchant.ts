@@ -709,3 +709,141 @@ export function filterEnchantScoreByStock(
     gain: top.scoreAfter - target.scoreNow,
   };
 }
+
+/* ─────────────── 精魔／精煉目標：12+9、11+7（用持有素材判定） ─────────────── */
+
+export type EnchantTierKey = "12+9" | "11+7";
+
+export interface EnchantTier {
+  key: EnchantTierKey;
+  /** 體攻防%：精魔、精煉目標值 */
+  pct: [number, number];
+  /** 速度：精魔、精煉目標值 */
+  spd: [number, number];
+}
+
+export const ENCHANT_TIERS: EnchantTier[] = [
+  { key: "12+9", pct: [12, 9], spd: [9, 5] },
+  { key: "11+7", pct: [11, 7], spd: [8, 4] },
+];
+
+export interface EnchantTierReach {
+  tier: EnchantTierKey;
+  /** 目標屬性（2 / 4 / 6 體攻防%，8 速度） */
+  stat: number;
+  label: string;
+  suffix: string;
+  /** 持有寶石可精魔出的值 */
+  gem: number;
+  /** 持有磨石可精煉的值 */
+  grind: number;
+  /** 精魔＋精煉後的值 */
+  after: number;
+  /** 目前這條的數值（符文上沒有這條就是 0） */
+  now: number;
+  /** regem = 重轉目前這條寶石屬性；natural = 自然屬性只靠精煉往上加 */
+  kind: "regem" | "natural";
+}
+
+/** 把持有素材整理成「套裝＋屬性」查表，避免每顆符文都重掃一次素材 */
+interface EnchantStockIndex {
+  gem: Map<string, number>;
+  grind: Map<string, number>;
+}
+
+const stockIndexCache = new WeakMap<EnchantStock, EnchantStockIndex>();
+
+const stockKey = (ancient: boolean, immemorial: boolean, set: number, stat: number) =>
+  `${ancient ? 1 : 0}:${immemorial ? 1 : 0}:${set}:${stat}`;
+
+function stockIndex(stock: EnchantStock): EnchantStockIndex {
+  const cached = stockIndexCache.get(stock);
+  if (cached) return cached;
+  const gem = new Map<string, number>();
+  const grind = new Map<string, number>();
+  for (const g of stock.gems) {
+    if (g.amount <= 0) continue;
+    const key = stockKey(g.ancient, g.immemorial, g.set, g.stat);
+    const value = gemStoneMax(g.stat, g.grade, g.ancient);
+    if (value > (gem.get(key) ?? 0)) gem.set(key, value);
+  }
+  for (const s of stock.grindstones) {
+    if (s.amount <= 0) continue;
+    const key = stockKey(s.ancient, s.immemorial, s.set, s.stat);
+    const value = grindStoneMax(s.stat, s.grade, s.ancient);
+    if (value > (grind.get(key) ?? 0)) grind.set(key, value);
+  }
+  const index: EnchantStockIndex = { gem, grind };
+  stockIndexCache.set(stock, index);
+  return index;
+}
+
+/** 查這顆符文在指定屬性上，持有素材最高能給多少（套裝／遠古／無形規則與寶石一致） */
+function stockValue(index: EnchantStockIndex, rune: Rune, stat: number, kind: "gem" | "grind"): number {
+  const map = kind === "gem" ? index.gem : index.grind;
+  if (rune.ancient) return map.get(stockKey(true, false, rune.set, stat)) ?? 0;
+  return Math.max(
+    map.get(stockKey(false, true, 0, stat)) ?? 0,
+    map.get(stockKey(false, false, rune.set, stat)) ?? 0,
+  );
+}
+
+/**
+ * 用持有素材判斷這顆符文能不能把「已經有的屬性」做到目標（例如 12+9），
+ * 只回報還沒達標、但做得上去的屬性；沒有就回 null。
+ *
+ * - 寶石轉出來的屬性：重轉同一條（寶石 ≥ 目標、磨石 ≥ 目標）
+ * - 自然屬性：不能精魔成同一條，只能靠精煉往上加，補到目標總和才算
+ */
+export function enchantTierReach(
+  rune: Rune,
+  stock: EnchantStock,
+  tier: EnchantTier,
+): EnchantTierReach | null {
+  const index = stockIndex(stock);
+  let best: EnchantTierReach | null = null;
+
+  for (const stat of [2, 4, 6, 8]) {
+    const [needGem, needGrind] = stat === 8 ? tier.spd : tier.pct;
+    if (!slotAllowsStat(rune.slot, stat)) continue;
+
+    const line = rune.subs.find((s) => s.t === stat);
+    // 只算符文上已經有的屬性
+    if (!line) continue;
+
+    const grind = Math.min(stockValue(index, rune, stat, "grind"), grindMax(stat, rune.ancient));
+    if (grind < needGrind) continue;
+
+    const total = needGem + needGrind;
+    const now = line.v + (line.g ?? 0);
+    if (now >= total) continue;
+
+    let after: number;
+    let kind: "regem" | "natural";
+    if ((line.gem ?? 0) > 0) {
+      const gem = stockValue(index, rune, stat, "gem");
+      if (gem < needGem) continue;
+      after = gem + grind;
+      kind = "regem";
+    } else {
+      after = now + grind;
+      if (after < total) continue;
+      kind = "natural";
+    }
+
+    const cand: EnchantTierReach = {
+      tier: tier.key,
+      stat,
+      label: enchantStatLabel(stat),
+      suffix: enchantStatSuffix(stat),
+      gem: kind === "regem" ? after - grind : 0,
+      grind,
+      after,
+      now,
+      kind,
+    };
+    if (!best || cand.after - cand.now > best.after - best.now) best = cand;
+  }
+
+  return best;
+}

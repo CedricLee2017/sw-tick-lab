@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
-  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, Shield, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, Hammer, ArrowLeftRight, Castle, BookOpen, Target, Crown, FlaskConical,
+  Upload, LayoutDashboard, Users, Gauge, Wand2, Gem, Settings as SettingsIcon, ShieldCheck, Shield, CircleDot, Sparkles, Swords, Bookmark, Calculator, Layers, Timer, ScrollText, Zap, LogIn, LogOut, LayoutGrid, X, ArrowLeftRight, Castle, BookOpen, Target, Crown, FlaskConical,
 } from "lucide-react";
 import { accountGameLabel, ensureOwner, useStore } from "./store";
 import { useAuth } from "./lib/auth";
@@ -29,7 +29,6 @@ import TeamOptimizerPage from "./pages/TeamOptimizer";
 import AdminPage from "./pages/Admin";
 import RunesPage from "./pages/Runes";
 import RuneStandingPage from "./pages/RuneStanding";
-import GrindPage from "./pages/Grind";
 import EnchantPage from "./pages/Enchant";
 import ArtifactsPage from "./pages/Artifacts";
 import ArtifactReductionPage from "./pages/ArtifactReduction";
@@ -41,7 +40,7 @@ import { buildRankIndex } from "./lib/rankings";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
 
-type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "worldboss-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "standing" | "grind" | "enchant" | "artifacts" | "artifact-reduction" | "guild" | "admin" | "settings";
+type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "worldboss-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "standing" | "enchant" | "artifacts" | "artifact-reduction" | "guild" | "admin" | "settings";
 
 const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; sub: string }[] = [
   { key: "import", label: "匯入", icon: <Upload size={17} />, title: "匯入存檔", sub: "上傳 SWEX / SWOP 匯出的 JSON" },
@@ -65,8 +64,7 @@ const ROUTES: { key: RouteKey; label: string; icon: ReactNode; title: string; su
   { key: "summonlog", label: "魔靈召喚記錄", icon: <ScrollText size={17} />, title: "魔靈召喚記錄", sub: "原4 / 原5 魔靈的取得時間軸" },
   { key: "runes", label: "符文", icon: <Gem size={17} />, title: "符文倉庫", sub: "效率、套裝與裝備狀態" },
   { key: "standing", label: "符文定位", icon: <Target size={17} />, title: "符文定位", sub: "效率、精煉進度與公會差距" },
-  { key: "grind", label: "精煉建議", icon: <Hammer size={17} />, title: "精煉建議", sub: "依符文素質、套裝與裝備對象排出精煉順序" },
-  { key: "enchant", label: "精魔建議", icon: <FlaskConical size={17} />, title: "精魔建議", sub: "找出換一條副屬性就能符合自行分類的符文" },
+  { key: "enchant", label: "精煉／精魔建議", icon: <FlaskConical size={17} />, title: "精煉／精魔建議", sub: "精煉與精魔一次看完：找出能達到 12+9 / 11+7、或符合自行分類的符文" },
   { key: "artifacts", label: "神器", icon: <Sparkles size={17} />, title: "神器倉庫", sub: "屬性 / 類型神器、主副效果與裝備狀態" },
   { key: "artifact-reduction", label: "減傷統計", icon: <Shield size={17} />, title: "神器減傷統計", sub: "屬性減傷分組比較，找出可以賣掉的神器" },
   { key: "guild", label: "公會", icon: <Users size={17} />, title: "公會", sub: "匯入隊友資料，比較成員的符文與神器" },
@@ -82,6 +80,8 @@ const MOBILE_SHORT_LABEL: Partial<Record<RouteKey, string>> = {
 
 function currentRoute(): RouteKey {
   const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
+  // 舊書籤：#/grind 已併入「精煉／精魔建議」
+  if (h === "grind") return "enchant";
   return (ROUTES.find((r) => r.key === h)?.key ?? "import") as RouteKey;
 }
 
@@ -108,7 +108,6 @@ const PAGE_COMPONENTS: Record<RouteKey, ComponentType> = {
   summonlog: SummonLogPage,
   runes: RunesPage,
   standing: RuneStandingPage,
-  grind: GrindPage,
   enchant: EnchantPage,
   artifacts: ArtifactsPage,
   "artifact-reduction": ArtifactReductionPage,

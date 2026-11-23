@@ -65,6 +65,8 @@ export {
   projectRune,
   slotAllowsStat,
   sortEnchantTargets,
+  ENCHANT_TIERS,
+  enchantTierReach,
 } from "../src/lib/enchant";
 export * from "../src/lib/usage";
 export * from "../src/lib/rankings";

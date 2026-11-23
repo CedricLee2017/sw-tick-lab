@@ -8,9 +8,11 @@ import {
   ENCHANT_MAIN_STATS,
   ENCHANT_SCORE_SORTS,
   ENCHANT_SORTS,
+  ENCHANT_TIERS,
   analyzeEnchant,
   analyzeEnchantScore,
   enchantStatLabel,
+  enchantTierReach,
   filterEnchantByStock,
   filterEnchantScoreByStock,
   heldMaterialsLabel,
@@ -22,6 +24,8 @@ import {
   type EnchantSort,
   type EnchantStock,
   type EnchantTarget,
+  type EnchantTierKey,
+  type EnchantTierReach,
 } from "../lib/enchant";
 import type { Rune, RuneTagRule } from "../lib/types";
 import { buildRuneUseCounts, COMMON_SORTS, type CommonSort, type RuneUseCount } from "../lib/usage";
@@ -45,10 +49,31 @@ const excludeRuneLabel = (r: Rune) =>
 
 type EnchantMode = "tag" | "score" | "common";
 
+/** 12+9 / 11+7 精煉目標的可達標籤 */
+function ReachChip({ reach }: { reach: EnchantTierReach }) {
+  return (
+    <span
+      className="chip green"
+      title={
+        reach.kind === "regem"
+          ? `${reach.tier} 目標：重轉「${reach.label}」這條寶石屬性，用持有素材可精魔 +${reach.gem}${reach.suffix}、精煉 +${reach.grind}${reach.suffix}，合計 ${reach.after}${reach.suffix}；目前 ${reach.now}${reach.suffix}`
+          : `${reach.tier} 目標：「${reach.label}」是自然屬性，只能靠精煉 +${reach.grind}${reach.suffix} 從 ${reach.now}${reach.suffix} 補到 ${reach.after}${reach.suffix}`
+      }
+    >
+      可達 {reach.label} {reach.tier}
+      <span className="dim">
+        {reach.kind === "regem" ? ` ${reach.gem}＋${reach.grind}＝${reach.after}` : ` ${reach.now}→${reach.after}`}
+        {reach.suffix}
+      </span>
+    </span>
+  );
+}
+
 function EnchantCard({
   t,
   setName,
   heldMaterials,
+  reach,
   locked,
   excluded,
   currentTags,
@@ -60,6 +85,8 @@ function EnchantCard({
   setName: string;
   /** 勾選持有素材時，最好的精魔方式所需的持有寶石＋磨石（空字串表示未勾選） */
   heldMaterials: string;
+  /** 12+9 / 11+7 精煉目標的可達資訊（選了目標才會有） */
+  reach?: EnchantTierReach;
   locked: boolean;
   excluded: boolean;
   /** 這顆符文目前已經符合的分類（精魔前） */
@@ -79,6 +106,7 @@ function EnchantCard({
       onToggleExclude={onToggleExclude}
     >
       <div className="row wrap" style={{ gap: 6 }}>
+        {reach && <ReachChip reach={reach} />}
         <span
           className={`chip ${delta >= 0 ? "gold" : "muted"}`}
           title="以 6★ 傳說寶石＋精煉上限估算，精魔後效率（含精煉；可超過 100%）"
@@ -154,6 +182,7 @@ function EnchantScoreCard({
   stockOn,
   useCount,
   targetScore,
+  reach,
   locked,
   excluded,
   currentTags,
@@ -169,6 +198,8 @@ function EnchantScoreCard({
   /** 「常用符文」方向：這顆符文在預設隊 / RTA 的使用次數 */
   useCount?: RuneUseCount;
   targetScore: number;
+  /** 12+9 / 11+7 精煉目標的可達資訊（選了目標才會有） */
+  reach?: EnchantTierReach;
   locked: boolean;
   excluded: boolean;
   currentTags: string[];
@@ -188,6 +219,7 @@ function EnchantScoreCard({
       onToggleExclude={onToggleExclude}
     >
       <div className="row wrap" style={{ gap: 6 }}>
+        {reach && <ReachChip reach={reach} />}
         {useCount && (
           <span
             className="chip gold"
@@ -326,6 +358,8 @@ export default function EnchantPage() {
   const [targetScore, setTargetScore] = useState(250);
   const [onlyUnmet, setOnlyUnmet] = useState(true);
   const [take, setTake] = useState(40);
+  /** 精魔／精煉目標（12+9、11+7）；空字串 = 不篩選 */
+  const [tierKey, setTierKey] = useState<EnchantTierKey | "">("");
 
   const toggleSlot = (n: number) =>
     setSlots((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)));
@@ -339,6 +373,20 @@ export default function EnchantPage() {
   const gemTotal = useMemo(() => stock.gems.reduce((sum, g) => sum + g.amount, 0), [stock]);
   const grindTotal = useMemo(() => stock.grindstones.reduce((sum, g) => sum + g.amount, 0), [stock]);
   const stockOn = onlyHaveStock && hasStockData;
+
+  /** 12+9 / 11+7：每顆符文用持有素材可達的目標（只計還沒達標的屬性） */
+  const tierMaps = useMemo(() => {
+    const maps = new Map<EnchantTierKey, Map<number, EnchantTierReach>>();
+    for (const tier of ENCHANT_TIERS) maps.set(tier.key, new Map());
+    if (!hasStockData || !account) return maps;
+    for (const rune of account.runes) {
+      for (const tier of ENCHANT_TIERS) {
+        const hit = enchantTierReach(rune, stock, tier);
+        if (hit) maps.get(tier.key)?.set(rune.id, hit);
+      }
+    }
+    return maps;
+  }, [account, stock, hasStockData]);
 
   /** 預設隊 / 防守隊與 RTA 的符文使用次數（常用符文方向用） */
   const useCounts = useMemo(() => buildRuneUseCounts(account), [account]);
@@ -542,9 +590,38 @@ export default function EnchantPage() {
     return sortEnchantScoreTargets(list, scoreSort);
   }, [scoreReach, onlyUnmet, scoreSort]);
 
+  const tierMap = useMemo(
+    () => (tierKey ? tierMaps.get(tierKey) ?? null : null),
+    [tierKey, tierMaps],
+  );
+
+  /** 各目標在目前清單中符合的數量（chip 上的數字） */
+  const tierCounts = useMemo(() => {
+    const baseList = mode === "tag" ? filtered : mode === "score" ? scoreList : commonFiltered;
+    const out = new Map<EnchantTierKey, number>();
+    for (const tier of ENCHANT_TIERS) {
+      const map = tierMaps.get(tier.key);
+      out.set(tier.key, map ? baseList.filter((t) => map.has(t.rune.id)).length : 0);
+    }
+    return out;
+  }, [mode, filtered, scoreList, commonFiltered, tierMaps]);
+
+  const tagTiered = useMemo(
+    () => (tierMap ? filtered.filter((t) => tierMap.has(t.rune.id)) : filtered),
+    [filtered, tierMap],
+  );
+  const scoreTiered = useMemo(
+    () => (tierMap ? scoreList.filter((t) => tierMap.has(t.rune.id)) : scoreList),
+    [scoreList, tierMap],
+  );
+  const commonTiered = useMemo(
+    () => (tierMap ? commonFiltered.filter((t) => tierMap.has(t.rune.id)) : commonFiltered),
+    [commonFiltered, tierMap],
+  );
+
   useEffect(() => {
     setTake(40);
-  }, [mode, tagFilter, onlyEquipped, onlySix, onlyReady, assumeGrind, setId, slots, mainStat, onlyHaveStock, excludedSets, excludedRuneIds, q, sort, scoreSort, commonSort, minUses, maxUses, showDeckUses, showRtaUses, targetScore, onlyUnmet]);
+  }, [mode, tagFilter, onlyEquipped, onlySix, onlyReady, assumeGrind, setId, slots, mainStat, onlyHaveStock, excludedSets, excludedRuneIds, q, sort, scoreSort, commonSort, minUses, maxUses, showDeckUses, showRtaUses, targetScore, onlyUnmet, tierKey]);
 
   const summary = useMemo(() => {
     const six = gemReady.filter((t) => t.rune.grade === 6).length;
@@ -577,10 +654,10 @@ export default function EnchantPage() {
     return (
       <div className="card card-pad">
         <div className="card-title row" style={{ gap: 7 }}>
-          <FlaskConical size={15} className="gold" /> 精魔建議
+          <FlaskConical size={15} className="gold" /> 精煉／精魔建議
         </div>
         <div className="tiny dim" style={{ marginTop: 6, lineHeight: 1.7 }}>
-          還沒有啟用中的自行分類。精魔建議會依「符文 → 自行分類」的規則，找出只差一條副屬性就能符合分類的符文。
+          還沒有啟用中的自行分類。精煉／精魔建議會依「符文 → 自行分類」的規則，找出只差一條副屬性就能符合分類的符文。
           請先到符文頁建立或啟用分類（例如：輔助符 = 速度、體力%、防禦%、效果抵抗）；
           或切換到「依分數」找出達標的符文，或切到「常用符文」看預設隊 / RTA 常用的符文。
         </div>
@@ -604,13 +681,13 @@ export default function EnchantPage() {
     );
   }
 
-  const shown = filtered.slice(0, take);
-  const scoreShown = scoreList.slice(0, take);
-  const commonShown = commonFiltered.slice(0, take);
-  const commonDeck = mode === "common" ? commonFiltered.filter((t) => (useCounts.get(t.rune.id)?.deck ?? 0) > 0).length : 0;
-  const commonRta = mode === "common" ? commonFiltered.filter((t) => (useCounts.get(t.rune.id)?.rta ?? 0) > 0).length : 0;
+  const shown = tagTiered.slice(0, take);
+  const scoreShown = scoreTiered.slice(0, take);
+  const commonShown = commonTiered.slice(0, take);
+  const commonDeck = mode === "common" ? commonTiered.filter((t) => (useCounts.get(t.rune.id)?.deck ?? 0) > 0).length : 0;
+  const commonRta = mode === "common" ? commonTiered.filter((t) => (useCounts.get(t.rune.id)?.rta ?? 0) > 0).length : 0;
   const commonUses = mode === "common"
-    ? commonFiltered.reduce((s, t) => {
+    ? commonTiered.reduce((s, t) => {
         const u = useCounts.get(t.rune.id);
         return s + (u ? (showDeckUses ? u.deck : 0) + (showRtaUses ? u.rta : 0) : 0);
       }, 0)
@@ -621,23 +698,23 @@ export default function EnchantPage() {
       <div className="row between wrap" style={{ gap: 10, marginBottom: 12 }}>
         <div>
           <div className="card-title row" style={{ gap: 7 }}>
-            <FlaskConical size={15} className="gold" /> 精魔建議
+            <FlaskConical size={15} className="gold" /> 精煉／精魔建議
           </div>
           <div className="card-sub">
             {mode === "tag"
               ? "找出「換掉一條副屬性後，就會符合自行分類」的符文；只列出目前不符合、而且只差一條屬性的符文。"
               : mode === "common"
-                ? "列出預設隊 / 防守隊與 RTA 常用到的符文；可勾選來源（兩個都選＝聯集），再用「排列」自訂使用次數 / 目前分數 / 目標分數，並設定使用次數上下限，卡片仍顯示精魔建議。"
+                ? "列出預設隊 / 防守隊與 RTA 常用到的符文；可勾選來源（兩個都選＝聯集），再用「排列」自訂使用次數 / 目前分數 / 目標分數，並設定使用次數上下限，卡片仍顯示精煉／精魔建議。"
                 : "不需要自行分類：直接算出「精魔一次＋精煉到上限」後能達到目標分數的符文。"}
             數值以 6★ 傳說寶石＋精煉上限估算，實際會依寶石與磨石等級、骰值較低；效率不設上限，超過 100% 會照實顯示。
           </div>
         </div>
         <span className="chip gold">
           {mode === "tag"
-            ? `精魔候選 ${gemReady.length} 顆`
+            ? `精魔候選 ${tagTiered.length} 顆`
             : mode === "common"
-              ? `常用 ${commonFiltered.length} 顆`
-              : `可達 ${targetScore} 分 ${scoreReach.length} 顆`}
+              ? `常用 ${commonTiered.length} 顆`
+              : `可達 ${targetScore} 分 ${scoreTiered.length} 顆`}
         </span>
       </div>
 
@@ -707,6 +784,35 @@ export default function EnchantPage() {
                 ? "列出預設隊 / RTA 常用符文，可選擇來源（預設隊 / RTA，兩個都選＝聯集），再用「排列」自訂排序方式與使用次數範圍"
                 : "以遊戲分數為標準，找精魔＋精煉後能達標的符文"}
           </span>
+          <span className="divider-v" />
+          <span className="tiny dim" title="用你持有的寶石與磨石等級判定：只列出還沒達標、但做得到的符文">
+            精煉目標
+          </span>
+          {ENCHANT_TIERS.map((tier) => {
+            const on = tierKey === tier.key;
+            const count = tierCounts.get(tier.key) ?? 0;
+            return (
+              <button
+                key={tier.key}
+                type="button"
+                className={`chip ${on ? "gold" : "muted"}`}
+                style={{ cursor: hasStockData ? "pointer" : "not-allowed", opacity: hasStockData ? 1 : .55 }}
+                aria-pressed={on}
+                disabled={!hasStockData}
+                title={
+                  hasStockData
+                    ? `${tier.key}：體攻防% 精魔 ${tier.pct[0]}＋精煉 ${tier.pct[1]}；速度 ${tier.spd[0]}＋${tier.spd[1]}。只用你持有的素材，列出還沒達標但做得到的符文`
+                    : "這份存檔沒有寶石／磨石資料，請重新匯入一次 JSON"
+                }
+                onClick={() => setTierKey(on ? "" : tier.key)}
+              >
+                {tier.key} · {count}
+              </button>
+            );
+          })}
+          {tierKey && (
+            <span className="tiny dim">符合 {tierCounts.get(tierKey) ?? 0} 顆（持有素材可達、目前還沒達標）</span>
+          )}
         </div>
 
         {mode === "score" && (
@@ -955,12 +1061,12 @@ export default function EnchantPage() {
           </span>
           <span className="tiny dim">
             {mode === "tag"
-              ? `顯示 ${filtered.length} / ${gemReady.length} 顆`
+              ? `顯示 ${tagTiered.length} / ${gemReady.length} 顆`
               : mode === "common"
-                ? `顯示 ${commonFiltered.length} / ${commonAll.length} 顆`
-                : `顯示 ${scoreList.length} / ${scoreGemReady.length} 顆`}
+                ? `顯示 ${commonTiered.length} / ${commonAll.length} 顆`
+                : `顯示 ${scoreTiered.length} / ${scoreGemReady.length} 顆`}
           </span>
-          {(onlyEquipped || onlySix || !onlyReady || setId || slots.length > 0 || mainStat || onlyHaveStock || excludedSets.length > 0 || excludedRuneIds.length > 0 || q || tagFilter.length > 0 || commonSort !== "uses-desc" || !showDeckUses || !showRtaUses || minUses !== 1 || maxUses !== 0 || (!onlyUnmet && mode === "score")) && (
+          {(onlyEquipped || onlySix || !onlyReady || setId || slots.length > 0 || mainStat || onlyHaveStock || excludedSets.length > 0 || excludedRuneIds.length > 0 || q || tagFilter.length > 0 || commonSort !== "uses-desc" || !showDeckUses || !showRtaUses || minUses !== 1 || maxUses !== 0 || tierKey !== "" || (!onlyUnmet && mode === "score")) && (
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -978,6 +1084,7 @@ export default function EnchantPage() {
                 setQ("");
                 setTagFilter([]);
                 setOnlyUnmet(true);
+                setTierKey("");
                 setCommonSort("uses-desc");
                 setShowDeckUses(true);
                 setShowRtaUses(true);
@@ -995,7 +1102,7 @@ export default function EnchantPage() {
         <div className="row wrap tiny" style={{ gap: 8, margin: "0 0 12px", alignItems: "center" }}>
           <Ban size={13} className="gold" />
           <span className="dim">
-            已排除 {excludedSets.length} 個套裝、{excludedRuneIds.length} 顆符文（只影響這頁的精魔建議清單）
+            已排除 {excludedSets.length} 個套裝、{excludedRuneIds.length} 顆符文（只影響這頁的精煉／精魔建議清單）
           </span>
           <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setExcludedSets([]); setExcludedRuneIds([]); }}>
             清除排除
@@ -1096,7 +1203,7 @@ export default function EnchantPage() {
       </div>
 
       <details className="card card-pad grind-guide" style={{ marginBottom: 14 }}>
-        <summary className="card-title" style={{ cursor: "pointer" }}>精魔規則與使用建議</summary>
+        <summary className="card-title" style={{ cursor: "pointer" }}>精煉／精魔規則與使用建議</summary>
         <ol>
           <li><b>精魔是「換屬性」，不是加數值。</b>寶石會把一條副屬性整個換成另一條，原本的強化（+3 / +6 / +9 / +12）與精煉都會消失，換完要重新精煉。</li>
           <li><b>只能換一條。</b>每顆符文只能選一條副屬性精魔；之後再用寶石也只能換同一條，不能改別條。</li>
@@ -1110,13 +1217,14 @@ export default function EnchantPage() {
           <li><b>已達標與精煉即可達標。</b>「已達標」代表目前分數就夠；「精煉即可達標」代表不用精魔，只要把現有可精煉副屬性拉滿就到目標。想看這兩類可以取消「只看還沒達標」。</li>
           <li><b>持有精煉石和精魔石素材。</b>勾選後只列出「換成你手上真的有的寶石」、而且「精魔後要用來精煉的磨石也真的持有」的符文；素材要比照套裝（遠古符文用遠古素材、無形素材不限套裝）且屬性正確。暴率 / 暴傷 / 抵抗 / 命中不能精煉，不需要磨石；在「依分類」關閉「假設精魔後精煉滿」時也不需要磨石。<b>分數會改以持有素材的等級計算</b>：卡片顯示「持有素材精滿 X 分」，而不是 6★ 傳說上限的 MAX；是否達標也用這個分數判斷。卡片會列出用到的素材、等級、可加數值與持有數量。舊存檔若沒有素材資料，請重新匯入一次 JSON；素材數量不會跨符文扣除。</li>
           <li><b>主屬 / 位置篩選。</b>可依符文主屬性（例如 2 號速度、4 號暴傷、6 號體力%）縮小清單；下拉只列出這份存檔實際擁有的主屬性。位置 1–6 可多選，和套裝、主屬、持有素材等條件一起生效。</li>
-          <li><b>排除符文 / 排除套裝。</b>在「排除符文 / 排除套裝」卡片點套裝即可排除整套，或搜尋符文 ID / 套裝 / 主屬 / 擁有者加入單顆排除；兩者可疊加，也和上面的套裝、主屬、持有素材等條件一起生效。這些排除只影響精魔建議這一頁，不會改到全域「符文限制」的排除清單（卡片上的「排除」標記仍來自全域設定）。</li>
+          <li><b>排除符文 / 排除套裝。</b>在「排除符文 / 排除套裝」卡片點套裝即可排除整套，或搜尋符文 ID / 套裝 / 主屬 / 擁有者加入單顆排除；兩者可疊加，也和上面的套裝、主屬、持有素材等條件一起生效。這些排除只影響精煉／精魔建議這一頁，不會改到全域「符文限制」的排除清單（卡片上的「排除」標記仍來自全域設定）。</li>
           <li><b>常用符文。</b>切到這個方向會列出預設隊 / 防守隊與 RTA 配裝用到的符文；來源可勾選「預設隊」或「RTA」，兩個都選就是列出兩邊用到的符文（聯集）。「排列」可選使用次數、目前分數或目標分數的高低，也能設使用次數下限／上限（上限 0 = 不限）；次數會依所選來源合計。卡片會顯示「常用 N 次」與預設隊 / RTA 的細項。次數是匯出當下的快照，同一顆符文可同時在一般與 RTA 使用；仍可搭配上面的套裝、主屬、搜尋與排除篩選。</li>
+          <li><b>精煉目標 12+9 / 11+7。</b>用你手上的寶石（精魔）與磨石（精煉）等級判斷，只算符文上「已經有的屬性」：體攻防% 要精魔 ≥12、精煉 ≥9（合計 21%），速度要精魔 ≥9、精煉 ≥5（合計 14）；11+7 這一級是體攻防% 11+7、速度 8+4（合計 18% / 12%）。已經是寶石轉出來的屬性可以重轉同一條；自然屬性不能精魔成同一條，只能靠精煉補到目標總和。只列出目前還沒達標、但持有素材做得到的符文，卡片會標示可達的屬性與數值；自然屬性顯示「目前 → 精煉後」，寶石屬性顯示「精魔＋精煉」。舊存檔若沒有寶石／磨石資料，這個篩選會停用，請重新匯入一次 JSON。</li>
         </ol>
       </details>
 
       {mode === "tag" ? (
-        filtered.length === 0 ? (
+        tagTiered.length === 0 ? (
           <div className="empty card" style={{ padding: "40px 16px" }}>
             <FlaskConical size={34} style={{ opacity: .3, marginBottom: 8 }} />
             <div style={{ fontWeight: 600, color: "var(--text)" }}>沒有符合條件的精魔候選</div>
@@ -1135,6 +1243,7 @@ export default function EnchantPage() {
                   t={t}
                   setName={gemNames.get(String(t.rune.id)) ?? ""}
                   heldMaterials={stockOn && t.options[0] ? heldMaterialsLabel(t.rune, t.options[0].toT, t.options[0].toGrind, stock) : ""}
+                  reach={tierMap?.get(t.rune.id)}
                   locked={lockedSet.has(t.rune.id)}
                   excluded={excludedSet.has(t.rune.id)}
                   currentTags={(currentTagsOf.get(t.rune.id) ?? []).map((r) => r.name)}
@@ -1143,17 +1252,17 @@ export default function EnchantPage() {
                 />
               ))}
             </div>
-            {filtered.length > shown.length && (
+            {tagTiered.length > shown.length && (
               <div className="row" style={{ justifyContent: "center", marginTop: 14 }}>
                 <button type="button" className="btn" onClick={() => setTake((n) => n + 40)}>
-                  顯示更多（還有 {filtered.length - shown.length} 顆）
+                  顯示更多（還有 {tagTiered.length - shown.length} 顆）
                 </button>
               </div>
             )}
           </>
         )
       ) : mode === "common" ? (
-        commonFiltered.length === 0 ? (
+        commonTiered.length === 0 ? (
           <div className="empty card" style={{ padding: "40px 16px" }}>
             <FlaskConical size={34} style={{ opacity: .3, marginBottom: 8 }} />
             <div style={{ fontWeight: 600, color: "var(--text)" }}>找不到常用的符文</div>
@@ -1173,6 +1282,7 @@ export default function EnchantPage() {
                   stockOn={false}
                   useCount={useCounts.get(t.rune.id)}
                   targetScore={targetScore}
+                  reach={tierMap?.get(t.rune.id)}
                   locked={lockedSet.has(t.rune.id)}
                   excluded={excludedSet.has(t.rune.id)}
                   currentTags={activeTags.filter((rule) => matchesRuneTag(rule, t.rune)).map((r) => r.name)}
@@ -1181,16 +1291,16 @@ export default function EnchantPage() {
                 />
               ))}
             </div>
-            {commonFiltered.length > commonShown.length && (
+            {commonTiered.length > commonShown.length && (
               <div className="row" style={{ justifyContent: "center", marginTop: 14 }}>
                 <button type="button" className="btn" onClick={() => setTake((n) => n + 40)}>
-                  顯示更多（還有 {commonFiltered.length - commonShown.length} 顆）
+                  顯示更多（還有 {commonTiered.length - commonShown.length} 顆）
                 </button>
               </div>
             )}
           </>
         )
-      ) : scoreList.length === 0 ? (
+      ) : scoreTiered.length === 0 ? (
         <div className="empty card" style={{ padding: "40px 16px" }}>
           <FlaskConical size={34} style={{ opacity: .3, marginBottom: 8 }} />
           <div style={{ fontWeight: 600, color: "var(--text)" }}>沒有符文能在精魔＋精煉後達到 {targetScore} 分</div>
@@ -1210,6 +1320,7 @@ export default function EnchantPage() {
                 heldMaterials={stockOn && t.best ? heldMaterialsLabel(t.rune, t.best.toT, t.best.toGrind, stock) : ""}
                 stockOn={stockOn}
                 targetScore={targetScore}
+                reach={tierMap?.get(t.rune.id)}
                 locked={lockedSet.has(t.rune.id)}
                 excluded={excludedSet.has(t.rune.id)}
                 currentTags={activeTags.filter((rule) => matchesRuneTag(rule, t.rune)).map((r) => r.name)}
@@ -1218,10 +1329,10 @@ export default function EnchantPage() {
               />
             ))}
           </div>
-          {scoreList.length > scoreShown.length && (
+          {scoreTiered.length > scoreShown.length && (
             <div className="row" style={{ justifyContent: "center", marginTop: 14 }}>
               <button type="button" className="btn" onClick={() => setTake((n) => n + 40)}>
-                顯示更多（還有 {scoreList.length - scoreShown.length} 顆）
+                顯示更多（還有 {scoreTiered.length - scoreShown.length} 顆）
               </button>
             </div>
           )}
