@@ -44,17 +44,23 @@ const FONT_STACK = "'Noto Sans TC','Microsoft JhengHei','PingFang TC','Segoe UI'
 const font = (weight: number, size: number) => `${weight} ${size}px ${FONT_STACK}`;
 
 const W = 1440;
-const PAD = 36;
-const GAP = 18;
-const COLS = 3;
-const SCALE = 2;
-const ICON = 48;
+const PAD = 32;
+const GAP = 14;
+const COLS = 4;
+const SCALE = 1.5;
 const PER_ROW = 3;
 const HEADER_H = 104;
-const UNIT_H = 82;
-const CELL_PAD = 14;
+const CELL_PAD = 12;
 const CELL_LABEL_H = 28;
 const FOOTER_H = 44;
+const ICON_GAP = 10;
+
+const CELL_W = (W - PAD * 2 - GAP * (COLS - 1)) / COLS;
+/** 圖示大小由卡片寬度反推：同一隊三隻盡量靠緊，圖示就能放大 */
+const ICON = Math.floor((CELL_W - CELL_PAD * 2 - ICON_GAP * (PER_ROW - 1)) / PER_ROW);
+const UNIT_H = ICON + 38;
+const CELL_H = CELL_PAD + CELL_LABEL_H + UNIT_H + 8;
+const BADGE_R = Math.round(ICON * 0.12);
 
 const iconCache = new Map<string, Promise<HTMLImageElement | null>>();
 
@@ -123,7 +129,7 @@ function drawIcon(
   x: number,
   y: number,
 ) {
-  roundRect(ctx, x, y, ICON, ICON, 10);
+  roundRect(ctx, x, y, ICON, ICON, Math.round(ICON * 0.2));
   ctx.save();
   ctx.clip();
   if (img) {
@@ -132,7 +138,7 @@ function drawIcon(
     ctx.fillStyle = "rgba(255,255,255,.05)";
     ctx.fillRect(x, y, ICON, ICON);
     ctx.fillStyle = EL_COLOR[unit.el] ?? "#8b9cc0";
-    ctx.font = font(800, 22);
+    ctx.font = font(800, Math.round(ICON * 0.44));
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText((unit.name || "?").slice(0, 1), x + ICON / 2, y + ICON / 2 + 1);
@@ -140,13 +146,13 @@ function drawIcon(
   }
   ctx.restore();
 
-  roundRect(ctx, x + 1, y + 1, ICON - 2, ICON - 2, 9);
+  roundRect(ctx, x + 1, y + 1, ICON - 2, ICON - 2, Math.round(ICON * 0.19));
   ctx.strokeStyle = EL_COLOR[unit.el] ?? "#8b9cc0";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = Math.max(2, ICON * 0.03);
   ctx.stroke();
 
   if (unit.rank > 0) {
-    const r = 9;
+    const r = BADGE_R;
     const cx = x + r + 1;
     const cy = y + r + 1;
     ctx.beginPath();
@@ -154,10 +160,10 @@ function drawIcon(
     ctx.fillStyle = "rgba(6,10,20,.9)";
     ctx.fill();
     ctx.strokeStyle = unit.rank === 1 ? "#f2c65c" : "rgba(255,255,255,.28)";
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1.4;
     ctx.stroke();
     ctx.fillStyle = unit.rank === 1 ? "#f2c65c" : "#cfdcff";
-    ctx.font = font(700, 8.5);
+    ctx.font = font(700, Math.round(r * 0.95));
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(`#${unit.rank}`, cx, cy + 0.5);
@@ -170,8 +176,7 @@ export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
   const teams = input.teams;
   const maxUnits = Math.max(1, ...teams.map((t) => Math.min(5, t.units.length)));
   const unitRows = Math.max(1, Math.ceil(maxUnits / PER_ROW));
-  const cellW = (W - PAD * 2 - GAP * (COLS - 1)) / COLS;
-  const cellH = CELL_PAD + CELL_LABEL_H + unitRows * UNIT_H + 10;
+  const cellH = CELL_H + (unitRows - 1) * UNIT_H;
   const rows = Math.max(1, Math.ceil(teams.length / COLS));
   const H = HEADER_H + rows * cellH + (rows - 1) * GAP + FOOTER_H + 14;
 
@@ -222,7 +227,7 @@ export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
 
   // ── 隊伍卡片 ─────────────────────────────────────────
   const icons = await loadIcons(teams);
-  const itemW = (cellW - CELL_PAD * 2) / PER_ROW;
+  const itemW = (CELL_W - CELL_PAD * 2) / PER_ROW;
 
   if (teams.length === 0) {
     ctx.fillStyle = "#6f80a6";
@@ -234,10 +239,10 @@ export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
   teams.forEach((team, i) => {
     const col = i % COLS;
     const row = Math.floor(i / COLS);
-    const x = PAD + col * (cellW + GAP);
+    const x = PAD + col * (CELL_W + GAP);
     const y = HEADER_H + row * (cellH + GAP);
 
-    roundRect(ctx, x, y, cellW, cellH, 14);
+    roundRect(ctx, x, y, CELL_W, cellH, 14);
     ctx.fillStyle = "#121b30";
     ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,.07)";
@@ -251,16 +256,16 @@ export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
     ctx.fillText(`第 ${team.seq} 隊`, x + CELL_PAD, y + CELL_PAD + 15);
 
     const leader = team.units.find((u) => u.leader);
-    const rightMax = cellW - CELL_PAD * 2 - 90;
+    const rightMax = CELL_W - CELL_PAD * 2 - 92;
     ctx.textAlign = "right";
     if (leader) {
       ctx.fillStyle = "#f2c65c";
-      ctx.font = font(600, 11);
-      ctx.fillText(fitText(ctx, `隊長 ${leader.name}`, rightMax), x + cellW - CELL_PAD, y + CELL_PAD + 15);
+      ctx.font = font(600, 11.5);
+      ctx.fillText(fitText(ctx, `隊長 ${leader.name}`, rightMax), x + CELL_W - CELL_PAD, y + CELL_PAD + 15);
     } else {
       ctx.fillStyle = "#6f80a6";
-      ctx.font = font(500, 11);
-      ctx.fillText(`${team.units.length} 人`, x + cellW - CELL_PAD, y + CELL_PAD + 15);
+      ctx.font = font(500, 11.5);
+      ctx.fillText(`${team.units.length} 人`, x + CELL_W - CELL_PAD, y + CELL_PAD + 15);
     }
 
     // 隊員
@@ -275,15 +280,15 @@ export async function renderDeckPoster(input: PosterInput): Promise<Blob> {
       const cx = ix + ICON / 2;
       ctx.textAlign = "center";
       ctx.fillStyle = unit.leader ? "#f2c65c" : "#dfe8ff";
-      ctx.font = font(600, 11.5);
-      ctx.fillText(fitText(ctx, unit.name, itemW - 4), cx, iy + ICON + 17);
+      ctx.font = font(600, 12.5);
+      ctx.fillText(fitText(ctx, unit.name, itemW - 2), cx, iy + ICON + 18);
 
-      ctx.font = font(600, 10);
+      ctx.font = font(600, 10.5);
       const spd = unit.spd > 0 ? `SPD ${unit.spd}` : "SPD —";
       const tick = unit.tick > 0 ? `T${unit.tick}` : "T—";
       const meta = `${spd} · ${tick}`;
       ctx.fillStyle = "#9fb0d4";
-      ctx.fillText(fitText(ctx, meta, itemW - 4), cx, iy + ICON + 31);
+      ctx.fillText(fitText(ctx, meta, itemW - 2), cx, iy + ICON + 34);
     });
   });
 
