@@ -10,6 +10,8 @@ interface EffectDef {
   negative?: boolean;
   /** 小數位（追加傷害的體力 % 需要 1 位） */
   decimals?: number;
+  /** 屬性 id（水火風光暗），表頭用屬性色顯示 */
+  el?: number;
 }
 
 interface TableDef {
@@ -24,22 +26,22 @@ const TABLES: TableDef[] = [
     key: "taken",
     title: "受到屬性傷害減少",
     effects: [
-      { t: 306, label: "水", negative: true },
-      { t: 305, label: "火", negative: true },
-      { t: 307, label: "風", negative: true },
-      { t: 308, label: "光", negative: true },
-      { t: 309, label: "暗", negative: true },
+      { t: 306, label: "水", negative: true, el: 1 },
+      { t: 305, label: "火", negative: true, el: 2 },
+      { t: 307, label: "風", negative: true, el: 3 },
+      { t: 308, label: "光", negative: true, el: 4 },
+      { t: 309, label: "暗", negative: true, el: 5 },
     ],
   },
   {
     key: "dealt",
     title: "對屬性傷害增加",
     effects: [
-      { t: 301, label: "水" },
-      { t: 300, label: "火" },
-      { t: 302, label: "風" },
-      { t: 303, label: "光" },
-      { t: 304, label: "暗" },
+      { t: 301, label: "水", el: 1 },
+      { t: 300, label: "火", el: 2 },
+      { t: 302, label: "風", el: 3 },
+      { t: 303, label: "光", el: 4 },
+      { t: 304, label: "暗", el: 5 },
     ],
   },
   {
@@ -102,24 +104,37 @@ const TABLES: TableDef[] = [
   },
 ];
 
+type ArtifactGroup = "attr" | "type";
+
 interface ArtifactTab {
   key: string;
   label: string;
+  group: ArtifactGroup;
+  /** 分組代表色：屬性神器用屬性色，類型神器統一用青綠色 */
+  color: string;
   match: (a: Artifact) => boolean;
 }
 
-const TABS: ArtifactTab[] = [
-  { key: "water", label: "水", match: (a) => a.type === 1 && a.attr === 1 },
-  { key: "fire", label: "火", match: (a) => a.type === 1 && a.attr === 2 },
-  { key: "wind", label: "風", match: (a) => a.type === 1 && a.attr === 3 },
-  { key: "light", label: "光", match: (a) => a.type === 1 && a.attr === 4 },
-  { key: "dark", label: "暗", match: (a) => a.type === 1 && a.attr === 5 },
-  { key: "attack", label: "攻擊", match: (a) => a.type === 2 && a.style === 1 },
-  { key: "defense", label: "防禦", match: (a) => a.type === 2 && a.style === 2 },
-  { key: "hp", label: "體力", match: (a) => a.type === 2 && a.style === 3 },
-  { key: "support", label: "支援", match: (a) => a.type === 2 && a.style === 4 },
-  { key: "special", label: "無形", match: (a) => a.attr === 98 || (a.type === 2 && a.style === 98) },
+/** 類型神器統一色，和五種屬性色明顯區隔 */
+const TYPE_COLOR = "#2dd4bf";
+
+const ATTR_TABS: ArtifactTab[] = [
+  { key: "water", label: "水", group: "attr", color: "var(--water)", match: (a) => a.type === 1 && a.attr === 1 },
+  { key: "fire", label: "火", group: "attr", color: "var(--fire)", match: (a) => a.type === 1 && a.attr === 2 },
+  { key: "wind", label: "風", group: "attr", color: "var(--wind)", match: (a) => a.type === 1 && a.attr === 3 },
+  { key: "light", label: "光", group: "attr", color: "var(--light)", match: (a) => a.type === 1 && a.attr === 4 },
+  { key: "dark", label: "暗", group: "attr", color: "var(--dark)", match: (a) => a.type === 1 && a.attr === 5 },
 ];
+
+const TYPE_TABS: ArtifactTab[] = [
+  { key: "attack", label: "攻擊", group: "type", color: TYPE_COLOR, match: (a) => a.type === 2 && a.style === 1 },
+  { key: "defense", label: "防禦", group: "type", color: TYPE_COLOR, match: (a) => a.type === 2 && a.style === 2 },
+  { key: "hp", label: "體力", group: "type", color: TYPE_COLOR, match: (a) => a.type === 2 && a.style === 3 },
+  { key: "support", label: "支援", group: "type", color: TYPE_COLOR, match: (a) => a.type === 2 && a.style === 4 },
+  { key: "special", label: "無形", group: "type", color: TYPE_COLOR, match: (a) => a.attr === 98 || (a.type === 2 && a.style === 98) },
+];
+
+const TABS: ArtifactTab[] = [...ATTR_TABS, ...TYPE_TABS];
 
 /** 每件神器只取該效果的最高數值，再排出前 10 名 */
 function topValues(artifacts: Artifact[], effect: number): number[] {
@@ -143,6 +158,28 @@ export function ArtifactTopTables({ artifacts }: { artifacts: Artifact[] }) {
   const active = TABS.find((t) => t.key === tab) ?? TABS[0];
   const rows = useMemo(() => artifacts.filter(active.match), [artifacts, active]);
 
+  const tabButton = (t: ArtifactTab) => {
+    const on = tab === t.key;
+    return (
+      <button
+        key={t.key}
+        type="button"
+        className="chip"
+        title={`${t.group === "attr" ? "屬性神器" : "類型神器"}：${t.label}`}
+        style={{
+          cursor: "pointer",
+          color: on ? "#0b1120" : t.color,
+          background: on ? t.color : "transparent",
+          borderColor: on ? t.color : "var(--line-soft)",
+          fontWeight: on ? 700 : 500,
+        }}
+        onClick={() => setTab(t.key)}
+      >
+        {t.label}
+      </button>
+    );
+  };
+
   const tables = useMemo(
     () =>
       TABLES.map((table) => ({
@@ -162,21 +199,19 @@ export function ArtifactTopTables({ artifacts }: { artifacts: Artifact[] }) {
             <span className="dim tiny" style={{ fontWeight: 400 }}>本組 {rows.length} 件</span>
           </div>
           <div className="card-sub">
-            參考 SWGT Artifact 統計：切換屬性 / 類型神器，列出每個效果最高的 10 件；數值已含強化。
+            參考 SWGT Artifact 統計：屬性神器（水／火／風／光／暗，用屬性色）與類型神器（攻擊／防禦／體力／支援／無形，青色）以顏色區分，列出每個效果最高的 10 件；數值已含強化。
           </div>
         </div>
-        <div className="row wrap" style={{ gap: 5, justifyContent: "flex-end" }}>
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              className={`chip ${tab === t.key ? "gold" : "muted"}`}
-              style={{ cursor: "pointer" }}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="row wrap" style={{ gap: 5, justifyContent: "flex-end", alignItems: "center" }}>
+          <div className="row" style={{ gap: 5, alignItems: "center", flexWrap: "nowrap" }}>
+            <span className="tiny dim">屬性神器</span>
+            {ATTR_TABS.map(tabButton)}
+          </div>
+          <span className="divider-v" />
+          <div className="row" style={{ gap: 5, alignItems: "center", flexWrap: "nowrap" }}>
+            <span className="tiny dim">類型神器</span>
+            {TYPE_TABS.map(tabButton)}
+          </div>
         </div>
       </div>
 
@@ -198,7 +233,9 @@ export function ArtifactTopTables({ artifacts }: { artifacts: Artifact[] }) {
                     <tr>
                       <th className="num" style={{ width: 42 }}>#</th>
                       {table.effects.map((e) => (
-                        <th key={e.t} className="num">{e.label}</th>
+                        <th key={e.t} className="num">
+                          {e.el ? <span className={`el-${e.el}`}>{e.label}</span> : e.label}
+                        </th>
                       ))}
                     </tr>
                   </thead>
