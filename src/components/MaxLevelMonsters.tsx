@@ -28,6 +28,14 @@ function groupOf(view: UnitView): GroupKey {
 
 type FilterKey = "all" | "built" | "empty" | "noskill";
 
+const EL_COLORS: Record<number, string> = {
+  1: "var(--water)",
+  2: "var(--fire)",
+  3: "var(--wind)",
+  4: "var(--light)",
+  5: "var(--dark)",
+};
+
 const FILTERS: { key: FilterKey; label: string; title: string }[] = [
   { key: "all", label: "全部", title: "顯示全部 6★ 滿等魔靈" },
   { key: "built", label: "已配符", title: "只顯示身上有符文的魔靈" },
@@ -50,6 +58,12 @@ export function MaxLevelMonsters({ views }: { views: UnitView[] }) {
       return next;
     });
   };
+
+  const elCounts = useMemo(() => {
+    const c: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const v of views) c[v.monster.el] = (c[v.monster.el] ?? 0) + 1;
+    return c;
+  }, [views]);
 
   const groups = useMemo(() => {
     const key = q.trim().toLowerCase();
@@ -82,6 +96,7 @@ export function MaxLevelMonsters({ views }: { views: UnitView[] }) {
           </div>
           <div className="card-sub">
             依 SWGT Monster Collection 分區：NAT 5 / NAT 4 / NAT 3 / NAT 2 / SECOND AWAKENED；全部都是 6★ Lv40，點圖示看完整面板。
+            屬性可多選（符合任一個）：只選水就只出水屬性，選風＋光就只出風與光屬性。
           </div>
         </div>
         <div className="row wrap" style={{ gap: 6, justifyContent: "flex-end" }}>
@@ -95,18 +110,46 @@ export function MaxLevelMonsters({ views }: { views: UnitView[] }) {
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
-          {[1, 2, 3, 4, 5].map((el) => (
+          <span className="divider-v" />
+          <span className="tiny dim" style={{ alignSelf: "center" }}>屬性</span>
+          {[1, 2, 3, 4, 5].map((el) => {
+            const on = els.has(el);
+            const dim = els.size > 0 && !on;
+            return (
+              <button
+                key={el}
+                type="button"
+                className="chip"
+                style={{
+                  cursor: "pointer",
+                  padding: "5px 10px",
+                  color: dim ? "var(--muted-2)" : EL_COLORS[el],
+                  background: on ? "rgba(255, 255, 255, .06)" : "transparent",
+                  borderColor: on ? EL_COLORS[el] : "var(--line-soft)",
+                  boxShadow: on ? `inset 0 0 0 1px ${EL_COLORS[el]}` : "none",
+                  fontWeight: on ? 700 : 500,
+                }}
+                onClick={() => toggleEl(el)}
+                title={`${ELEMENTS[el as 1].name}屬性 · 點擊${on ? "取消" : "加入"}篩選（可多選）`}
+              >
+                {on ? "✓ " : ""}{ELEMENTS[el as 1].name} · {elCounts[el] ?? 0}
+              </button>
+            );
+          })}
+          {els.size > 0 && (
             <button
-              key={el}
               type="button"
-              className={`chip ${els.has(el) ? "gold" : "muted"}`}
-              style={{ cursor: "pointer" }}
-              onClick={() => toggleEl(el)}
-              title={`只看${ELEMENTS[el as 1].name}屬性（可多選）`}
+              className="chip muted"
+              style={{ cursor: "pointer", padding: "5px 10px" }}
+              onClick={() => setEls(new Set())}
+              title="清除屬性篩選，顯示全部屬性"
             >
-              <span className={`el-${el}`}>{ELEMENTS[el as 1].name.slice(0, 1)}</span>
+              清除 · 全屬性 {views.length}
             </button>
-          ))}
+          )}
+          {els.size > 1 && (
+            <span className="tiny dim">符合任一個</span>
+          )}
           <span className="divider-v" />
           {FILTERS.map((f) => (
             <button
