@@ -17,7 +17,7 @@ import {
 import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
 import { computeSkillDamage, loadSkillData, skillsForMonster, type DamageOptions, type Skill, type SkillData } from "../lib/damage";
-import { autoAssignRoles, roleSetup, BUILTIN_ROLE_PRESETS, type BuiltinRolePreset, type RoleUnit } from "../lib/teamRoles";
+import { autoAssignRoles, boosterBoostOf, BUILTIN_ROLE_PRESETS, roleSetup, type BuiltinRolePreset, type RoleUnit } from "../lib/teamRoles";
 import { battleSpeedForPanelExtra, computeFollowPlan, leadBonus, mirrorTimeline, orderSafeFloorSpeeds, panelExtraFor } from "../lib/teamSpeed";
 import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply, teamSetsOf,
@@ -1051,6 +1051,8 @@ export default function TeamOptimizerPage() {
       tick: setup.tick,
       speedMode: setup.tick > 0 ? "tick" : "panel",
       focus: setup.focus.map((f) => ({ ...f })),
+      boostPct: 0,
+      speedBuff: false,
     });
     notify(`已套用定位「${TEAM_ROLE_LABELS[role]}」的配裝設定`);
   };
@@ -1073,6 +1075,8 @@ export default function TeamOptimizerPage() {
       tick: preset.tick,
       speedMode: preset.speedMode,
       focus: preset.focus.map((f) => ({ ...f })),
+      boostPct: 0,
+      speedBuff: false,
     });
     notify(`已套用預設定位「${preset.name}」`);
   };
@@ -1094,6 +1098,8 @@ export default function TeamOptimizerPage() {
       tick: preset.tick,
       focus: preset.focus.map((f) => ({ ...f })),
       speedMode: preset.speedMode,
+      boostPct: 0,
+      speedBuff: false,
     });
     notify(`已套用定位「${preset.name}」`);
   };
@@ -1237,6 +1243,48 @@ export default function TeamOptimizerPage() {
     if (!m) return 0;
     return Math.max(0, m.leadPct ?? leadPcts[teamOfIndex(index)] ?? 0);
   };
+
+  /**
+   * 接速打手：同隊有「提條輔助」時，即時讀取那隻魔靈的技能，
+   * 把提條 % 與速度強化帶入。只在使用者換魔靈或換預設定位時重算，
+   * 避免蓋掉手動調整的數值。
+   */
+  const autoBoostSigRef = useRef("");
+  useEffect(() => {
+    const sig =
+      `${size}:${teams}:` +
+      members.map((m) => `${m.unitId}:${m.presetId ?? ""}`).join("|") +
+      (skillData ? "|skill" : "|noskill");
+    if (sig === autoBoostSigRef.current) return;
+    autoBoostSigRef.current = sig;
+
+    const boosterOfTeam = new Map<number, MemberDraft>();
+    members.forEach((m, i) => {
+      if (m.presetId !== "builtin:atb-booster") return;
+      const team = teamOfIndex(i);
+      if (!boosterOfTeam.has(team)) boosterOfTeam.set(team, m);
+    });
+
+    let changed = false;
+    const next = members.map((m, i) => {
+      if (!m.presetId?.startsWith("builtin:")) return m;
+      const preset = BUILTIN_ROLE_PRESETS.find((p) => `builtin:${p.id}` === m.presetId);
+      if (!preset?.autoBoost) return m;
+      const booster = boosterOfTeam.get(teamOfIndex(i));
+      const view = booster ? viewOf(booster.unitId) : undefined;
+      const boost = view ? boosterBoostOf(skillData, view.monster.id) : null;
+      const pct = boost?.pct ?? 0;
+      const speedBuff = boost?.speedBuff ?? false;
+      if (m.boostPct === pct && m.speedBuff === speedBuff) return m;
+      changed = true;
+      return { ...m, boostPct: pct, speedBuff };
+    });
+
+    if (!changed) return;
+    setMembers(next);
+    setPlan(null);
+    resetSequence();
+  }, [members, size, teams, skillData]);
 
   const selected = members.filter((m) => m.unitId > 0);
   const teamIds = selected.map((m) => m.unitId);

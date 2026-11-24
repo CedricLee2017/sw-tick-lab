@@ -57,8 +57,56 @@ export interface RoleSetup {
 
 /** SWARFARM 特殊效果 id：17 = 增加攻擊條 */
 const ATB_EFFECT = 17;
+/** SWARFARM 特殊效果 id：5 = 增加攻擊速度（速度強化 +30%） */
+const SPEED_BUFF_EFFECT = 5;
 /** 描述裡「增加／填充攻擊條」的寫法；純粹吸收或削減對手攻擊條不算 */
 const ATB_INCREASE = /(increase|fill|fills|charge|boost)[^.]{0,60}attack bar|attack bar[^.]{0,40}(increase|fill)/i;
+/** 技能是否作用在隊友（全隊／單一隊友），而不是只加自己的攻擊條 */
+const ALLY_TARGET = /\b(all allies|allies|ally|team)\b/i;
+/** 從技能描述抓攻擊條 %（前後兩種語序都支援） */
+const ATB_PCT_PATTERNS = [
+  /attack (?:bar|gauge)s?[^.%]{0,60}?(\d{1,3})\s*%/i,
+  /(\d{1,3})\s*%[^.%]{0,30}?attack (?:bar|gauge)/i,
+];
+
+export interface BoosterBoost {
+  /** 提供給隊友的攻擊條 %（0 = 沒有提條） */
+  pct: number;
+  /** 是否有速度強化（+30%） */
+  speedBuff: boolean;
+}
+
+function atbPctOf(text: string): number {
+  for (const re of ATB_PCT_PATTERNS) {
+    const m = text.match(re);
+    if (m) return Math.max(0, Math.min(100, Number(m[1]) || 0));
+  }
+  // 「Fills up the Attack Bar」沒有寫 % 時視為 100%
+  if (/fills? up? (?:the )?attack (?:bar|gauge)|attack (?:bar|gauge)[^.]{0,20}fills? up/i.test(text)) {
+    return 100;
+  }
+  return 0;
+}
+
+/**
+ * 讀取提條魔靈的技能，算出他能給隊友的提條 % 與速度強化。
+ * 只看主動技能、且技能要作用在隊友身上；自己加速／自己補攻擊條不列入。
+ */
+export function boosterBoostOf(data: SkillData | null, master: number): BoosterBoost | null {
+  if (!data || !master) return null;
+  const ids = data.monsters[String(master)] ?? [];
+  let pct = 0;
+  let speedBuff = false;
+  for (const id of ids) {
+    const skill = data.skills[String(id)];
+    if (!skill || skill.passive) continue;
+    const desc = skill.d ?? "";
+    if (!ALLY_TARGET.test(desc)) continue;
+    if (skill.e?.includes(SPEED_BUFF_EFFECT)) speedBuff = true;
+    if (skill.e?.includes(ATB_EFFECT)) pct = Math.max(pct, atbPctOf(desc));
+  }
+  return pct > 0 || speedBuff ? { pct, speedBuff } : null;
+}
 
 /** 這隻魔靈是否有增加攻擊條的技能（含自身或全隊） */
 export function hasAtbBoost(data: SkillData | null, master: number): boolean {
@@ -294,6 +342,11 @@ export interface BuiltinRolePreset {
   tick: number;
   speedMode: "panel" | "tick";
   focus: FocusEntry[];
+  /**
+   * 接速打手：套用後會即時讀取同隊「提條輔助」的技能，
+   * 自動帶入提條 % 與速度強化。
+   */
+  autoBoost?: boolean;
 }
 
 /**
@@ -391,5 +444,76 @@ export const BUILTIN_ROLE_PRESETS: BuiltinRolePreset[] = [
       { key: "spd", weight: 6 },
       { key: "res", weight: 10 },
     ],
+  },
+  {
+    id: "atb-booster",
+    name: "提條輔助",
+    role: "booster",
+    weight: 10,
+    set4: 3, // 迅速
+    set2: 0, // 不限
+    mains: { 2: 8, 4: 2 }, // 2 號速度、4 號體力%，6 號不限
+    min: {},
+    tick: 0,
+    speedMode: "panel",
+    focus: [{ key: "spd", weight: 10 }],
+  },
+  {
+    id: "speed-tuned-cd-cr100",
+    name: "接速百爆傷害打手",
+    role: "dps",
+    weight: 10,
+    set4: 0,
+    set2: 0,
+    mains: { 2: 8, 4: 10, 6: 4 }, // 2 速、4 爆傷、6 攻擊%
+    min: { cr: 100 },
+    tick: 0,
+    speedMode: "panel",
+    focus: [
+      { key: "spd", weight: 10 },
+      { key: "cr", weight: 10 },
+      { key: "atk", weight: 10 },
+      { key: "cd", weight: 10 },
+      { key: "hp", weight: 5 },
+    ],
+    autoBoost: true,
+  },
+  {
+    id: "speed-tuned-cd-atk",
+    name: "接速無爆率傷害打手",
+    role: "dps",
+    weight: 10,
+    set4: 0,
+    set2: 0,
+    mains: { 2: 8, 4: 10, 6: 4 }, // 2 速、4 爆傷、6 攻擊%
+    min: {},
+    tick: 0,
+    speedMode: "panel",
+    focus: [
+      { key: "spd", weight: 10 },
+      { key: "atk", weight: 10 },
+      { key: "cd", weight: 10 },
+      { key: "hp", weight: 5 },
+    ],
+    autoBoost: true,
+  },
+  {
+    id: "speed-tuned-cd-hp",
+    name: "接速無爆率坦打手",
+    role: "dps",
+    weight: 10,
+    set4: 0,
+    set2: 0,
+    mains: { 2: 8, 4: 10, 6: 2 }, // 2 速、4 爆傷、6 體力%
+    min: {},
+    tick: 0,
+    speedMode: "panel",
+    focus: [
+      { key: "spd", weight: 10 },
+      { key: "atk", weight: 10 },
+      { key: "cd", weight: 10 },
+      { key: "hp", weight: 5 },
+    ],
+    autoBoost: true,
   },
 ];
