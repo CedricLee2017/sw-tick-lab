@@ -16,7 +16,7 @@ const MAX_NAME = 20;
 
 const TEAM_ROLES: TeamRole[] = ["speed", "booster", "dps", "tank", "support", "free"];
 
-/** 與一鍵配隊頁的「目標」選項一致；分開定義避免 lib 反向依賴頁面。 */
+/** 舊版預設定位曾保存搜尋目標；保留欄位只為讀取既有資料，新的定位一律使用「role」。 */
 export const PRESET_OBJECTIVES = ["role", "skill", "spd", "atk", "def", "hp", "dps", "tank", "support", "score"] as const;
 export type PresetObjective = (typeof PRESET_OBJECTIVES)[number];
 

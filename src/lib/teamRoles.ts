@@ -277,3 +277,83 @@ export const ROLE_SETUPS: Record<TeamRole, RoleSetup> = {
 export function roleSetup(role: TeamRole): RoleSetup {
   return ROLE_SETUPS[role];
 }
+
+/** 內建「預設定位」：選一次就把整組套裝 / 主屬性 / 下限 / Tick / 焦點填入 */
+export interface BuiltinRolePreset {
+  id: string;
+  name: string;
+  role: TeamRole;
+  weight: number;
+  /** 4 件套；0 = 不指定 */
+  set4: number;
+  /** 2 件套；0 = 不指定 */
+  set2: number;
+  mains: Partial<Record<number, number>>;
+  min: Partial<Record<StatKey, number>>;
+  /** 目標 Tick（T5） */
+  tick: number;
+  speedMode: "panel" | "tick";
+  focus: FocusEntry[];
+}
+
+/**
+ * T5 防後手系列：暴走 ×4＋意志 ×2、目標 Tick 5（含速隊長與建築加成）。
+ * 焦點比重會直接帶入，用家套用後仍可自行調整任何欄位。
+ */
+export const BUILTIN_ROLE_PRESETS: BuiltinRolePreset[] = [
+  {
+    id: "t5-anti-late-cd",
+    name: "T5 防後手爆傷",
+    role: "dps",
+    weight: 10,
+    set4: 13,
+    set2: 15,
+    mains: { 2: 4, 4: 10, 6: 4 },
+    min: { cr: 100 },
+    tick: 5,
+    speedMode: "tick",
+    focus: [
+      { key: "hp", weight: 6 },
+      { key: "atk", weight: 6 },
+      { key: "def", weight: 6 },
+      { key: "spd", weight: 6 },
+      { key: "cr", weight: 10 },
+    ],
+  },
+  {
+    id: "t5-anti-late-cr",
+    name: "T5 防後手爆率追傷",
+    role: "dps",
+    weight: 10,
+    set4: 13,
+    set2: 15,
+    mains: { 2: 2, 4: 9, 6: 2 },
+    min: { cr: 100 },
+    tick: 5,
+    speedMode: "tick",
+    focus: [
+      { key: "hp", weight: 6 },
+      { key: "atk", weight: 6 },
+      { key: "def", weight: 6 },
+      { key: "spd", weight: 6 },
+    ],
+  },
+  {
+    id: "t5-anti-late-hp",
+    name: "T5 防後手純追傷",
+    role: "tank",
+    weight: 10,
+    set4: 13,
+    set2: 15,
+    mains: { 2: 2, 4: 2, 6: 2 },
+    min: {},
+    tick: 5,
+    speedMode: "tick",
+    focus: [
+      { key: "hp", weight: 10 },
+      { key: "atk", weight: 6 },
+      { key: "def", weight: 6 },
+      { key: "spd", weight: 6 },
+    ],
+  },
+];

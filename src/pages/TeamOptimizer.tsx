@@ -17,7 +17,7 @@ import {
 import { deckTypeLabel } from "../lib/deckTypes";
 import { artifactSpeedBuffPct } from "../lib/artifacts";
 import { computeSkillDamage, loadSkillData, skillsForMonster, type DamageOptions, type Skill, type SkillData } from "../lib/damage";
-import { autoAssignRoles, roleSetup, type RoleUnit } from "../lib/teamRoles";
+import { autoAssignRoles, roleSetup, BUILTIN_ROLE_PRESETS, type BuiltinRolePreset, type RoleUnit } from "../lib/teamRoles";
 import { battleSpeedForPanelExtra, computeFollowPlan, leadBonus, mirrorTimeline, orderSafeFloorSpeeds, panelExtraFor } from "../lib/teamSpeed";
 import {
   TEAM_ROLE_LABELS, roleObjective, runeSupply, teamSetsOf,
@@ -28,22 +28,6 @@ import { TEAM_TEMPLATES, teamTemplateOf, templateMembers, type TeamMemberTemplat
 import { useTeamPresets } from "../lib/teamPresets";
 import { useRolePresets, type RolePreset } from "../lib/rolePresets";
 import type { FocusEntry } from "../lib/types";
-
-/** 每隻魔靈的搜尋目標 */
-type ObjectiveMode = "role" | "skill" | "spd" | "atk" | "def" | "hp" | "dps" | "tank" | "support" | "score";
-
-const OBJECTIVE_LABELS: Record<ObjectiveMode, string> = {
-  role: "依定位",
-  skill: "技能傷害",
-  spd: "速度",
-  atk: "攻擊",
-  def: "防禦",
-  hp: "體力",
-  dps: "傷害期望",
-  tank: "坦度 EHP",
-  support: "綜合",
-  score: "符文評分",
-};
 
 const MIN_LABELS: Record<StatKey, string> = {
   hp: "體力",
@@ -98,8 +82,6 @@ interface MemberDraft {
   weight: number;
   /** 優先順序：1 = 最優先；0 = 不指定（依權重） */
   priority: number;
-  /** 搜尋目標：依角色 / 技能傷害 / 速度 / 傷害 / 坦度 / 綜合 / 評分 */
-  objectiveMode: ObjectiveMode;
   /** 技能傷害目標的技能 id；0 = 自動選最後一招（通常是 S3） */
   skillId: number;
   /** 技能傷害目標的技能欄位（S1～S4）；0 = 沒有指定，套用隊型時用來跨魔靈對應技能 */
@@ -196,7 +178,6 @@ function draftFromTemplate(t: TeamMemberTemplate, unitId = 0): MemberDraft {
     title: t.title,
     weight: t.weight,
     priority: t.priority ?? 0,
-    objectiveMode: t.objective ?? "role",
     skillId: 0,
     skillSlot: t.skillSlot ?? 0,
     set4,
@@ -234,7 +215,6 @@ function blankMember(unitId = 0): MemberDraft {
     title: TEAM_ROLE_LABELS.free,
     weight: 1,
     priority: 0,
-    objectiveMode: "role",
     skillId: 0,
     skillSlot: 0,
     set4: 0,
@@ -578,10 +558,11 @@ export default function TeamOptimizerPage() {
   useEffect(() => {
     if (!presetsReady) return;
     const ids = new Set(presets.map((p) => p.id));
+    const isStale = (id?: string) => !!id && !id.startsWith("builtin:") && !ids.has(id);
     setMembers((prev) => {
-      if (!prev.some((m) => m.presetId && !ids.has(m.presetId))) return prev;
+      if (!prev.some((m) => isStale(m.presetId))) return prev;
       return prev.map((m) =>
-        m.presetId && !ids.has(m.presetId)
+        isStale(m.presetId)
           ? { ...m, presetId: undefined, title: TEAM_ROLE_LABELS[m.role] }
           : m,
       );
@@ -754,7 +735,6 @@ export default function TeamOptimizerPage() {
       speedMode: d.speedMode,
       panelExtra: d.panelExtra,
       panelExtraMax: d.panelExtraMax,
-      objectiveMode: d.objectiveMode,
       skillId: d.skillId,
       skillSlot: d.skillSlot,
       order: d.order,
@@ -1021,7 +1001,7 @@ export default function TeamOptimizerPage() {
 
   /** 手動改到定位相關的欄位時，視為偏離原本的預設定位 */
   const PRESET_FIELDS: (keyof MemberDraft)[] = [
-    "role", "weight", "set4", "set2", "set2b", "set2c", "mains", "min", "max", "tick", "focus", "objectiveMode", "speedMode", "panelExtraMax",
+    "role", "weight", "set4", "set2", "set2b", "set2c", "mains", "min", "max", "tick", "focus", "speedMode", "panelExtraMax",
   ];
 
   const updateMember = (i: number, patch: Partial<MemberDraft>) => {
@@ -1029,7 +1009,7 @@ export default function TeamOptimizerPage() {
       prev.map((m, j) => {
         if (j !== i) return m;
         // 手動改到定位相關欄位時，視為偏離原本的預設定位，名稱回到內建定位
-        const drifted = !!m.presetId && !patch.presetId && PRESET_FIELDS.some((key) => key in patch);
+        const drifted = !!m.presetId && !("presetId" in patch) && PRESET_FIELDS.some((key) => key in patch);
         return {
           ...m,
           ...patch,
@@ -1051,6 +1031,52 @@ export default function TeamOptimizerPage() {
     resetSequence();
     notify(`已重置 ${v ? unitLabel(v.unit) : "這隻魔靈"} 的所有設定（定位：自由）`);
   };
+
+  /** 套用內建定位的完整配裝；套用後仍可手動調整任何欄位 */
+  const applyBuiltinRole = (i: number, role: TeamRole) => {
+    const setup = roleSetup(role);
+    updateMember(i, {
+      presetId: undefined,
+      role,
+      title: setup.title,
+      weight: setup.weight,
+      set4: setup.set4,
+      set2: setup.set2,
+      set2b: 0,
+      set2c: 0,
+      mains: { ...setup.mains },
+      min: { ...setup.min },
+      max: {},
+      panelExtraMax: 0,
+      tick: setup.tick,
+      speedMode: setup.tick > 0 ? "tick" : "panel",
+      focus: setup.focus.map((f) => ({ ...f })),
+    });
+    notify(`已套用定位「${TEAM_ROLE_LABELS[role]}」的配裝設定`);
+  };
+
+  /** 套用內建的「預設定位」（T5 防後手等）；套用後仍可手動調整 */
+  const applyBuiltinPreset = (i: number, preset: BuiltinRolePreset) => {
+    updateMember(i, {
+      presetId: `builtin:${preset.id}`,
+      title: preset.name,
+      role: preset.role,
+      weight: preset.weight,
+      set4: preset.set4,
+      set2: preset.set2,
+      set2b: 0,
+      set2c: 0,
+      mains: { ...preset.mains },
+      min: { ...preset.min },
+      max: {},
+      panelExtraMax: 0,
+      tick: preset.tick,
+      speedMode: preset.speedMode,
+      focus: preset.focus.map((f) => ({ ...f })),
+    });
+    notify(`已套用預設定位「${preset.name}」`);
+  };
+
   const applyRolePreset = (i: number, preset: RolePreset) => {
     updateMember(i, {
       presetId: preset.id,
@@ -1067,7 +1093,6 @@ export default function TeamOptimizerPage() {
       panelExtraMax: 0,
       tick: preset.tick,
       focus: preset.focus.map((f) => ({ ...f })),
-      objectiveMode: preset.objective,
       speedMode: preset.speedMode,
     });
     notify(`已套用定位「${preset.name}」`);
@@ -1089,7 +1114,7 @@ export default function TeamOptimizerPage() {
       min: { ...member.min },
       tick: member.tick,
       focus: member.focus.map((f) => ({ ...f })),
-      objective: member.objectiveMode,
+      objective: "role",
       speedMode: member.speedMode,
     });
     if (!saved) return notify("請先輸入定位名稱", "err");
@@ -1100,10 +1125,6 @@ export default function TeamOptimizerPage() {
 
   /** 把目前這一隻的設定轉成可儲存的隊型成員 */
   const memberToTemplate = (m: MemberDraft): TeamMemberTemplate => {
-    const v = m.unitId ? viewOf(m.unitId) : undefined;
-    const skills = v && skillData ? skillsForMonster(skillData, v.monster.id) : [];
-    const skillSlot =
-      m.skillSlot || (m.objectiveMode === "skill" ? skills.find((s) => s.id === m.skillId)?.slot ?? 0 : 0);
     const twos = m.set4 ? [m.set2] : [m.set2, m.set2b, m.set2c];
     return {
       role: m.role,
@@ -1116,14 +1137,13 @@ export default function TeamOptimizerPage() {
       min: { ...m.min },
       tick: m.tick,
       focus: m.focus.map((f) => ({ ...f })),
-      objective: m.objectiveMode === "role" ? undefined : m.objectiveMode,
       order: m.order,
       boostPct: m.boostPct,
       speedBuff: m.speedBuff,
       artifactPct: m.artifactPct,
       speedMode: m.speedMode,
       panelExtra: m.panelExtra,
-      skillSlot,
+      skillSlot: m.skillSlot,
       priority: m.priority,
     };
   };
@@ -1421,14 +1441,7 @@ export default function TeamOptimizerPage() {
       bySlot.set(r.slot, id);
     }
 
-    // 技能傷害目標：優先使用指定技能；隊型用技能欄位（S1～S4）跨魔靈對應
-    const skills = skillData ? skillsForMonster(skillData, v.monster.id) : [];
-    const slotSkill = m.skillSlot ? skills.find((s) => s.slot === m.skillSlot) : undefined;
-    const skill =
-      m.objectiveMode === "skill"
-        ? (slotSkill ?? skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills))
-        : undefined;
-
+    // 搜尋目標一律依定位決定；焦點屬性則用來在候選之間排序
     return {
       unitId: m.unitId,
       master: v.monster.id,
@@ -1445,12 +1458,7 @@ export default function TeamOptimizerPage() {
       focus: m.focus,
       includeRunes: [...bySlot.values()],
       leadSpd: leadPctOf(i),
-      objective: skill
-        ? "skill"
-        : m.objectiveMode === "role"
-          ? roleObjective(m.role)
-          : m.objectiveMode,
-      skillObjective: skill ? { skill, opts: TEAM_DAMAGE_OPTS } : undefined,
+      objective: roleObjective(m.role),
     };
   };
 
@@ -2177,7 +2185,7 @@ export default function TeamOptimizerPage() {
           </select>
         </div>
         <div className="tiny dim team-help" style={{ marginTop: 6 }}>
-          自訂隊型會保存這台裝置的第一隊設定（定位稱呼、出手順序、套裝 3×2／主屬性、面板速度或 Tick、面板下限、目標技能）；不綁定魔靈，套用時再選隊員。
+          自訂隊型會保存這台裝置的第一隊設定（定位稱呼、出手順序、套裝 3×2／主屬性、面板速度或 Tick、面板下限）；不綁定魔靈，套用時再選隊員。
           「結果」可一次產生 5～100 組隊伍，翻頁瀏覽後再挑一組上符；數量越多，運算時間越長。
           「逐隻配＋排除」模式則把這個數量當成單隻魔靈的候選配裝數。
         </div>
@@ -2198,10 +2206,15 @@ export default function TeamOptimizerPage() {
           const teamIndex = Math.floor(i / size);
           const isTeamStart = i === teamIndex * size;
           const laterCount = members.filter((x, j) => j !== i && Math.floor(j / size) === teamIndex && x.order > m.order).length;
-          const skills = skillData && v ? skillsForMonster(skillData, v.monster.id) : [];
-          const effSkill = (m.skillSlot ? skills.find((s) => s.slot === m.skillSlot) : undefined) ??
-            skills.find((s) => s.id === m.skillId) ?? defaultAttackSkill(skills);
           const appliedPreset = presets.find((p) => p.id === m.presetId);
+          const builtinPreset = m.presetId?.startsWith("builtin:")
+            ? BUILTIN_ROLE_PRESETS.find((p) => `builtin:${p.id}` === m.presetId)
+            : undefined;
+          const presetSelection = builtinPreset
+            ? `builtin:${builtinPreset.id}`
+            : appliedPreset
+              ? `preset:${appliedPreset.id}`
+              : `role:${m.role}`;
           return (
             <Fragment key={i}>
               {isTeamStart && (
@@ -2303,22 +2316,31 @@ export default function TeamOptimizerPage() {
               <div className={`team-member-fields ${openMembers.has(i) ? "open" : ""}`}>
               <div className="team-fields">
                 <label>
-                  <span>定位</span>
+                  <span>預設定位</span>
                   <select
                     className="select"
-                    value={appliedPreset ? `preset:${appliedPreset.id}` : `role:${m.role}`}
+                    value={presetSelection}
                     onChange={(e) => {
                       const value = e.target.value;
+                      if (value.startsWith("builtin:")) {
+                        const preset = BUILTIN_ROLE_PRESETS.find((p) => `builtin:${p.id}` === value);
+                        if (preset) applyBuiltinPreset(i, preset);
+                        return;
+                      }
                       if (value.startsWith("preset:")) {
                         const preset = presets.find((p) => p.id === value.slice(7));
                         if (preset) applyRolePreset(i, preset);
                         return;
                       }
-                      const role = value.slice(5) as TeamRole;
-                      updateMember(i, { role, presetId: undefined, title: TEAM_ROLE_LABELS[role] });
+                      applyBuiltinRole(i, value.slice(5) as TeamRole);
                     }}
-                    title="內建定位之外，也可以把常用的套裝／主屬性存成「我的定位」"
+                    title="選一個定位就會套用它的套裝、主屬性、下限、速度 Tick 與焦點；套用後仍可自由調整"
                   >
+                    <optgroup label="預設定位">
+                      {BUILTIN_ROLE_PRESETS.map((p) => (
+                        <option key={p.id} value={`builtin:${p.id}`}>{p.name}</option>
+                      ))}
+                    </optgroup>
                     <optgroup label="內建定位">
                       {(Object.keys(TEAM_ROLE_LABELS) as TeamRole[]).map((r) => (
                         <option key={r} value={`role:${r}`}>{TEAM_ROLE_LABELS[r]}</option>
@@ -2336,7 +2358,7 @@ export default function TeamOptimizerPage() {
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      setPresetModal({ index: i, name: appliedPreset?.name ?? "" });
+                      setPresetModal({ index: i, name: appliedPreset?.name ?? builtinPreset?.name ?? "" });
                     }}
                     title="把這隻目前的套裝、主屬性、下限與 Tick 存成我的定位"
                   >
@@ -2370,40 +2392,6 @@ export default function TeamOptimizerPage() {
                     {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </label>
-                <label>
-                  <span>目標</span>
-                  <select
-                    className="select"
-                    value={m.objectiveMode}
-                    onChange={(e) => updateMember(i, { objectiveMode: e.target.value as ObjectiveMode })}
-                    title="技能傷害：以選定技能的傷害當作搜尋目標；攻擊 / 防禦 / 體力：直接最大化該面板數值"
-                  >
-                    {(Object.keys(OBJECTIVE_LABELS) as ObjectiveMode[]).map((k) => (
-                      <option key={k} value={k}>{OBJECTIVE_LABELS[k]}</option>
-                    ))}
-                  </select>
-                </label>
-                {m.objectiveMode === "skill" && (
-                  <label style={{ gridColumn: "1 / -1" }}>
-                    <span>技能傷害目標</span>
-                    <select
-                      className="select"
-                      value={effSkill?.id ?? 0}
-                      onChange={(e) => {
-                        const id = Number(e.target.value) || 0;
-                        updateMember(i, { skillId: id, skillSlot: skills.find((s) => s.id === id)?.slot ?? 0 });
-                      }}
-                      disabled={skills.length === 0}
-                      title={skills.length === 0 ? "技能資料載入中…" : "選擇要用來最大化的技能"}
-                    >
-                      {skills.length === 0 ? (
-                        <option value={0}>{v ? "技能資料載入中…" : "請先選擇魔靈"}</option>
-                      ) : (
-                        skills.map((s) => <option key={s.id} value={s.id}>S{s.slot} · {s.n}</option>)
-                      )}
-                    </select>
-                  </label>
-                )}
                 <div className="team-mode">
                   <span>速度條件</span>
                   <div className="seg" role="radiogroup" aria-label={`第 ${i + 1} 隻速度條件`}>
@@ -3090,7 +3078,7 @@ export default function TeamOptimizerPage() {
                   的候選配裝（{seqCandidates.length} 組）
                   {seqCurrent && (
                     <span className="chip muted" style={{ marginLeft: 6 }}>
-                      目標：{OBJECTIVE_LABELS[seqCurrent.objectiveMode]}
+                      焦點：{seqCurrent.focus.length > 0 ? `${seqCurrent.focus.length} 組` : "未設定"}
                     </span>
                   )}
                 </div>
@@ -3557,7 +3545,7 @@ export default function TeamOptimizerPage() {
                                   s.key === "dmg"
                                     ? dmg.actual
                                       ? `${dmg.name ?? "指定技能"}：依技能傷害目標算出的實際傷害`
-                                      : `${dmg.name ? `${dmg.name}：` : ""}未指定技能傷害目標，以自動挑選的技能估算`
+                                      : `${dmg.name ? `${dmg.name}：` : ""}以自動挑選的技能估算`
                                     : undefined
                                 }
                               >
@@ -3589,7 +3577,7 @@ export default function TeamOptimizerPage() {
               <div className="tiny dim" style={{ marginTop: 5 }}>
                 點表格列可切換到該組（再按上方「卡片」看完整符文）；點欄位標題可依該數值排序，再點一次切換高低。
                 每一隻魔靈的欄位都有自己的顏色與色塊邊框，滑過表格列時顏色會加深，方便追蹤數值。
-                「技能傷害」在目標設為技能傷害時顯示實際計算值（金色），其他目標則以自動挑選的技能估算（灰色），滑過欄位可看技能名稱。
+                「技能傷害」以自動挑選的技能（優先 S1～S3 的最高階技能）估算，滑過欄位可看技能名稱；搜尋目標改由「預設定位」與焦點決定。
               </div>
             </div>
           )}
@@ -3684,7 +3672,7 @@ export default function TeamOptimizerPage() {
                             ) : (
                               <span
                                 className="dim"
-                                title={`${dmg.name ? `${dmg.name}：` : ""}未指定技能傷害目標，以自動挑選的技能估算`}
+                                title={`${dmg.name ? `${dmg.name}：` : ""}以自動挑選的技能估算`}
                               >
                                 {fmt(dmg.value)}
                               </span>
@@ -3757,7 +3745,7 @@ export default function TeamOptimizerPage() {
           <div className="st-modal-sec">
             <div className="st-modal-label">把第 {presetModal.index + 1} 隻目前的設定存成定位</div>
             <div className="tiny dim" style={{ marginTop: 3, lineHeight: 1.7 }}>
-              會儲存 4 件套、2 件套、2／4／6 號主屬性、下限、目標 Tick、速度條件、焦點與目標模式。
+              會儲存 4 件套、2 件套、2／4／6 號主屬性、下限、目標 Tick、速度條件與焦點。
               之後在「定位」選單選一次就會全部填入。定位只保存在這台裝置的瀏覽器。
             </div>
             <label className="row" style={{ gap: 8, marginTop: 10 }}>
@@ -3881,7 +3869,7 @@ export default function TeamOptimizerPage() {
               onChange={(e) => setTeamPresetModal({ ...teamPresetModal, desc: e.target.value })}
             />
             <div className="tiny dim" style={{ marginTop: 8, lineHeight: 1.7 }}>
-              會儲存目前第 1 隊的 {size} 隻設定（定位稱呼、出手順序、套裝、主屬性、速度或 Tick、面板下限與目標技能）。
+              會儲存目前第 1 隊的 {size} 隻設定（定位稱呼、出手順序、套裝、主屬性、速度或 Tick、面板下限）。
               隊型不綁定魔靈，套用後再選隊員；同名隊型會直接覆寫。
             </div>
           </div>
@@ -3909,10 +3897,6 @@ export default function TeamOptimizerPage() {
                   .filter((k) => (m.min[k] ?? 0) > 0)
                   .map((k) => `${MIN_LABELS[k]} ${m.min[k]}`)
                   .join(" · ");
-                const skillText =
-                  m.objectiveMode === "skill"
-                    ? `技能傷害${m.skillSlot ? `（S${m.skillSlot}）` : ""}`
-                    : OBJECTIVE_LABELS[m.objectiveMode];
                 return (
                   <div key={i} className="row between wrap" style={{ gap: 8, fontSize: 12 }}>
                     <div style={{ minWidth: 0 }}>
@@ -3920,31 +3904,8 @@ export default function TeamOptimizerPage() {
                       <span className="tiny dim"> · 順序 {m.order} · {TEAM_ROLE_LABELS[m.role]}</span>
                     </div>
                     <div className="tiny dim" style={{ textAlign: "right" }}>
-                      {setText} · {speedText} · {skillText}{minText ? ` · 下限 ${minText}` : ""}
+                      {setText} · {speedText}{minText ? ` · 下限 ${minText}` : ""}
                     </div>
-                    {m.objectiveMode === "skill" && (
-                      <label className="row" style={{ gap: 4 }}>
-                        <span className="tiny dim">技能</span>
-                        <select
-                          className="select"
-                          style={{ width: 90 }}
-                          value={m.skillSlot}
-                          onChange={(e) => {
-                            const slot = Number(e.target.value) || 0;
-                            const v = m.unitId ? viewOf(m.unitId) : undefined;
-                            const sk =
-                              v && skillData
-                                ? skillsForMonster(skillData, v.monster.id).find((s) => s.slot === slot)
-                                : undefined;
-                            updateMember(i, { skillSlot: slot, skillId: sk?.id ?? 0 });
-                          }}
-                          title="以傷害為目標時要最大化的技能（S1～S4）；換魔靈時會自動對應同一個技能欄位"
-                        >
-                          <option value={0}>自動</option>
-                          {[1, 2, 3, 4].map((s) => <option key={s} value={s}>S{s}</option>)}
-                        </select>
-                      </label>
-                    )}
                   </div>
                 );
               })}
@@ -4046,11 +4007,6 @@ export default function TeamOptimizerPage() {
           onPick={(e) => {
             const unitId = Number(e.key);
             const picked = viewOf(unitId);
-            const prevMember = members[pickerIndex];
-            const pickedSkills = picked && skillData ? skillsForMonster(skillData, picked.monster.id) : [];
-            const slotSkill = prevMember?.skillSlot
-              ? pickedSkills.find((s) => s.slot === prevMember.skillSlot)
-              : undefined;
             updateMember(pickerIndex, {
               unitId,
               includeRunes: [],
@@ -4058,8 +4014,6 @@ export default function TeamOptimizerPage() {
               panelExtra: 0,
               // 自動帶入該魔靈神器上的「速度增加效果 +%」
               artifactPct: picked ? artifactSpeedBuffPct(picked.artifacts) : 0,
-              // 隊型指定的技能欄位（S1～S4）換成新魔靈對應的技能
-              ...(prevMember?.objectiveMode === "skill" ? { skillId: slotSkill?.id ?? 0 } : {}),
             });
             setOpenMembers(new Set([pickerIndex]));
             setPickerIndex(-1);
