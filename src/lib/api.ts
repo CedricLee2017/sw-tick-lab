@@ -6,6 +6,8 @@ export interface ApiUser {
   name: string | null;
   picture: string | null;
   role: string;
+  /** 功能方案：basic = 基本分析；full = 完整功能 */
+  tier: "basic" | "full";
   isAdmin: boolean;
   createdAt: number;
   lastLoginAt: number | null;

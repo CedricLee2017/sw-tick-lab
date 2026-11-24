@@ -7,6 +7,7 @@ interface AdminUserRow {
   email: string;
   name: string | null;
   role: string;
+  tier: string;
   status: string;
   created_at: number;
   last_login_at: number | null;
@@ -24,7 +25,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   const where = q ? "WHERE (u.email LIKE ?1 OR u.name LIKE ?1)" : "";
   const params = q ? [`%${q}%`] : [];
-  const listSql = `SELECT u.id, u.email, u.name, u.role, u.status, u.created_at, u.last_login_at,
+  const listSql = `SELECT u.id, u.email, u.name, u.role, u.tier, u.status, u.created_at, u.last_login_at,
       (SELECT COUNT(*) FROM uploads up WHERE up.user_id = u.id AND up.deleted_at IS NULL) AS uploads
     FROM users u ${where}
     ORDER BY u.created_at DESC

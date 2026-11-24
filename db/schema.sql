@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   name                TEXT,
   picture             TEXT,
   role                TEXT    NOT NULL DEFAULT 'user',
+  -- 功能方案：basic = 基本分析；full = 完整功能（admin 一律視為 full）
+  tier                TEXT    NOT NULL DEFAULT 'basic',
   status              TEXT    NOT NULL DEFAULT 'active',
   -- 密碼：瀏覽器端 PBKDF2 產生的 verifier，再用隨機 salt 做 SHA-256
   password_hash       TEXT,

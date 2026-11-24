@@ -132,6 +132,11 @@ export function LoginForm() {
           ? "登入後，你匯入的存檔會自動備份到伺服器（Cloudflare R2）；解析與計算仍在你的瀏覽器完成。"
           : "登入只用來辨識會員身分；解析與計算仍在你的瀏覽器完成。"}
       </div>
+      {mode === "register" && (
+        <div className="tiny dim login-note">
+          新註冊帳號預設為「基本方案」；需要完整功能請聯絡管理員開通。
+        </div>
+      )}
     </div>
   );
 }

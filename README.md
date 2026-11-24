@@ -284,7 +284,9 @@ npx wrangler d1 execute sw-tick-lab-db --remote --command "UPDATE settings SET v
 - **雲端存檔還原**：登入後如果本機還沒有任何存檔，App 會自動呼叫 `GET /api/uploads/latest` 把最新一筆存檔載回來（含換手機／換電腦）。本機已有存檔時不會自動覆蓋，避免蓋掉剛上符的配置；需要時可在「匯入」頁的「雲端存檔」卡片看到自己的備份（每次載入 10 筆，可再載入更舊的），按「載入」還原任一筆、按右側下載圖示取回原始 JSON，或按「刪除」永久移除該筆雲端備份（同時刪除 R2 檔案並標記 D1 紀錄，不影響本機已載入的存檔）。清單只會顯示目前登入會員自己的紀錄（`GET`／`DELETE /api/uploads/:id` 都會驗證 `user_id`）。`importText` 只在本機解析，不會因此重複上傳。
 - **儲存庫同步**：登入後把「配裝儲存庫」與「預設隊儲存庫」同步到 R2 的 `library/u{會員}.json`（沿用 `SAVES` bucket，不需要新的 D1 資料表）。登入時先以 `id` 取聯集合併本機與雲端資料（本機優先，上限各 60 筆），本機有雲端沒有的項目就回寫；之後每次儲存／刪除配裝或預設隊都會延遲 1.2 秒自動上傳。
 - **換帳號保護**：IndexedDB 會記住本機資料屬於哪個會員（`swtick:owner`）。同一個瀏覽器換帳號登入時，會先清掉前一個會員的存檔與儲存庫，再從新帳號的雲端還原，避免把別人的資料同步進新帳號。
-- **後台 `/admin`**（出現在側邊欄的「後台」）：會員列表、搜尋、停用／啟用、設為管理員；上傳紀錄會顯示玩家遊戲 ID（`wizard_info` 的暱稱，沒有暱稱時用 `wizard_id`）、**公會名稱**（`guild.guild_info.name`，沒有公會時退回 `dimension_arena_user_info.guild_name`）、原始檔名、下載原始 JSON、刪除（同步刪 R2）、容量統計。改版前上傳的舊紀錄沒有公會名稱，可按上傳紀錄右上角的「補抓公會名稱」分批讀取 R2 原始 JSON 補齊（每次最多 10 筆）。
+- **後台 `/admin`**（出現在側邊欄的「後台」）：會員列表、搜尋、停用／啟用、設為管理員、切換「基本／完整」方案；上傳紀錄會顯示玩家遊戲 ID（`wizard_info` 的暱稱，沒有暱稱時用 `wizard_id`）、**公會名稱**（`guild.guild_info.name`，沒有公會時退回 `dimension_arena_user_info.guild_name`）、原始檔名、下載原始 JSON、刪除（同步刪 R2）、容量統計。改版前上傳的舊紀錄沒有公會名稱，可按上傳紀錄右上角的「補抓公會名稱」分批讀取 R2 原始 JSON 補齊（每次最多 10 筆）。
+- **功能方案**：`users.tier` 分為 `basic`（基本分析：匯入、總覽、我的魔靈、符文、神器、魔靈圖鑑、設定）與 `full`（完整功能）。新註冊會員預設 `basic`，未開放的功能會直接從選單隱藏；管理員在後台按皇冠圖示即可升級或降回基本。管理員帳號一律視為 `full`。既有會員升級時會由 `db/migrate-007-user-tier.sql` 保留為 `full`，避免突然被鎖。
+- **資料隔離**：每位會員的存檔各自存在 R2 的 `saves/u{會員ID}/…`，D1 查詢、下載、刪除都帶 `user_id` 條件；會員只能看到自己的雲端存檔與儲存庫。只有 `role = admin` 的帳號能透過 `/api/admin/uploads` 與 `/api/admin/uploads/:id/download` 列出、下載或刪除其他人的原始 JSON。
 - **環境變數**：`SESSION_SECRET`（Pages secret）、`ADMIN_EMAILS`（`wrangler.toml`）。
 - 本機測試後端：
 
@@ -292,6 +294,8 @@ npx wrangler d1 execute sw-tick-lab-db --remote --command "UPDATE settings SET v
 npx wrangler d1 execute sw-tick-lab-db --local --file=db/schema.sql
 npm run dev:api   # http://localhost:8788（已建置的版本；R2 會用本機模擬）
 ```
+
+> 既有環境要加上功能方案欄位：`npx wrangler d1 execute sw-tick-lab-db --remote --file=db/migrate-007-user-tier.sql`（會把既有會員保留為完整方案，新註冊會員才是基本方案）。
 
 > 本機同時要 HMR 時：開一個終端機跑 `npm run dev:api`，另一個跑 `npm run dev`（Vite 會把 `/api` 代理到 8788）。
 

@@ -4,6 +4,8 @@ export interface UserRow {
   name: string | null;
   picture: string | null;
   role: string;
+  /** 功能方案：basic = 基本分析；full = 完整功能 */
+  tier: string;
   status: string;
   password_hash: string | null;
   password_salt: string | null;
@@ -20,6 +22,7 @@ export interface PublicUser {
   name: string | null;
   picture: string | null;
   role: string;
+  tier: "basic" | "full";
   isAdmin: boolean;
   createdAt: number;
   lastLoginAt: number | null;
@@ -35,12 +38,15 @@ export function isAdminEmail(adminEmails: string | undefined, email: string): bo
 }
 
 export function toPublicUser(row: UserRow): PublicUser {
+  // 管理員一律擁有完整功能；舊資料沒有 tier 時視為基本方案。
+  const tier: "basic" | "full" = row.role === "admin" || row.tier === "full" ? "full" : "basic";
   return {
     id: row.id,
     email: row.email,
     name: row.name,
     picture: row.picture,
     role: row.role,
+    tier,
     isAdmin: row.role === "admin",
     createdAt: row.created_at,
     lastLoginAt: row.last_login_at,
@@ -62,11 +68,11 @@ export async function createUser(
   const now = Math.floor(Date.now() / 1000);
   const row = await db
     .prepare(
-      `INSERT INTO users (email, name, role, status, password_hash, password_salt, password_updated_at, created_at, last_login_at)
-       VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?6, ?6, ?6)
+      `INSERT INTO users (email, name, role, tier, status, password_hash, password_salt, password_updated_at, created_at, last_login_at)
+       VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?7, ?7, ?7)
        RETURNING *`,
     )
-    .bind(input.email, input.name, input.admin ? "admin" : "user", input.hash, input.salt, now)
+    .bind(input.email, input.name, input.admin ? "admin" : "user", input.admin ? "full" : "basic", input.hash, input.salt, now)
     .first<UserRow>();
   if (!row) throw new Error("create user failed");
   return row;

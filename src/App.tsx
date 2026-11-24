@@ -39,6 +39,7 @@ import { RankProvider } from "./components/RankProvider";
 import { buildRankIndex } from "./lib/rankings";
 import { InstallAppButton } from "./components/InstallApp";
 import { formatCloudTime, loadLatestSave } from "./lib/cloudSave";
+import { canUseFeature } from "./lib/features";
 
 type RouteKey = "import" | "overview" | "bestiary" | "monsters" | "summonlog" | "speed" | "speedtick" | "follow-speed" | "siege" | "siege-advice" | "worldboss" | "worldboss-advice" | "rta" | "optimizer" | "team-opt" | "artifact-opt" | "artifact-ad" | "damage-compare" | "builds" | "decks" | "runes" | "standing" | "enchant" | "artifacts" | "artifact-reduction" | "guild" | "admin" | "settings";
 
@@ -261,7 +262,19 @@ export default function App() {
     setRoute(k);
   };
 
+  /** 依會員方案決定能不能看到某個頁面；管理員永遠全開 */
+  const canUse = (key: RouteKey) => canUseFeature(user?.tier, key, user?.isAdmin);
+
   const meta = ROUTES.find((r) => r.key === route) ?? ROUTES[0];
+
+  // 直接輸入網址或舊書籤連到未開放頁面時，導回匯入頁。
+  useEffect(() => {
+    if (!authReady) return;
+    if (!canUseFeature(user?.tier, route, user?.isAdmin)) {
+      window.location.hash = "#/import";
+      setRoute("import");
+    }
+  }, [authReady, user?.tier, user?.isAdmin, route]);
 
   // 符文 / 神器的副屬排名：整份存檔只算一次，卡片直接由 Context 取值
   const ranks = useMemo(
@@ -277,7 +290,7 @@ export default function App() {
   ) : (
     <>
       {ROUTES.map((r) => {
-        if (!visited.has(r.key)) return null;
+        if (!visited.has(r.key) || !canUse(r.key)) return null;
         const Comp = PAGE_COMPONENTS[r.key];
         return (
           <div key={r.key} hidden={route !== r.key}>
@@ -305,20 +318,20 @@ export default function App() {
 
         <nav className="nav" ref={navRef}>
           <div className="nav-label">工作區</div>
-          {ROUTES.slice(0, 1).map((r) => (
+          {ROUTES.slice(0, 1).filter((r) => canUse(r.key)).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
             </button>
           ))}
           <div className="nav-label">分析</div>
-          {ROUTES.slice(1, -1).filter((r) => r.key !== "admin" || user?.isAdmin).map((r) => (
+          {ROUTES.slice(1, -1).filter((r) => canUse(r.key)).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
               {!account && <span className="dim" style={{ marginLeft: "auto", fontSize: 10 }}>—</span>}
             </button>
           ))}
           <div className="nav-label">系統</div>
-          {ROUTES.slice(-1).map((r) => (
+          {ROUTES.slice(-1).filter((r) => canUse(r.key)).map((r) => (
             <button key={r.key} className={`nav-item ${route === r.key ? "active" : ""}`} onClick={() => go(r.key)}>
               {r.icon} {r.label}
             </button>
@@ -432,7 +445,7 @@ export default function App() {
       </div>
 
       <nav className="mobile-nav">
-        {MOBILE_PRIMARY.map((key) => {
+        {MOBILE_PRIMARY.filter((key) => canUse(key)).map((key) => {
           const r = ROUTES.find((x) => x.key === key)!;
           return (
             <button key={r.key} className={route === r.key ? "active" : ""} onClick={() => go(r.key)}>
@@ -473,7 +486,7 @@ export default function App() {
             </div>
 
             <div className="sheet-grid">
-              {ROUTES.filter((r) => r.key !== "admin" || user?.isAdmin).map((r) => (
+              {ROUTES.filter((r) => canUse(r.key)).map((r) => (
                 <button
                   key={r.key}
                   type="button"

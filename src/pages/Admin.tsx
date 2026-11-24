@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Download, Loader2, RefreshCw, Search, ShieldCheck, Trash2, UserCheck, UserX } from "lucide-react";
+import { Download, Loader2, RefreshCw, Search, ShieldCheck, Trash2, UserCheck, UserX, Crown } from "lucide-react";
 import { fmt } from "../components/ui";
 import { useStore } from "../store";
 import { useAuth } from "../lib/auth";
@@ -9,6 +9,7 @@ interface AdminUser {
   email: string;
   name: string | null;
   role: string;
+  tier: string;
   status: string;
   created_at: number;
   last_login_at: number | null;
@@ -118,7 +119,7 @@ export default function AdminPage() {
     );
   }
 
-  const patchUser = async (id: number, body: { status?: string; role?: string }) => {
+  const patchUser = async (id: number, body: { status?: string; role?: string; tier?: string }) => {
     try {
       await adminFetch(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(body) });
       notify("已更新會員");
@@ -244,6 +245,7 @@ export default function AdminPage() {
                   <th>Email</th>
                   <th>名稱</th>
                   <th>角色</th>
+                  <th>方案</th>
                   <th>狀態</th>
                   <th className="num">存檔</th>
                   <th>註冊</th>
@@ -260,6 +262,9 @@ export default function AdminPage() {
                       <span className={`chip ${u.role === "admin" ? "gold" : "muted"}`}>{u.role === "admin" ? "管理員" : "會員"}</span>
                     </td>
                     <td>
+                      <span className={`chip ${u.tier === "full" ? "green" : "muted"}`}>{u.tier === "full" ? "完整" : "基本"}</span>
+                    </td>
+                    <td>
                       <span className={`chip ${u.status === "active" ? "green" : "red"}`}>{u.status === "active" ? "正常" : "已停用"}</span>
                     </td>
                     <td className="num mono">{u.uploads}</td>
@@ -267,6 +272,16 @@ export default function AdminPage() {
                     <td className="tiny dim">{when(u.last_login_at)}</td>
                     <td className="num">
                       <div className="row" style={{ gap: 4, justifyContent: "flex-end" }}>
+                        {u.role !== "admin" && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost btn-icon"
+                            title={u.tier === "full" ? "降為基本方案" : "升級為完整方案"}
+                            onClick={() => void patchUser(u.id, { tier: u.tier === "full" ? "basic" : "full" })}
+                          >
+                            <Crown size={13} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="btn btn-sm btn-ghost btn-icon"
@@ -288,7 +303,7 @@ export default function AdminPage() {
                   </tr>
                 ))}
                 {users.length === 0 && !loading && (
-                  <tr><td colSpan={8} className="tiny dim" style={{ textAlign: "center", padding: 18 }}>沒有資料</td></tr>
+                  <tr><td colSpan={9} className="tiny dim" style={{ textAlign: "center", padding: 18 }}>沒有資料</td></tr>
                 )}
               </tbody>
             </table>
